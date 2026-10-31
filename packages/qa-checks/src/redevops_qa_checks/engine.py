@@ -138,7 +138,10 @@ class CheckEngine:
             else:
                 if self._images is None:
                     raise Unsupported("image metadata checks are not configured in this adapter")
-                doc = self._images.get(f["digest"])
+                try:
+                    doc = self._images.get(f["digest"])
+                except ResourceAmbiguous:
+                    return None, "AMBIGUOUS", 2, tuple(digests)
                 if doc is None:
                     return None, "UNRESOLVED", 0, tuple(digests)
                 images.append(freeze(doc))

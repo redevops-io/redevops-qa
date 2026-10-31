@@ -37,6 +37,16 @@ CASES = [
     ("case root digest check", "adapter.py",
      "if actual != profile.case_root_digest:", "if False:",
      ["test_qc_adapter.py::test_the_case_root_digest_in_the_profile_must_match"]),
+    ("image blob digest verification", "image_store.py",
+     'if "sha256:" + hashlib.sha256(data).hexdigest() != digest:', "if False:",
+     ["test_qc_images.py::test_a_config_blob_that_does_not_match_its_name_is_not_trusted",
+      "test_qc_images.py::test_a_manifest_blob_that_does_not_match_its_name_gives_no_document"]),
+    ("image environment values are dropped", "image_store.py",
+     'env_names = sorted({e.split("=", 1)[0] for e in _strs(c.get("Env"))})', 'env_names = sorted(_strs(c.get("Env")))',
+     ["test_qc_images.py::test_environment_values_and_build_commands_are_never_kept"]),
+    ("image ambiguity is not resolved by first-wins", "image_store.py",
+     "if len(docs) > 1:", "if False:",
+     ["test_qc_images.py::test_two_documents_with_one_digest_are_ambiguous_not_first_wins"]),
 ]
 
 
