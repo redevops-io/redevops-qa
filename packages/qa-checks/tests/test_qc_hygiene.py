@@ -27,7 +27,7 @@ SECRET_SHAPES = {
     "google api key": re.compile(j("AI", "za[0-9A-Za-z_-]{35}")),
     "stripe key": re.compile(j("sk_", "(live|test)_[0-9A-Za-z]{20,}")),
     "credential assignment": re.compile(j("(?i)(pass", "word|secret|api[_-]?key|tok", "en)\\s*[:=]\\s*[\"'][A-Za-z0-9/+_=-]{16,}[\"']")),
-    "long base64 blob": re.compile(j("[A-Za-z0-9+/]{60,}", "={0,2}")),
+    "long base64 blob": re.compile(j("(?<![A-Za-z0-9+/])(?![0-9a-f]+(?![A-Za-z0-9+/]))", "[A-Za-z0-9+/]{60,}", "={0,2}")),
 }
 
 WORDING = {

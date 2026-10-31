@@ -2,7 +2,7 @@
 """The registry of individually hashed check programs.
 
 A check program is a module under ``programs/`` that declares ``PROGRAM_ID``, ``PROGRAM_VERSION``, ``DESCRIPTION`` and
-``SUPPORT`` (the helper files it uses, relative to the package) and defines ``run(data) -> observed value``. Its
+``SUPPORT`` (the helper files it uses, relative to the package; optional ``FRAMEWORK`` names further framework files to hash) and defines ``run(data) -> observed value``. Its
 ``program_hash`` is the sha256 of a *source bundle*: a header naming the program id, version and entry point, the program
 module, each declared support file, and the framework files every program depends on (loader, canonical serialisation, input
 type). A change to any of them changes the hash, so a hash frozen in an assertion pins the whole behaviour. Line endings are
@@ -39,10 +39,13 @@ from .program_input import ProgramInput
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 FRAMEWORK_FILES = ("canonical.py", "manifests.py", "program_input.py")
+#: further framework files a program may declare in ``FRAMEWORK`` (hashed with it; not part of the purity lint, they read files)
+HASHED_FRAMEWORK = ("image_store.py",)
 ID_PATTERN = re.compile(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*")
 VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 #: modules a program (and its support files) may import
+SUPPORT_MODULES = frozenset({"_common", "_image"})
 ALLOWED_IMPORTS = frozenset({"__future__", "re", "fractions", "ipaddress", "typing", "collections", "itertools", "math"})
 FORBIDDEN_CALLS = frozenset({"open", "exec", "eval", "compile", "__import__", "globals", "locals", "vars", "getattr", "setattr",
                              "delattr", "breakpoint", "input", "memoryview"})
@@ -81,9 +84,9 @@ def assert_pure_source(rel: str, source: bytes) -> None:
                 if alias.name.split(".")[0] not in ALLOWED_IMPORTS:
                     raise ProgramRefused(f"{rel}: import of {alias.name!r} is not allowed in a check program")
         elif isinstance(node, ast.ImportFrom):
-            if node.level == 1 and node.module in ("_common",):
+            if node.level == 1 and node.module in SUPPORT_MODULES:
                 continue
-            if node.level == 1 and node.module is None and all(a.name == "_common" for a in node.names):
+            if node.level == 1 and node.module is None and all(a.name in SUPPORT_MODULES for a in node.names):
                 continue
             if node.level != 0 or (node.module or "").split(".")[0] not in ALLOWED_IMPORTS:
                 raise ProgramRefused(f"{rel}: import from {'.' * node.level}{node.module or ''} is not allowed in a check program")
@@ -166,6 +169,10 @@ def spec_from_module(module_name: str) -> Tuple[ProgramSpec, ...]:
         files[rel] = _framework_bytes(rel)
     for rel, data in files.items():
         assert_pure_source(rel, data)
+    for rel in getattr(mod, "FRAMEWORK", ()):
+        if rel not in HASHED_FRAMEWORK:
+            raise ProgramRefused(f"{module_name}: FRAMEWORK entry {rel!r} is not an allowed framework file")
+        files[rel] = _framework_bytes(rel)
     entries = [("run", pid, mod.run)]
     if hasattr(mod, "run_counts"):
         entries.append(("run_counts", pid + ".counts", mod.run_counts))
@@ -241,7 +248,8 @@ def refuse_expected(payload: Any, where: str = "check input") -> None:
 
 
 BUILTIN_MODULES = ("image_references", "image_name_map", "security_context", "resources", "env_and_secret_refs",
-                   "gateway_routes", "network_policies", "kyverno_policies", "probes", "cross_references", "structure")
+                   "gateway_routes", "network_policies", "kyverno_policies", "probes", "cross_references", "structure",
+                   "image_user_runtime", "image_ports_health", "image_labels_base", "image_layers", "image_attestations")
 
 
 def builtin_registry(extra_modules: Iterable[str] = ()) -> ProgramRegistry:

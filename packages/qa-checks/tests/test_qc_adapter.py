@@ -65,12 +65,18 @@ def test_resolve_returns_a_content_digest_for_paths_and_objects(adapter, case_ro
     assert r2.content_digest.startswith("sha256:")
 
 
-def test_resolve_of_something_absent_is_a_typed_error_and_image_digests_are_not_expressible_here(adapter, case_root, R, E):
+def test_resolve_of_something_absent_is_a_typed_error(adapter, case_root, R, E):
     w = adapter.open_workspace(profile(R, case_root))
     with pytest.raises(E.EnvironmentUnhealthy):
         adapter.resolve(w, R.ResourceRef(kind=R.ResourceKind.MANIFEST_PATH, path="nope.yaml"))
-    with pytest.raises(E.UnsupportedOperation):
+    with pytest.raises(E.EnvironmentUnhealthy):
         adapter.resolve(w, R.ResourceRef(kind=R.ResourceKind.IMAGE_DIGEST, digest="sha256:" + "0" * 64))
+
+
+def test_without_an_image_store_an_image_reference_is_not_expressible(case_root, registry):
+    from redevops_qa_checks.errors import Unsupported
+    with pytest.raises(Unsupported):
+        CheckEngine(case_root, registry).resolve({"kind": "IMAGE_DIGEST", "digest": "sha256:" + "0" * 64})
 
 
 def test_a_missing_input_is_an_unresolved_subject_not_a_value(adapter, case_root, registry, R):

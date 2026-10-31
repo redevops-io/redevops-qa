@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple
 from . import errors as ce
 from .canonical import canonical_bytes, sha256_ref
 from .engine import CheckEngine, Outcome
+from .image_store import ImageStore
 from .registry import ProgramRegistry, builtin_registry
 
 ADAPTER_ID = "redevops-qa-checks"
@@ -71,7 +72,7 @@ class CheckAdapter:
                  blobs: Any = None, image_store: Any = None, tier_k: Optional[TierKGate] = None) -> None:
         self._n = neutral()
         self._engine = CheckEngine(Path(case_root), registry if registry is not None else builtin_registry(),
-                                   image_store=image_store)
+                                   image_store=image_store if image_store is not None else ImageStore(Path(case_root)))
         self._redactor = redactor
         self._blobs = blobs
         self._tier_k = tier_k

@@ -37,12 +37,30 @@ as the adapter.
 | `manifest.cross-references` | selectors, service ports and referenced objects resolved inside the input |
 | `manifest.structure` | identity fields, duplicate identities, kinds, files that did not load |
 
+Image metadata programs read image documents built from files in the case root (see "Image metadata" below):
+
+| Id (version 1.0.0) | Observes |
+|---|---|
+| `image.user-and-runtime` | `User` (empty, root, numeric, by name), entrypoint, command, working directory, variable names, volumes |
+| `image.ports-and-health` | exposed ports and the declared health check (present, disabled) |
+| `image.labels-and-base` | labels, annotations, reference names, declared base image digest and name |
+| `image.layers` | layer count, sizes, media types, diff ids, config digest, platform, index children |
+| `image.attestations` | SBOM and provenance presence among the files provided, and how it was found |
+
 Every program above also has a compact projection registered as `<id>.counts` (its own hash): a gating assertion compares one
 observed value with one expected value, and a small value of counts is what can be named in an assertion.
 
 Reference documents (`apiVersion: qa-checks/reference-1`) carry declared context the program reads next to the manifests, such
 as an image map or a budget. A key that looks like an expected value or a verdict (`expected`, `predicate`, `verdict` ...) in
 a reference document is a load error.
+
+## Image metadata
+
+`image_store.ImageStore` reads, inside the case root and never over a network: OCI image layout directories (manifest, index
+and configuration blobs are verified against the digest in their file name; layer blobs are not read), loose manifest, index
+and configuration files, and `image inspect` output. An `IMAGE_DIGEST` reference is the manifest digest (or the index digest, or
+the digest an `inspect` document reports). Two documents answering to one digest are `AMBIGUOUS`, never first-wins. Variable
+values and build commands are not kept (names and counts only). There is no registry access, no daemon call and no network.
 
 ## What a program hash covers
 
