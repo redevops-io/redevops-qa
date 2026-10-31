@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """A pytest plugin that records, per conformance check, what was collected and what happened to it.
 
-It counts a skip (including an ``xfail``) as a skip, a setup error as a failure, and a collection error as a failure.
+A test that carries the ``not_applicable`` marker and passes is reported as ``not_applicable`` (a receipt category, never a
+pytest skip). It counts a skip (including an ``xfail``) as a skip, a setup error as a failure, and a collection error as a failure.
 A test of the conformance directory that carries no ``check`` marker is recorded under ``UNMAPPED`` and fails the run:
 nothing outside the seven checks may count towards the receipt.
 """
@@ -19,6 +20,8 @@ UNMAPPED = "UNMAPPED"
 class ConformancePlugin:
     def __init__(self) -> None:
         self.collected: Dict[str, str] = {}              # nodeid -> check id
+        self.not_applicable_nodes: set = set()           # nodeids carrying the not_applicable marker
+        self.item_ids: Dict[str, Optional[str]] = {}     # nodeid -> parametrised item id
         self.results: Dict[str, Dict[str, Any]] = {}     # nodeid -> {"check", "outcome", "code", "message", "details"}
         self.collection_errors: List[str] = []
         self._pending: Dict[str, Dict[str, Any]] = {}
@@ -28,6 +31,10 @@ class ConformancePlugin:
         for item in items:
             marker = item.get_closest_marker("check")
             self.collected[item.nodeid] = str(marker.args[0]) if marker and marker.args else UNMAPPED
+            if item.get_closest_marker("not_applicable"):
+                self.not_applicable_nodes.add(item.nodeid)
+            callspec = getattr(item, "callspec", None)
+            self.item_ids[item.nodeid] = callspec.id if callspec is not None else None
 
     def pytest_collectreport(self, report: Any) -> None:
         if report.failed:
@@ -56,6 +63,8 @@ class ConformancePlugin:
             return
         if report.when == "call":
             entry["outcome"] = "passed" if report.passed else ("skipped" if report.skipped else "failed")
+            if entry["outcome"] == "passed" and nodeid in self.not_applicable_nodes:
+                entry["outcome"] = "not_applicable"
         elif report.when in ("setup", "teardown"):
             if report.failed:
                 entry["outcome"] = "failed"
@@ -71,4 +80,5 @@ class ConformancePlugin:
                                                       "message": "collected but never reported", "details": {}})
                     for nodeid, check in self.collected.items()}
         return {"collected": len(self.collected), "collection_errors": list(self.collection_errors),
-                "tests": [{"nodeid": nodeid, **entry} for nodeid, entry in sorted(outcomes.items())]}
+                "tests": [{"nodeid": nodeid, "item": self.item_ids.get(nodeid), **entry}
+                          for nodeid, entry in sorted(outcomes.items())]}

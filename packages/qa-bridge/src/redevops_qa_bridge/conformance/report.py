@@ -69,6 +69,7 @@ def build_report(summary: Dict[str, Any], receipt: Dict[str, Any]) -> Dict[str, 
             "collected_tests": receipt["collected_tests"], "failed_tests": receipt["failed_tests"],
             "groups": {k: {"description": KNOWN.get(k, PENDING_TEXT if k == PENDING else "failures outside the known set"),
                            "count": len(v), "failures": v} for k, v in groups.items()},
+            "not_applicable": receipt.get("not_applicable", []),
             "checks": [{"check_id": c["check_id"], "name": c["name"], "status": c["status"], "failed": c["failed"],
                         "failure_codes": c["failure_codes"]} for c in receipt["checks"]]}
 
@@ -87,6 +88,11 @@ def render_markdown(report: Dict[str, Any]) -> str:
     out.append("|---|---|---|---|---|")
     for c in report["checks"]:
         out.append(f"| {c['check_id']} | {c['name']} | {c['status']} | {c['failed']} | {', '.join(c['failure_codes'])} |")
+    if report.get("not_applicable"):
+        out += ["", "## Not applicable at this pin set", ""]
+        for e in report["not_applicable"]:
+            out.append(f"- {e['check_id']} `{e['item_id']}`: {e['reason']} (introduced in contracts `{e['introduced_in']}`; "
+                       f"the item itself gives {e['real_item_result']})")
     for key, group in report["groups"].items():
         out += ["", f"## {key}: {group['description']}", "", f"{group['count']} failing item(s)."]
         for f in group["failures"]:

@@ -1,8 +1,9 @@
 name: tests
 
-# Read-only. No tag trigger, no release or publish step, no credentials beyond the read token that fetches the pinned
-# upstream commits (see pins.toml); fork pull requests do not receive that secret, so the pinned jobs cannot run for
-# them and the run is red rather than skipped. Both jobs run for every pin set in pins.toml.
+# Read-only and secret-free: no tag trigger, no release or publish step, no secret and no token input. The two pinned upstreams
+# (public repositories) are fetched by exact commit SHA with the workflow's own read-only permissions, then verified against
+# pins.toml (HEAD, clean tree, tree digest, vector-file digests) before anything runs. A pin that cannot be fetched or does not
+# verify fails the job; nothing is skipped. Both jobs run for every pin set in pins.toml.
 on:
   push:
     branches: ["**"]
@@ -17,7 +18,7 @@ concurrency:
 
 jobs:
   pins:
-    name: pins.toml is well formed
+    name: pins.toml is well formed (a TEMP-PIN is allowed only on a feature branch)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -26,9 +27,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Check every pin set (a TEMP-PIN is refused on main)
+      - name: Check every pin set
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then flag="--forbid-temp-pin"; else flag=""; fi
+          branch="${HEAD_REF:-$REF_NAME}"
+          case "$branch" in
+            qa-p1/*|feature/*) flag="" ;;
+            *) flag="--forbid-temp-pin" ;;
+          esac
           for set in c3 c4; do
             PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --pin-set "$set" $flag
           done
@@ -57,18 +65,20 @@ jobs:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
-          token: ${{ secrets.QA_PINS_READ_TOKEN }}
           persist-credentials: false
-      - name: Fetch agent-harness (QA module) at the pinned commit
+      - name: Fetch agent-harness at the pinned commit
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
           path: ${{ steps.pins.outputs.harness_qa_path }}
-          token: ${{ secrets.QA_PINS_READ_TOKEN }}
           persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --pin-set "${{ matrix.pin_set }}" --verify-trees --require-git
       - name: Install test tools (the pinned trees are imported from their paths, not installed)
         run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
       - name: Run the bridge and repository tests in a scrubbed environment (the conformance suite has its own job)
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
@@ -88,6 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -101,39 +112,48 @@ jobs:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
-          token: ${{ secrets.QA_PINS_READ_TOKEN }}
           persist-credentials: false
-      - name: Fetch agent-harness (QA module) at the pinned commit
+      - name: Fetch agent-harness at the pinned commit
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
           path: ${{ steps.pins.outputs.harness_qa_path }}
-          token: ${{ secrets.QA_PINS_READ_TOKEN }}
           persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --pin-set "${{ matrix.pin_set }}" --verify-trees --require-git
       - name: Install test tools
         run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Output directory outside the checkout (the receipt requires a clean working tree)
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "OUT=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
       - name: Run the conformance suite and write the compat-receipt/1
-        # A missing or inexact dependency, zero collected tests, any skip and any failed check all give a non-zero exit.
+        # A missing or inexact dependency, zero collected tests, any skip, a dirty tree and any failed check all give a non-zero exit.
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/qa-bridge/src \
             REDEVOPS_QA_PIN_SET="${{ matrix.pin_set }}" QA_CI_WORKFLOW="${{ github.workflow }}" QA_CI_RUN_ID="${{ github.run_id }}" \
-            python -m redevops_qa_bridge.conformance.cli run --receipt compat-receipt-${{ matrix.pin_set }}.json \
-              --report divergence-report-${{ matrix.pin_set }}.json --report-md divergence-report-${{ matrix.pin_set }}.md
-      - name: Verify the receipt (hash, consistency, not stale)
-        if: always()
+            python -m redevops_qa_bridge.conformance.cli run --receipt "$OUT/compat-receipt-${{ matrix.pin_set }}.json" \
+              --report "$OUT/divergence-report-${{ matrix.pin_set }}.json" --report-md "$OUT/divergence-report-${{ matrix.pin_set }}.md" \
+              --junit "$OUT/junit-conformance-${{ matrix.pin_set }}.xml"
+      - name: Fail on zero collected tests or any skip (second, independent check of the JUnit report)
+        run: python tools/check_junit.py "$OUT/junit-conformance-${{ matrix.pin_set }}.xml"
+      - name: Verify the receipt (hash, consistency, not stale; c4 must list no not-applicable item)
         run: |
-          test -f compat-receipt-${{ matrix.pin_set }}.json
+          flag=""
+          if [ "${{ matrix.pin_set }}" = "c4" ]; then flag="--forbid-not-applicable"; fi
           env -i HOME="$(mktemp -d)" PATH="$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/qa-bridge/src \
             REDEVOPS_QA_PIN_SET="${{ matrix.pin_set }}" \
-            python -m redevops_qa_bridge.conformance.cli verify compat-receipt-${{ matrix.pin_set }}.json
+            python -m redevops_qa_bridge.conformance.cli verify "$OUT/compat-receipt-${{ matrix.pin_set }}.json" $flag
       - name: Upload the receipt and the divergence report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: compat-receipt-${{ matrix.pin_set }}
           path: |
-            compat-receipt-${{ matrix.pin_set }}.json
-            divergence-report-${{ matrix.pin_set }}.json
-            divergence-report-${{ matrix.pin_set }}.md
+            ${{ runner.temp }}/out/compat-receipt-${{ matrix.pin_set }}.json
+            ${{ runner.temp }}/out/divergence-report-${{ matrix.pin_set }}.json
+            ${{ runner.temp }}/out/divergence-report-${{ matrix.pin_set }}.md
           if-no-files-found: error

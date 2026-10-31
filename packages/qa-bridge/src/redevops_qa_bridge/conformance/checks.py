@@ -1053,18 +1053,30 @@ def run_classification(ctx: Context, item: Item) -> None:
     if got_c != expected:
         fail(GOLDEN_MISMATCH, f"classify_refusal({case['code']!r}) no longer matches its fixture", expected=expected,
              contracts=got_c)
-    codes = _neutral_codes(ctx)
-    cls = codes.get(case["code"])
-    if cls is None and case["code"] == ctx.neutral.errors.REASON_ASSERTION_INTEGRITY and expected is not None:
-        return          # the neutral module names the outcome reason itself with this constant
-    if cls is None:
+    classify = deps.neutral_module("classify")
+    neutral_classify = getattr(classify, "classify_refusal", None)
+    if neutral_classify is None:
         contract_codes, _ = _integrity_vocabulary(ctx)
-        fail(INTEGRITY_CODE_VOCABULARY if case["code"] in contract_codes else REFUSAL_PARITY,
-             f"the neutral module has no error for {case['code']!r}, so it cannot classify it as the contracts side does",
-             code=case["code"], contracts_classification=expected, neutral="no error class with this code")
-    got_n = ["INCONCLUSIVE", "ASSERTION_INTEGRITY"] if getattr(cls, "run_outcome", None) else None
+        fail(INTEGRITY_CODE_VOCABULARY, "the neutral module has no refusal classifier (classify.classify_refusal), so it "
+             "cannot classify a refusal code, in particular an unknown one, fail-closed as the contracts side does",
+             code=case["code"], contracts_classification=expected, neutral="no classify_refusal")
+    found = neutral_classify(case["code"])
+    got_n = None if found is None else [found[0].value, found[1]]
     if got_n != expected:
-        fail(REFUSAL_PARITY, f"classification of {case['code']!r} differs", expected=expected, neutral=got_n)
+        contract_codes, neutral_codes = _integrity_vocabulary(ctx)
+        fail(INTEGRITY_CODE_VOCABULARY if case["code"] in contract_codes and case["code"] not in neutral_codes
+             else REFUSAL_PARITY, f"classify_refusal({case['code']!r}) differs between the two sides", code=case["code"],
+             expected=expected, contracts=got_c, neutral=got_n)
+    halts_c = c.refusal_halts_batch(case["code"])
+    halts_n = getattr(classify, "refusal_halts_batch", lambda code: got_n is not None)(case["code"])
+    if halts_c != halts_n:
+        fail(REFUSAL_PARITY, f"refusal_halts_batch({case['code']!r}) differs", contracts=halts_c, neutral=halts_n)
+    cls = _neutral_codes(ctx).get(case["code"])
+    if cls is not None:           # a code with an error class: the class must say the same as the classifier
+        from_class = ["INCONCLUSIVE", "ASSERTION_INTEGRITY"] if getattr(cls, "run_outcome", None) else None
+        if from_class != got_n:
+            fail(REFUSAL_PARITY, f"the error class of {case['code']!r} and the neutral classifier disagree",
+                 error_class=from_class, classifier=got_n)
 
 
 def run_idempotency(ctx: Context, item: Item) -> None:
@@ -1185,6 +1197,80 @@ def run_rtvariant(ctx: Context, item: Item) -> None:
         raise
 
 
+# -- not-applicable items and completeness -----------------------------------------------------------------------------
+
+def _probe_contracts_lacks_enum(ctx: Context, arg: str) -> Optional[str]:
+    present = arg in set(deps.contracts_module("registry").ALL_ENUMS)
+    return f"the contracts package defines enum {arg}" if present else None
+
+
+def _probe_contracts_lacks_field(ctx: Context, arg: str) -> Optional[str]:
+    record, _, name = arg.partition(".")
+    for cls in deps.contracts_module("registry").RECORDS:
+        if cls.__name__ == record:
+            has = name in {f.name for f in dataclasses.fields(cls)}
+            return f"the contracts record {record} has a field {name}" if has else None
+    return f"the contracts package has no record {record}, the probe cannot establish absence of {arg}"
+
+
+def _probe_contracts_lacks_error_codes(ctx: Context, arg: str) -> Optional[str]:
+    base = deps.contracts_module("base")
+    present = [c for c in arg.split(",") if hasattr(base.Code, c)]
+    return f"the contracts Code vocabulary defines {present}" if present else None
+
+
+def _probe_contracts_inventory_lacks_enum(ctx: Context, arg: str) -> Optional[str]:
+    path = ctx.pins.contracts.vector_path("golden/qa.inventory.json")
+    with open(path, encoding="utf-8") as handle:
+        inventory = json.load(handle)
+    return f"the contracts field inventory lists enum {arg}" if arg in inventory.get("enums", {}) else None
+
+
+NA_PROBES: Dict[str, Callable[[Context, str], Optional[str]]] = {
+    "contracts_lacks_enum": _probe_contracts_lacks_enum,
+    "contracts_lacks_field": _probe_contracts_lacks_field,
+    "contracts_lacks_error_codes": _probe_contracts_lacks_error_codes,
+    "contracts_inventory_lacks_enum": _probe_contracts_inventory_lacks_enum,
+}
+
+
+def run_not_applicable(ctx: Context, item: Item) -> None:
+    """The item is declared not applicable at this pin set. It still runs: the probe must prove the feature is absent from
+    the pinned contracts, and the real item must fail (it cannot apply). Either condition not met is a failure."""
+    entry, real = item.data["entry"], item.data["real"]
+    name, _, arg = entry.probe.partition(":")
+    probe = NA_PROBES.get(name)
+    if probe is None:
+        fail("NOT_APPLICABLE_UNJUSTIFIED", f"unknown probe {entry.probe!r}", item=item.item_id)
+    present = probe(ctx, arg)
+    if present is not None:
+        fail("NOT_APPLICABLE_UNJUSTIFIED", f"{item.item_id} is declared not applicable but it applies: {present}",
+             item=item.item_id, introduced_in=entry.introduced_in)
+    try:
+        RUNNERS[real.kind](ctx, real)
+    except ConformanceFailure as exc:
+        EVIDENCE.not_applicable[(item.check, item.item_id)] = {"real_item_result": f"FAIL:{exc.code}"}
+        return
+    fail("NOT_APPLICABLE_UNNEEDED", f"{item.item_id} is declared not applicable but passes at this pin set; it must run",
+         item=item.item_id)
+
+
+def run_na_missing(ctx: Context, item: Item) -> None:
+    fail("NOT_APPLICABLE_ITEM_MISSING", f"the declared not-applicable item {item.item_id[len('na-missing:'):]} does not "
+         "exist in this check", item=item.item_id)
+
+
+def run_completeness(ctx: Context, item: Item) -> None:
+    d = item.data
+    if d["expected"] is None:
+        fail("EXPECTED_ITEMS_UNDECLARED", f"pins.toml declares no expected_items for {d['check']} in pin set {d['pin_set']}",
+             check=d["check"], actual=d["actual"])
+    if d["expected"] != d["actual"]:
+        fail("ITEMS_MISSING" if d["actual"] < d["expected"] else "ITEMS_UNEXPECTED",
+             f"{d['check']} has {d['actual']} items at pin set {d['pin_set']}, pins.toml expects {d['expected']}",
+             check=d["check"], expected=d["expected"], actual=d["actual"])
+
+
 def run_unavailable(ctx: Context, item: Item) -> None:      # pragma: no cover - replaced in run_item
     d = item.data
     fail(d["code"], d["message"], **d.get("details", {}))
@@ -1202,6 +1288,7 @@ RUNNERS: Dict[str, Callable[[Context, Item], None]] = {
     "qa_playwright": run_qa_playwright,
     "refusal": run_refusal, "classification": run_classification, "idempotency": run_idempotency,
     "error_class": run_error_class, "error_vocabulary": run_error_vocabulary,
+    "not_applicable": run_not_applicable, "na_missing": run_na_missing, "completeness": run_completeness,
     "rt": run_rt, "nrt": run_nrt, "rtval": run_rtval, "rtvariant": run_rtvariant,
 }
 

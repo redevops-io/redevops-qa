@@ -5,7 +5,7 @@
 # pin is a TEMP-PIN (temp_pin = true, tag = ""): CI refuses a TEMP-PIN on main. default_set is used unless
 # REDEVOPS_QA_PIN_SET (or --pin-set) selects another set.
 #   c4 : runtime-contracts with the additive clarifications (addendum vectors, integrity refusal codes, reason_code)
-#   c3 : runtime-contracts at the frozen interface commit (IF-1)
+#   c3 : runtime-contracts at the earlier commit that the first interface was frozen at
 # Both sets pin the same harness QA module snapshot.
 #
 # source_path is relative to this file's directory; QA_PIN_CONTRACTS_PATH / QA_PIN_HARNESS_QA_PATH override it per machine
@@ -27,8 +27,8 @@ neutral_only_enums = []
 # generic structural codes contracts raises that the neutral module folds into SPEC_INVALID
 contracts_only_error_codes = ["INVALID_FIELD", "MISSING_FIELD", "DUPLICATE_ENTRY", "FLOAT_REFUSED", "SCHEMA_MISMATCH",
                               "PLAN_INVALID", "RECORD_INCONSISTENT", "ASSERTION_INTEGRITY"]
-# codes only the neutral module raises (canonicalisation; BATCH_HALTED until the contracts side defines it)
-neutral_only_error_codes = ["CANON_REFUSED", "BATCH_HALTED"]
+# codes only the neutral module raises (canonicalisation)
+neutral_only_error_codes = ["CANON_REFUSED"]
 # the real qa-playwright adapter, as "module:ClassName"; empty until that package exists. When non-empty it must resolve
 # and satisfy both protocols; qa_playwright_required = true makes an empty value a failure.
 qa_playwright_class = ""
@@ -61,16 +61,19 @@ repo = "redevops-io/agent-harness"
 version = "0.1.0"
 tag = ""
 temp_pin = true
-commit = "212c5a1f4948e87046a7a7220159c31910869643"
+commit = "2ef285a2d0e00611f78afbe4d94f0bfbf97e3a29"
 base_pin = "6b8ba3a596a5e2caf0fdf009f2af013517591662"
 package = "agent_harness"
 source_path = ".pinned/c4/agent-harness"
 distribution_paths = ["agent_harness"]
-distribution_sha256 = "ffea55a61ab44a67987092b40d089669fed27cd79a7343f9edd3ac948f67e034"
+distribution_sha256 = "844751b5c90be1001a19ab7ac7444187bcadaf6bf4b280e58ad83a8dfe8760af"
 
 [sets.c4.harness_qa.vector_files]
+"tests/qa/golden/qa.inventory.json" = "ce8709f40642be7513bd5a80dbd8711acd1f56cce61b3403bada3ec3b5179c6e"
+"tests/qa/golden/qa.schema.json" = "ce1146529e2d3e31ff89083dea11f6cc2719c872c2a653a640976ecd485855c4"
 "tests/qa/golden/qa_canon_vectors.json" = "7241c570746a63e75431591b88e42562f6604fc2a8586474a267eedb51908a13"
-"tests/qa/golden/qa.inventory.json" = "8ebd0be1488233966ba66dc2cbb7c46b42ec3973a246f405e905130a4d28ba57"
+"tests/qa/golden/qa_canon_vectors_addendum.json" = "c2f5faf7c132c4cdeb14a6708676a4167ddfbd5e60ccfdb96ebe4612f72564d8"
+"tests/qa/golden/qa_clarifications.json" = "a486ffcb0117e1cbb72600da1404761ac718f3d07df750db97bfa31bd88f9a3e"
 
 [sets.c3]
 
@@ -97,13 +100,75 @@ repo = "redevops-io/agent-harness"
 version = "0.1.0"
 tag = ""
 temp_pin = true
-commit = "212c5a1f4948e87046a7a7220159c31910869643"
+commit = "2ef285a2d0e00611f78afbe4d94f0bfbf97e3a29"
 base_pin = "6b8ba3a596a5e2caf0fdf009f2af013517591662"
 package = "agent_harness"
 source_path = ".pinned/c3/agent-harness"
 distribution_paths = ["agent_harness"]
-distribution_sha256 = "ffea55a61ab44a67987092b40d089669fed27cd79a7343f9edd3ac948f67e034"
+distribution_sha256 = "844751b5c90be1001a19ab7ac7444187bcadaf6bf4b280e58ad83a8dfe8760af"
 
 [sets.c3.harness_qa.vector_files]
+"tests/qa/golden/qa.inventory.json" = "ce8709f40642be7513bd5a80dbd8711acd1f56cce61b3403bada3ec3b5179c6e"
+"tests/qa/golden/qa.schema.json" = "ce1146529e2d3e31ff89083dea11f6cc2719c872c2a653a640976ecd485855c4"
 "tests/qa/golden/qa_canon_vectors.json" = "7241c570746a63e75431591b88e42562f6604fc2a8586474a267eedb51908a13"
-"tests/qa/golden/qa.inventory.json" = "8ebd0be1488233966ba66dc2cbb7c46b42ec3973a246f405e905130a4d28ba57"
+"tests/qa/golden/qa_canon_vectors_addendum.json" = "c2f5faf7c132c4cdeb14a6708676a4167ddfbd5e60ccfdb96ebe4612f72564d8"
+"tests/qa/golden/qa_clarifications.json" = "a486ffcb0117e1cbb72600da1404761ac718f3d07df750db97bfa31bd88f9a3e"
+
+
+# Items that cannot apply at c3: the contracts commit pinned here predates the feature they check (the harness module is aligned
+# with the later contracts commit). Each is still run: a probe must prove the feature is absent from the pinned contracts and the
+# item itself must fail; the receipt counts and names them. c4 declares none.
+[[sets.c3.not_applicable]]
+check = "CHK2"
+item = "inventory:qa.inventory.json"
+introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+probe = "contracts_inventory_lacks_enum:RecoveryReason"
+reason = "The contracts field inventory pinned here predates the additive clarifications: the harness copy lists the enums IntegrityRefusalCode and RecoveryReason and FaultRecovery.reason_code, which the contracts inventory gains at the introducing commit."
+
+[[sets.c3.not_applicable]]
+check = "CHK3"
+item = "fields:FaultRecovery"
+introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+probe = "contracts_lacks_field:FaultRecovery.reason_code"
+reason = "FaultRecovery.reason_code is introduced by the contracts additive clarifications; the contracts commit pinned here has no such field, so there is no contracts field set to compare the neutral one with."
+
+[[sets.c3.not_applicable]]
+check = "CHK4"
+item = "enum-presence:IntegrityRefusalCode"
+introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+probe = "contracts_lacks_enum:IntegrityRefusalCode"
+reason = "The enum IntegrityRefusalCode is introduced by the contracts additive clarifications; the contracts commit pinned here does not define it."
+
+[[sets.c3.not_applicable]]
+check = "CHK4"
+item = "enum-presence:RecoveryReason"
+introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+probe = "contracts_lacks_enum:RecoveryReason"
+reason = "The enum RecoveryReason is introduced by the contracts additive clarifications; the contracts commit pinned here does not define it."
+
+[[sets.c3.not_applicable]]
+check = "CHK6"
+item = "error-vocabulary"
+introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+probe = "contracts_lacks_error_codes:ASSERTION_PIN_MALFORMED,ASSERTION_PIN_NOT_FOUND,ASSERTION_PROGRAM_MISMATCH,ASSERTION_PROGRAM_UNREGISTERED"
+reason = "The distinct integrity refusal codes ASSERTION_PIN_MALFORMED, ASSERTION_PIN_NOT_FOUND, ASSERTION_PROGRAM_MISMATCH and ASSERTION_PROGRAM_UNREGISTERED are introduced by the contracts additive clarifications; the contracts commit pinned here defines none of them."
+
+# The exact number of conformance items each check has at a pin set (the completeness item of every check compares). An item that
+# goes missing, or one added without updating this table, fails the run; the table changes only together with a pin update.
+[sets.c4.expected_items]
+CHK1 = 293
+CHK2 = 237
+CHK3 = 60
+CHK4 = 36
+CHK5 = 8
+CHK6 = 82
+CHK7 = 102
+
+[sets.c3.expected_items]
+CHK1 = 193
+CHK2 = 236
+CHK3 = 60
+CHK4 = 36
+CHK5 = 8
+CHK6 = 45
+CHK7 = 102

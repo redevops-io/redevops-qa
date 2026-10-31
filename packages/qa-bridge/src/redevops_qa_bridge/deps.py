@@ -115,6 +115,18 @@ def _git_head(root: Path) -> str:
     return out.stdout.strip() if out.returncode == 0 else ""
 
 
+def _git_dirty(root: Path) -> bool:
+    """True when ``root`` is a git checkout with uncommitted or untracked changes (bytecode ignored by .gitignore)."""
+    if not (root / ".git").exists():
+        return False
+    try:
+        out = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True,
+                             timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return out.returncode != 0 or bool(out.stdout.strip())
+
+
 def tree_version(dep: DependencyPin) -> str:
     """``[project].version`` of the pinned tree's ``pyproject.toml`` ('' when absent)."""
     pyproject = dep.resolved_path / "pyproject.toml"
@@ -150,6 +162,7 @@ def current_state(dep: DependencyPin) -> Dict[str, object]:
     state["unlisted_addendum_files"] = [f for f in addendum_files(dep) if f not in dep.vector_files]
     state["git_head"] = _git_head(dep.resolved_path)
     state["tree_version"] = tree_version(dep)
+    state["git_dirty"] = _git_dirty(dep.resolved_path)
     return state
 
 
@@ -172,6 +185,8 @@ def pin_problems(dep: DependencyPin) -> List[Tuple[str, str]]:
     head = state["git_head"]
     if head and head != dep.commit:
         problems.append(("PIN_COMMIT_MISMATCH", f"{dep.name}: checkout is at {head}, pinned {dep.commit}"))
+    if state["git_dirty"]:
+        problems.append(("PIN_TREE_DIRTY", f"{dep.name}: the checkout has uncommitted or untracked changes"))
     version = state["tree_version"]
     if version and version != dep.version:
         problems.append(("PIN_VERSION_MISMATCH", f"{dep.name}: tree declares version {version!r}, pinned {dep.version!r}"))

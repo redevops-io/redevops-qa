@@ -44,13 +44,49 @@ def test_the_bridge_job_fails_on_zero_tests_or_skips():
     assert "--junitxml" in steps and "tools/check_junit.py" in steps
 
 
+@pytest.mark.parametrize("word", ["secrets.", "token", "qa_pins_read_token", "pat:", "password"])
+def test_the_workflow_uses_no_secret_and_no_token(word):
+    assert word not in TEXT.lower().replace("no token input", "").replace("no secret and no token", "")
+
+
 def test_the_pinned_trees_are_fetched_at_the_commit_named_in_pins_toml():
     for job in ("bridge", "conformance"):
         fetches = [s for s in WF["jobs"][job]["steps"] if "repository" in s.get("with", {})]
         assert len(fetches) == 2
         for s in fetches:
             assert s["with"]["ref"].startswith("${{ steps.pins.outputs.") and s["with"]["persist-credentials"] is False
+            assert set(s["with"]) == {"repository", "ref", "path", "persist-credentials"}      # no token input
 
 
 def test_tests_run_in_a_scrubbed_environment():
     assert TEXT.count("env -i HOME=") >= 3
+
+
+@pytest.mark.parametrize("job", ["bridge", "conformance"])
+def test_every_pinned_job_verifies_the_fetched_trees_before_running_anything(job):
+    steps = WF["jobs"][job]["steps"]
+    runs = [str(s.get("run", "")) for s in steps]
+    verify = next(i for i, r in enumerate(runs) if "--verify-trees --require-git" in r)
+    fetch = max(i for i, s in enumerate(steps) if "repository" in s.get("with", {}))
+    first_test = next(i for i, r in enumerate(runs) if "-m pytest" in r or "conformance.cli run" in r)
+    assert fetch < verify < first_test
+    assert any('test -z "$(git status --porcelain)"' in r for r in runs[:first_test])
+
+
+def test_a_temp_pin_is_refused_except_on_a_feature_branch():
+    step = WF["jobs"]["pins"]["steps"][-1]
+    run = step["run"]
+    assert "qa-p1/*|feature/*" in run and "--forbid-temp-pin" in run
+    assert run.index("qa-p1/*|feature/*) flag=\"\"") < run.index("*) flag=\"--forbid-temp-pin\"")
+
+
+def test_the_conformance_job_fails_on_zero_tests_and_skips_a_second_time_and_the_c4_receipt_may_list_no_not_applicable_item():
+    steps = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["conformance"]["steps"])
+    assert 'tools/check_junit.py "$OUT/junit-conformance-' in steps and '--junit "$OUT/junit-conformance-' in steps
+    # outputs are written outside the checkout (the receipt requires a clean tree) and the reviewed commit is checked out
+    job = WF["jobs"]["conformance"]
+    assert "env" not in job                       # the runner context is not available in job-level env
+    assert 'echo "OUT=$RUNNER_TEMP/out" >> "$GITHUB_ENV"' in steps
+    assert job["steps"][0]["with"]["ref"] == "${{ github.event.pull_request.head.sha || github.sha }}"
+    assert not any(str(x) in steps for x in ("--receipt compat-receipt", "--junit junit-conformance", "--report divergence"))
+    assert "--forbid-not-applicable" in steps and '"c4"' in steps

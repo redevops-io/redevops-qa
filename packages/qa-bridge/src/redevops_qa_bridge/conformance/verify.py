@@ -18,7 +18,9 @@ from .receipt import RECEIPT_SCHEMA, RECEIPT_VERSION, receipt_hash_of, redevops_
 
 EXIT = {"VALID": 0, "FAILED": 1, "INVALID": 1, "TAMPERED": 1, "STALE": 2}
 _TOP = ("receipt_schema", "receipt_version", "result", "subjects", "environment", "schema_ids", "dependencies_available",
-        "vectors", "checks", "collected_tests", "skipped_tests", "failed_tests", "timestamp_utc", "runner", "receipt_hash")
+        "vectors", "checks", "not_applicable", "collected_tests", "skipped_tests", "failed_tests", "not_applicable_tests",
+        "timestamp_utc", "runner", "receipt_hash")
+_NA_KEYS = {"check_id", "item_id", "introduced_in", "probe", "reason", "real_item_result"}
 
 
 def _has_float(v: Any) -> bool:
@@ -47,11 +49,21 @@ def consistency_problems(r: Dict[str, Any]) -> List[str]:
         problems.append(f"the receipt must hold exactly the seven checks in order, found {ids}")
         return problems
     for c in r["checks"]:
-        if c["collected"] != c["passed"] + c["failed"] + c["skipped"]:
-            problems.append(f"{c['check_id']}: collected is not passed + failed + skipped")
-        want = "PASS" if c["collected"] > 0 and c["failed"] == 0 and c["skipped"] == 0 and c["passed"] == c["collected"] else "FAIL"
+        if c["collected"] != c["passed"] + c["failed"] + c["skipped"] + c["not_applicable"]:
+            problems.append(f"{c['check_id']}: collected is not passed + failed + skipped + not_applicable")
+        want = "PASS" if (c["collected"] > 0 and c["failed"] == 0 and c["skipped"] == 0 and c["passed"] > 0
+                          and c["passed"] + c["not_applicable"] == c["collected"]) else "FAIL"
         if c["status"] != want:
             problems.append(f"{c['check_id']}: status {c['status']} contradicts its counts")
+    na = r["not_applicable"]
+    if not isinstance(na, list) or r["not_applicable_tests"] != len(na) or sum(c["not_applicable"] for c in r["checks"]) != len(na):
+        problems.append("the not-applicable count, list and per-check counts disagree")
+    else:
+        for e in na:
+            if set(e) != _NA_KEYS or not (isinstance(e["introduced_in"], str) and len(e["introduced_in"]) == 40) \
+                    or not e["reason"] or not str(e["real_item_result"]).startswith("FAIL:"):
+                problems.append(f"not-applicable entry {e.get('item_id')!r} is not named, justified and tied to a contracts commit")
+                break
     if sum(c["collected"] for c in r["checks"]) > r["collected_tests"]:
         problems.append("the checks collected more tests than the receipt total")
     if sum(c["skipped"] for c in r["checks"]) > r["skipped_tests"] or sum(c["failed"] for c in r["checks"]) > r["failed_tests"]:
@@ -102,7 +114,7 @@ def _dependency_differences(name: str, recorded: Dict[str, Any], dep: Dependency
     return diff
 
 
-def stale_reasons(r: Dict[str, Any], pins: Pins, redevops_root: Optional[Path]) -> List[str]:
+def stale_reasons(r: Dict[str, Any], pins: Pins, redevops_root: Optional[Path], accept_equal_tree: bool = False) -> List[str]:
     diff: List[str] = []
     subjects = r["subjects"]
     if subjects.get("pin_set") != pins.pin_set:
@@ -113,13 +125,22 @@ def stale_reasons(r: Dict[str, Any], pins: Pins, redevops_root: Optional[Path]) 
     if redevops_root is not None:
         now = redevops_qa_state(redevops_root)
         recorded = subjects["redevops_qa"]
-        if recorded.get("commit") != now["commit"]:
+        if recorded.get("commit") != now["commit"] and not (
+                accept_equal_tree and recorded.get("tree") and recorded.get("tree") == now["tree"]):
             diff.append(f"redevops_qa.commit: receipt {recorded.get('commit')!r}, now {now['commit']!r}")
+    receipt_na = sorted((e["check_id"], e["item_id"], e["introduced_in"], e["probe"]) for e in r["not_applicable"])
+    pinned_na = sorted((n.check, n.item, n.introduced_in, n.probe) for n in pins.not_applicable)
+    if receipt_na != pinned_na:
+        diff.append(f"not_applicable: receipt lists {len(receipt_na)} item(s), pins.toml declares {len(pinned_na)} "
+                    "(or they differ)")
     return diff
 
 
-def verify_receipt(path: Path, pins: Pins, *, redevops_root: Optional[Path] = None) -> Tuple[str, List[str]]:
-    """``(status, reasons)``."""
+def verify_receipt(path: Path, pins: Pins, *, redevops_root: Optional[Path] = None, accept_equal_tree: bool = False,
+                   forbid_not_applicable: bool = False) -> Tuple[str, List[str]]:
+    """``(status, reasons)``. ``accept_equal_tree`` treats a different ``redevops-qa`` commit with the same git tree as
+    current (the commit hash changes when patches are re-applied; the tree does not). ``forbid_not_applicable`` is the
+    strict form for a pin set that must have none: a receipt that lists any not-applicable item is ``FAILED``."""
     try:
         with open(path, encoding="utf-8") as handle:
             receipt = json.load(handle)
@@ -136,9 +157,11 @@ def verify_receipt(path: Path, pins: Pins, *, redevops_root: Optional[Path] = No
     problems = consistency_problems(receipt)
     if problems:
         return "INVALID", problems
-    stale = stale_reasons(receipt, pins, redevops_root)
+    stale = stale_reasons(receipt, pins, redevops_root, accept_equal_tree)
     if stale:
         return "STALE", stale
+    if forbid_not_applicable and receipt["not_applicable"]:
+        return "FAILED", [f"the receipt lists {len(receipt['not_applicable'])} not-applicable item(s) and none are allowed"]
     if receipt["result"] != "PASS":
         failing = [f"{c['check_id']} {c['name']}: {', '.join(c['failure_codes'])}" for c in receipt["checks"]
                    if c["status"] != "PASS"]

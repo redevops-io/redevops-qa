@@ -27,6 +27,7 @@ class Evidence:
         self.vectors: Dict[tuple, Dict[str, Any]] = {}
         self.schemas: Optional[List[Dict[str, Any]]] = None
         self.schema_info: Dict[str, Any] = {}
+        self.not_applicable: Dict[tuple, Dict[str, Any]] = {}
 
     def vector(self, vector_id: str, source: str, canon_v1_hash: str, rcv1_hash: str, golden_hash: str,
                equal: bool) -> None:
@@ -45,3 +46,4 @@ def reset_evidence() -> None:
     EVIDENCE.vectors.clear()
     EVIDENCE.schemas = None
     EVIDENCE.schema_info = {}
+    EVIDENCE.not_applicable.clear()

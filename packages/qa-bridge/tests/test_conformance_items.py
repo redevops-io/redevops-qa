@@ -50,7 +50,8 @@ def test_the_97_frozen_vectors_are_all_checked(items):
 
 def test_addendum_items_exist_exactly_when_the_addendum_is_pinned(items, pins):
     pinned = any("addendum" in rel for rel in pins.contracts.vector_files)
-    has_items = any("addendum" in i.item_id for v in items.values() for i in v)
+    has_items = any(i.item_id.startswith(("canon:qa_canon_vectors_addendum", "valdigest:qa_canon_vectors_addendum"))
+                    for v in items.values() for i in v)
     assert pinned == has_items
     kinds = {i.kind for v in items.values() for i in v}
     for kind in ("valdigest", "setorder", "pred", "reason_code", "classification"):

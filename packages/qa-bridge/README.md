@@ -109,3 +109,36 @@ python -m redevops_qa_bridge.conformance.cli verify compat-receipt.json --pin-se
 other field) and exits 0 only if its `result` is `PASS`. `verify` re-checks the hash and the receipt's own consistency and
 reports `VALID`, `STALE` (some pin differs from what the receipt was made against; exit 2), `TAMPERED`, `INVALID` or
 `FAILED`. A receipt is evidence for exactly the pins and the `redevops-qa` commit it records.
+
+### Not applicable at a pin set
+
+A pin set can declare, in `[[sets.<name>.not_applicable]]`, an item that cannot apply because the contracts commit pinned there predates the
+feature the item checks. Each declaration names the check and item, the contracts commit that introduces the feature (never the commit pinned
+in that set), a reason and a probe. The item is not hidden: the suite runs the probe (it must prove the feature is absent from the pinned
+contracts) and runs the item itself (it must fail); either condition not met fails the run. The receipt counts the item under
+`not_applicable`, lists it with its reason, commit and what the item would have given, and a check whose items are all not applicable does not
+pass. It is a receipt category, not a pytest skip: pytest skips, `xfail` and any skip marker still fail the run. `verify --forbid-not-applicable`
+is the strict form for a pin set that must have none (`c4`).
+
+`[sets.<name>.expected_items]` holds the exact number of items each check has at that pin set; the last item of every check (`completeness`)
+fails when an item is missing or one was added without updating the table.
+
+### Regenerating a receipt in a published tree
+
+The receipt records the `redevops-qa` commit (and its git tree). Re-applying patches with `git am` keeps the tree but changes commit hashes, so
+in the published checkout run, from the repository root with the pinned trees in place:
+
+```text
+python -m redevops_qa_bridge.conformance.cli run --pin-set c4 --receipt compat-receipt-c4.json --report divergence-report-c4.json
+python -m redevops_qa_bridge.conformance.cli verify compat-receipt-c4.json --pin-set c4 --forbid-not-applicable
+```
+
+A receipt made in another clone can be checked against an identical published tree with `verify --accept-equal-tree` (the commit differs, the git
+tree is the same); without the flag a different commit is STALE.
+
+### Continuous integration
+
+`.github/workflows/tests.yml` uses no secret and no token input. The two pinned upstreams are public: each job fetches them by exact commit
+SHA into `.pinned/<set>/...`, then `python -m redevops_qa_bridge.pins --verify-trees --require-git` checks that HEAD is the pinned commit, the
+checkout is clean, and the tree and vector-file digests equal `pins.toml`. A pin that cannot be fetched or verified fails the job. The job also
+fails on a dirty working tree, zero collected tests, any skip, and a TEMP-PIN outside a `qa-p1/*` or `feature/*` branch.

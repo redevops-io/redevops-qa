@@ -38,23 +38,29 @@ def pinned_env(pins):
 @pytest.fixture()
 def workdir(tmp_path):
     root = make_repo(tmp_path / "work", commit=False)
-    shutil.copy(ROOT / "pins.toml", root / "pins.toml")
+    import re
+    text = (ROOT / "pins.toml").read_text(encoding="utf-8")
+    # the stub tests stand in for the real items, so the not-applicable declarations of a pin set do not apply to them
+    text = re.sub(r"\[\[sets\.\w+\.not_applicable\]\]\n(?:[^\[\n][^\n]*\n|\n)*", "", text)
+    (root / "pins.toml").write_text(text, encoding="utf-8")
     from receipt_helpers import git
     git(root, "add", "pins.toml")
     git(root, "commit", "-q", "-m", "pins")
     return root
 
 
-def stub_tests(root: Path, *, skip=None, drop=(), stray=False, fail=None) -> Path:
+def stub_tests(root: Path, *, skip=None, drop=(), stray=False, fail=None, na=None) -> Path:
     d = root.parent / "stub_tests"
     d.mkdir()
-    (d / "pytest.ini").write_text("[pytest]\nmarkers =\n    check(id): conformance check\n")
+    (d / "pytest.ini").write_text("[pytest]\nmarkers =\n    check(id): conformance check\n    not_applicable: n/a\n")
     for i in sorted(PASSING - set(drop)):
         body = "import pytest\n"
         if skip == i:
             body += f"\n@pytest.mark.check('{i}')\n@pytest.mark.skip(reason='no')\ndef test_a():\n    pass\n"
         elif fail == i:
             body += f"\n@pytest.mark.check('{i}')\ndef test_a():\n    from redevops_qa_bridge.conformance.model import fail\n    fail('HASH_DIVERGENCE', 'x')\n"
+        elif na == i:
+            body += f"\n@pytest.mark.check('{i}')\n@pytest.mark.not_applicable\ndef test_a():\n    pass\n"
         else:
             body += f"\n@pytest.mark.check('{i}')\ndef test_a():\n    pass\n"
         (d / f"test_{i.lower()}.py").write_text(body)
@@ -153,6 +159,21 @@ def test_a_failing_test_names_its_code_in_the_receipt(pins, workdir):
     assert r["result"] == "FAIL" and r["checks"][1]["failure_codes"] == ["HASH_DIVERGENCE"] and r["failed_tests"] == 1
     report = load(workdir.parent / "report.json")
     assert report["groups"]["additional"]["count"] == 1
+
+
+def test_a_not_applicable_test_is_reported_as_such_and_never_as_a_skip_but_an_undeclared_one_cannot_pass(pins, workdir):
+    out = workdir.parent / "receipt.json"
+    tests = stub_tests(workdir, na="CHK3")
+    (tests / "test_chk3.py").write_text(
+        "import pytest\n\n@pytest.mark.check('CHK3')\ndef test_a():\n    pass\n\n"
+        "@pytest.mark.check('CHK3')\n@pytest.mark.not_applicable\ndef test_b():\n    pass\n")
+    done = run_cli(["run", "--receipt", str(out), "--tests-dir", str(tests)], pins_file=workdir / "pins.toml", env_extra=pinned_env(pins))
+    r = load(out)
+    chk3 = r["checks"][2]
+    assert (chk3["collected"], chk3["passed"], chk3["not_applicable"], chk3["skipped"]) == (2, 1, 1, 0)
+    assert r["skipped_tests"] == 0 and r["not_applicable_tests"] == 1 and len(r["not_applicable"]) == 1
+    # nothing in pins.toml declares it (the stub pins declare none): an unexplained not-applicable item cannot give PASS
+    assert r["not_applicable"][0]["reason"] == "" and r["result"] == "FAIL" and done.returncode == 1
 
 
 def test_a_test_outside_the_seven_checks_fails_the_run(pins, workdir):

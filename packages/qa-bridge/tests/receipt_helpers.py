@@ -25,7 +25,7 @@ def make_repo(root: Path, *, commit: bool = True) -> Path:
     return root
 
 
-def summary(per_check=3, *, failed=(), skipped=(), drop=(), unmapped=0, collection_errors=()):
+def summary(per_check=3, *, failed=(), skipped=(), drop=(), unmapped=0, collection_errors=(), pins=None):
     """A pytest summary with ``per_check`` passing tests per check; ``failed``/``skipped`` name checks that get one
     failing/skipped test instead of one passing; ``drop`` removes a check's tests entirely."""
     tests = []
@@ -41,14 +41,19 @@ def summary(per_check=3, *, failed=(), skipped=(), drop=(), unmapped=0, collecti
                 outcome = "skipped"
             tests.append({"nodeid": f"t.py::test_item[{check}-{i}]", "check": check, "outcome": outcome, "code": code,
                           "message": "", "details": {}})
+    for n in (pins.not_applicable if pins is not None else ()):
+        tests.append({"nodeid": f"t.py::test_item[{n.item}]", "check": n.check, "item": n.item, "outcome": "not_applicable",
+                      "code": None, "message": "", "details": {}})
     for i in range(unmapped):
         tests.append({"nodeid": f"t.py::test_stray[{i}]", "check": "UNMAPPED", "outcome": "passed", "code": None,
                       "message": "", "details": {}})
     return {"collected": len(tests), "collection_errors": list(collection_errors), "tests": tests}
 
 
-def evidence():
+def evidence(pins=None):
     ev = Evidence()
+    for n in (pins.not_applicable if pins is not None else ()):
+        ev.not_applicable[(n.check, n.item)] = {"real_item_result": "FAIL:ENUM_PARITY"}
     ev.vector("v1", "contracts_golden", "canon-v1:" + "a" * 64, "rcv1:" + "a" * 64, "rcv1:" + "a" * 64, True)
     ev.schemas = [{"schema_id": "runtime-contracts/qa/checkpoint", "contracts_schema_version": "0.1",
                    "neutral_schema_version": "0.1", "equal": True}]
