@@ -82,5 +82,10 @@ def test_a_temp_pin_is_refused_except_on_a_feature_branch():
 
 def test_the_conformance_job_fails_on_zero_tests_and_skips_a_second_time_and_the_c4_receipt_may_list_no_not_applicable_item():
     steps = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["conformance"]["steps"])
-    assert "tools/check_junit.py junit-conformance-" in steps and "--junit junit-conformance-" in steps
+    assert 'tools/check_junit.py "$OUT/junit-conformance-' in steps and '--junit "$OUT/junit-conformance-' in steps
+    # outputs are written outside the checkout (the receipt requires a clean tree) and the reviewed commit is checked out
+    job = WF["jobs"]["conformance"]
+    assert job["env"]["OUT"] == "${{ runner.temp }}/out"
+    assert job["steps"][0]["with"]["ref"] == "${{ github.event.pull_request.head.sha || github.sha }}"
+    assert not any(str(x) in steps for x in ("--receipt compat-receipt", "--junit junit-conformance", "--report divergence"))
     assert "--forbid-not-applicable" in steps and '"c4"' in steps
