@@ -1,0 +1,21 @@
+[project]
+name = "redevops-qa-playwright"
+version = "0.1.0.dev0"
+description = "Playwright browser adapter for ReDevOps QA: a driver layer, the adapter logic over it, and an offline fake driver"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
+# No runtime dependency on pip-installable versions of the harness neutral module or the bridge: the exact versions
+# under test are named in the repository's pins.toml. Playwright is an optional extra, imported only by the real driver.
+dependencies = []
+
+[project.optional-dependencies]
+browser = ["playwright==1.64.1"]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

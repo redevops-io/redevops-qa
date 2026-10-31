@@ -1,0 +1,22 @@
+[project]
+name = "redevops-qa-appium"
+version = "0.1.0.dev0"
+description = "Appium adapters for ReDevOps QA: Android first (UiAutomator2) over a driver protocol, and an iOS interface that reports unavailable without a licensed worker"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
+# The shared adapter kit and qa-selenium (for the driver fault vocabulary) are imported from the repository. The Appium Python client is an
+# optional, pinned extra imported only by the real driver; the Appium server, the drivers and any Android or Apple toolchain are the worker's
+# and are listed (or excluded) in third_party/adapter-license-matrix.yaml.
+dependencies = []
+
+[project.optional-dependencies]
+android = ["Appium-Python-Client==6.1.1"]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
