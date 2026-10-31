@@ -41,6 +41,29 @@ jobs:
             PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --pin-set "$set" $flag
           done
 
+  adapter-licences:
+    name: adapter licence matrix (unknown or incompatible redistributables fail; technical triage, not legal advice)
+    # Offline and independent of the pinned upstreams: reads third_party/adapter-license-matrix.yaml and the install lists of the
+    # packages and workflows. No download, no secret.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Check the matrix against the policy and against what the repository installs
+        run: env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 python tools/check_adapter_licenses.py
+      - name: Run the matrix tests (scrubbed environment)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q tests/test_adapter_license_matrix.py --junitxml="$RUNNER_TEMP/junit-adapter-licences.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-adapter-licences.xml"
+
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
     runs-on: ubuntu-24.04
