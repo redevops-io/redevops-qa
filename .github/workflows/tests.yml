@@ -358,3 +358,106 @@ jobs:
             python -m pytest -q -m robot_real packages/qa-robot/tests/real --junitxml="$RUNNER_TEMP/junit-robot-real.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-real.xml"
+
+  appium-offline:
+    name: "appium adapters (offline - fake device, capabilities, server policy, iOS reports unavailable; no Appium installed)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the offline Appium adapter tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q packages/qa-appium/tests --junitxml="$RUNNER_TEMP/junit-appium-offline.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-appium-offline.xml"
+
+  appium-server:
+    name: "appium server lane (real Appium 3.9.0 server and client 6.1.1, no device; NOT a required check until proven; a missing dependency fails, never skips)"
+    # Real server and client, no Android SDK and no device: shows the client talks to the server, the UiAutomator2 driver accepts the
+    # adapter's capabilities and a worker without a device is reported as unavailable. Read-only, no secret. The server listens on loopback only.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned test tools and Appium Python client
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "Appium-Python-Client==6.1.1"
+      - name: Install the pinned Appium server and the UiAutomator2 driver (no script runs; nothing else is downloaded)
+        run: |
+          npm install --prefix "$RUNNER_TEMP/appium" --ignore-scripts --no-audit --no-fund appium@3.9.0
+          mkdir -p "$RUNNER_TEMP/appium-home"
+          env -i HOME="$RUNNER_TEMP" PATH="$PATH" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" driver install uiautomator2@8.7.3
+      - name: Start the Appium server on loopback without any Android SDK variable
+        run: |
+          nohup env -i HOME="$RUNNER_TEMP" PATH="$PATH" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" --address 127.0.0.1 --port 4723 --log-level warn > "$RUNNER_TEMP/appium-server.log" 2>&1 &
+          python - <<'PY'
+          import time, urllib.request
+          for _ in range(60):
+              try:
+                  urllib.request.urlopen("http://127.0.0.1:4723/status", timeout=2).read()
+                  raise SystemExit(0)
+              except SystemExit:
+                  raise
+              except Exception:
+                  time.sleep(1)
+          raise SystemExit("FAIL: the Appium server did not answer within 60 seconds")
+          PY
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the server lane (scrubbed environment; only tests marked appium_server)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 QA_APPIUM_URL=http://127.0.0.1:4723 \
+            python -m pytest -q -m appium_server packages/qa-appium/tests/real --junitxml="$RUNNER_TEMP/junit-appium-server.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-appium-server.xml"
+      - name: Server log (diagnostics)
+        if: always()
+        run: tail -n 50 "$RUNNER_TEMP/appium-server.log" || true
+
+  appium-android:
+    name: "appium android lane (real emulator or device; EXPECTED RED on runners without one; NOT a required check; a missing emulator fails, never skips)"
+    # Needs an Android emulator or device that the worker's operator provisioned under Google's terms. This job does not install the Android SDK,
+    # accept a licence, download a system image or start an emulator, and it has not been shown to pass. It fails when no device is attached.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require an attached Android emulator or device (fail when there is none)
+        run: |
+          adb="${ANDROID_HOME:-/nonexistent}/platform-tools/adb"
+          if [ ! -x "$adb" ]; then echo "FAIL: no adb at $adb; this lane needs a worker with an operator-provisioned Android SDK"; exit 1; fi
+          "$adb" start-server
+          if ! "$adb" devices | tail -n +2 | grep -q "device$"; then echo "FAIL: no Android emulator or device is attached to this worker"; exit 1; fi
+      - name: Install the pinned test tools and Appium Python client
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "Appium-Python-Client==6.1.1"
+      - name: Install the pinned Appium server and the UiAutomator2 driver (no script runs; nothing else is downloaded)
+        run: |
+          npm install --prefix "$RUNNER_TEMP/appium" --ignore-scripts --no-audit --no-fund appium@3.9.0
+          mkdir -p "$RUNNER_TEMP/appium-home"
+          env -i HOME="$RUNNER_TEMP" PATH="$PATH" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" driver install uiautomator2@8.7.3
+      - name: Start the Appium server on loopback
+        run: |
+          nohup env -i HOME="$RUNNER_TEMP" PATH="$PATH" ANDROID_HOME="$ANDROID_HOME" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" --address 127.0.0.1 --port 4723 --log-level warn > "$RUNNER_TEMP/appium-server.log" 2>&1 &
+          sleep 10
+      - name: Run the Android lane (scrubbed environment; only tests marked appium_android)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 QA_APPIUM_URL=http://127.0.0.1:4723 \
+            python -m pytest -q -m appium_android packages/qa-appium/tests/real --junitxml="$RUNNER_TEMP/junit-appium-android.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-appium-android.xml"

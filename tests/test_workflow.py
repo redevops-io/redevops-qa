@@ -128,3 +128,19 @@ def test_the_robot_offline_job_installs_no_robot_and_the_real_job_never_skips():
     assert '"robotframework==7.5"' in run and "-m robot_real packages/qa-robot/tests/real" in run and "tools/check_junit.py" in run
     assert "needs" not in WF["jobs"]["robot-real"] and "NOT a required check until proven" in WF["jobs"]["robot-real"]["name"]
     assert not any("repository" in s.get("with", {}) for s in steps)
+
+
+def test_the_appium_offline_job_installs_no_appium_and_the_real_jobs_never_skip_install_licences_or_emulators():
+    offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["appium-offline"]["steps"])
+    assert "Appium-Python-Client" not in offline and "npm" not in offline and "packages/qa-appium/tests" in offline and "tools/check_junit.py" in offline
+    for name, marker in (("appium-server", "appium_server"), ("appium-android", "appium_android")):
+        job = WF["jobs"][name]
+        run = "\n".join(str(s.get("run", "")) for s in job["steps"])
+        assert f"-m {marker} packages/qa-appium/tests/real" in run and "tools/check_junit.py" in run and "needs" not in job
+        assert "NOT a required check" in job["name"] and "--ignore-scripts" in run and "appium@3.9.0" in run and "uiautomator2@8.7.3" in run
+        assert not any(w in run.lower() for w in ("sdkmanager", "avdmanager", "--licenses", "system-images", "emulator -avd", "kvm"))
+        assert not any("repository" in s.get("with", {}) for s in job["steps"])
+    android = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["appium-android"]["steps"])
+    assert android.index("exit 1") < android.index("pip install") and "no Android emulator or device" in android and "EXPECTED RED" in WF["jobs"]["appium-android"]["name"]
+    server_run = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["appium-server"]["steps"])
+    assert "ANDROID_HOME" not in server_run         # the server lane starts its server without any Android SDK variable

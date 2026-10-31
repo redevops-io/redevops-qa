@@ -29,8 +29,8 @@ def test_a_normal_exit_reports_its_code_and_output(tmp_path):
 
 
 def test_a_signal_death_is_reported_as_a_signal_not_an_exit_code(tmp_path):
-    out = run_supervised([PY, "-I", "-c", "import os,signal; os.kill(os.getpid(), signal.SIGABRT)"], cwd=str(tmp_path), env=ENV, limits=FAST)
-    assert out.exit_code is None and out.signal == signal.SIGABRT
+    out = run_supervised([PY, "-I", "-c", "import os,signal; os.kill(os.getpid(), signal.SIGUSR1)"], cwd=str(tmp_path), env=ENV, limits=FAST)
+    assert out.exit_code is None and out.signal == signal.SIGUSR1
 
 
 def test_the_deadline_ends_the_run_and_the_whole_process_group(tmp_path):

@@ -19,3 +19,4 @@ The licence matrix for optional adapter frameworks is in [third_party](third_par
 The shared adapter protocol, models and supervisor are in [packages/qa-adapter-kit](packages/qa-adapter-kit/README.md).
 The Selenium adapters are in [packages/qa-selenium](packages/qa-selenium/README.md).
 The Robot Framework adapter is in [packages/qa-robot](packages/qa-robot/README.md).
+The Appium adapters are in [packages/qa-appium](packages/qa-appium/README.md).
