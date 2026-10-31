@@ -79,13 +79,19 @@ class SeleniumChromeDriver:
 
     def _find(self, locator: Locator, timeout_s: float, *, clickable: bool = False):
         by = (self._by.CSS_SELECTOR, locator.css())
-        cond = self._ec.element_to_be_clickable(by) if clickable else self._ec.presence_of_element_located(by)
         try:
-            return self._wait(self._driver, timeout_s).until(cond)
+            element = self._wait(self._driver, timeout_s).until(self._ec.presence_of_element_located(by))
         except Exception as exc:
             kind = classify_exception(exc)
-            # a wait that ran out for a clickable element means the element exists but is not usable
-            raise DriverFault(FaultKind.NOT_FOUND if kind is FaultKind.TIMEOUT and not clickable else kind) from None
+            raise DriverFault(FaultKind.NOT_FOUND if kind is FaultKind.TIMEOUT else kind) from None
+        if clickable:
+            try:
+                return self._wait(self._driver, timeout_s).until(self._ec.element_to_be_clickable(by))
+            except Exception as exc:
+                kind = classify_exception(exc)
+                # present but never became usable within the wait: hidden, disabled or covered
+                raise DriverFault(FaultKind.NOT_INTERACTABLE if kind is FaultKind.TIMEOUT else kind) from None
+        return element
 
     def click(self, locator: Locator, timeout_s: float) -> None:
         self._guard(lambda: self._find(locator, timeout_s, clickable=True).click())
