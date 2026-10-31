@@ -121,7 +121,9 @@ value this version does not know is non-certifying: it is in the full view only.
 copy, for development variants with a known defect. The input is a plain tree (no symbolic links, no special files, no
 version-control metadata) and is never modified; the output is a new directory inside a work root that the tool created
 (`seed-copy create-work-root`), never inside a version-control checkout or the source tree, never at an existing path, and never
-under a path that names a protected corpus. The diff and a record (source and output tree digests, transformation, files changed)
+under a path that names a protected corpus. A tree is protected by a `.qa-protected` file (or directory) anywhere in it: a source
+that holds one is refused. The library holds the reserved path words and the earlier marker-file names only as SHA-256 digests
+(`PROTECTED_TOKEN_DIGESTS`, `LEGACY_MARKER_FILE_DIGESTS`), so a refusal carries a digest prefix and never the word. The diff and a record (source and output tree digests, transformation, files changed)
 are written next to the copy, and the copy carries a development-variant marker. The library has five generic transformations:
 replace a digest with a tag, remove a `securityContext` field, change a port, remove a probe, remove resource limits; each
 fails with `NO_MATCH` instead of changing nothing. There is no option to edit in place or to choose an output path.

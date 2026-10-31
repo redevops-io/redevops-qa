@@ -64,6 +64,29 @@ jobs:
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-adapter-licences.xml"
 
+  neutral-wording:
+    name: neutral wording (no tracked file carries a deny-listed term; offline, no pins; no skips, at least one test)
+    # Independent of the pinned upstreams: reads the tracked files only. The deny-list is held as digests in
+    # tools/check_neutral_wording.py; a hit is reported as file:line. Offline, read-only, no secret.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Scan the tracked files
+        run: env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 python tools/check_neutral_wording.py
+      - name: Run the guard tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q tests/test_neutral_wording.py --junitxml="$RUNNER_TEMP/junit-neutral-wording.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-neutral-wording.xml"
+
   adapter-kit:
     name: adapter kit (standard library only; fake adapters; supervisor, models, mapping; no skips, at least one test)
     # Independent of the pinned upstreams and of every framework: the kit imports none. Offline, read-only, no secret. Secret-looking

@@ -101,6 +101,14 @@ def test_the_adapter_licence_job_runs_the_checker_and_its_tests_offline_and_fail
     assert "needs" not in job and "continue-on-error" not in job
 
 
+def test_the_neutral_wording_job_scans_the_tracked_files_offline_without_pins_and_fails_on_skips():
+    job = WF["jobs"]["neutral-wording"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert "tools/check_neutral_wording.py" in steps and "tests/test_neutral_wording.py" in steps and "env -i HOME=" in steps
+    assert "tools/check_junit.py" in steps and not any("repository" in s.get("with", {}) for s in job["steps"])
+    assert "needs" not in job and "continue-on-error" not in job
+
+
 def test_the_adapter_kit_job_is_offline_pin_free_and_fails_on_skips():
     job = WF["jobs"]["adapter-kit"]
     steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
