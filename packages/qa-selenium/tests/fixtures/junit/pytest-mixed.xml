@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="1" skipped="2" tests="7" time="0.012" timestamp="2026-10-31T15:28:12.001895-04:00" hostname="recorded-host"><testcase classname="suite.test_mini" name="test_total_is_correct" file="suite/test_mini.py" line="8" time="0.000"><properties><property name="qa-assert" value="A-2" /><property name="qa-assert" value="A-3" /></properties></testcase><testcase classname="suite.test_mini" name="test_banner_text" file="suite/test_mini.py" line="14" time="0.000"><properties><property name="qa-assert" value="A-4" /></properties><failure message="AssertionError: assert 'Welcome' == 'Welcome back'&#10;  &#10;  - Welcome back&#10;  + Welcome">record_property = &lt;function record_property.&lt;locals&gt;.append_property at 0x1071509e0&gt;
+
+    def test_banner_text(record_property):
+        record_property("qa-assert", "A-4")
+&gt;       assert "Welcome" == "Welcome back"
+E       AssertionError: assert 'Welcome' == 'Welcome back'
+E         
+E         - Welcome back
+E         + Welcome
+
+suite/test_mini.py:17: AssertionError</failure></testcase><testcase classname="suite.test_mini" name="test_untagged_pass" file="suite/test_mini.py" line="19" time="0.000" /><testcase classname="suite.test_mini" name="test_error_in_fixture" file="suite/test_mini.py" line="28" time="0.000"><error message="failed on setup with &quot;RuntimeError: fixture exploded&quot;">@pytest.fixture
+    def broken():
+&gt;       raise RuntimeError("fixture exploded")
+E       RuntimeError: fixture exploded
+
+suite/test_mini.py:26: RuntimeError</error></testcase><testcase classname="suite.test_mini" name="test_skipped" file="suite/test_mini.py" line="32" time="0.000"><skipped type="pytest.skip" message="not on this platform">suite/test_mini.py:33: not on this platform</skipped></testcase><testcase classname="suite.test_mini" name="test_expected_failure" file="suite/test_mini.py" line="37" time="0.000"><skipped type="pytest.xfail" message="known bug" /></testcase><testcase classname="suite.test_mini.TestGroup" name="test_inside_class" file="suite/test_mini.py" line="43" time="0.000"><properties><property name="qa-assert" value="A-6" /></properties></testcase></testsuite></testsuites>

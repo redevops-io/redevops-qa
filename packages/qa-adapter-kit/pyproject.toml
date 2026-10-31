@@ -1,0 +1,19 @@
+[project]
+name = "redevops-qa-adapter-kit"
+version = "0.1.0.dev0"
+description = "Product-local protocol, typed models and shared supervisor for the optional ReDevOps QA execution adapters (suite and interactive)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
+# Standard library only: no framework, no pinned harness tree and no contracts package is imported by this package.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
