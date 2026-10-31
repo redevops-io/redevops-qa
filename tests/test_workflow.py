@@ -76,8 +76,8 @@ def test_every_pinned_job_verifies_the_fetched_trees_before_running_anything(job
 def test_a_temp_pin_is_refused_except_on_a_feature_branch():
     step = WF["jobs"]["pins"]["steps"][-1]
     run = step["run"]
-    assert "qa-p1/*|feature/*" in run and "--forbid-temp-pin" in run
-    assert run.index("qa-p1/*|feature/*) flag=\"\"") < run.index("*) flag=\"--forbid-temp-pin\"")
+    assert "qa-p1/*|qa-ea/*|feature/*" in run and "--forbid-temp-pin" in run
+    assert run.index("qa-p1/*|qa-ea/*|feature/*) flag=\"\"") < run.index("*) flag=\"--forbid-temp-pin\"")
 
 
 def test_the_conformance_job_fails_on_zero_tests_and_skips_a_second_time_and_the_c4_receipt_may_list_no_not_applicable_item():
@@ -90,3 +90,12 @@ def test_the_conformance_job_fails_on_zero_tests_and_skips_a_second_time_and_the
     assert job["steps"][0]["with"]["ref"] == "${{ github.event.pull_request.head.sha || github.sha }}"
     assert not any(str(x) in steps for x in ("--receipt compat-receipt", "--junit junit-conformance", "--report divergence"))
     assert "--forbid-not-applicable" in steps and '"c4"' in steps
+
+
+def test_the_adapter_licence_job_runs_the_checker_and_its_tests_offline_and_fails_on_skips():
+    job = WF["jobs"]["adapter-licences"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert "tools/check_adapter_licenses.py" in steps and "tests/test_adapter_license_matrix.py" in steps
+    assert "tools/check_junit.py" in steps and "--verify-upstream" not in steps      # offline: no download
+    assert not any("repository" in s.get("with", {}) for s in job["steps"])          # no pinned upstream is fetched
+    assert "needs" not in job and "continue-on-error" not in job
