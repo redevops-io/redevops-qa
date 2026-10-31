@@ -105,7 +105,7 @@ class PlaywrightDriver:
             self._manager = mod.sync_playwright()
             self._pw = self._manager.start()
         except Exception as exc:
-            raise DriverUnavailable("the Playwright driver is not available", reason=type(exc).__name__) from None
+            raise DriverUnavailable("the Playwright driver is not available (%s: %s)" % (type(exc).__name__, str(exc)[:400]), reason=type(exc).__name__) from None
         self._browsers: Dict[Tuple[Any, ...], Any] = {}
 
     def _browser_for(self, spec: ContextSpec) -> Any:
@@ -121,7 +121,7 @@ class PlaywrightDriver:
             try:
                 browser = self._pw.chromium.launch(**kwargs)
             except Exception as exc:
-                raise DriverUnavailable("the browser could not be started", reason=type(exc).__name__) from None
+                raise DriverUnavailable("the browser could not be started (%s: %s)" % (type(exc).__name__, str(exc)[:400]), reason=type(exc).__name__) from None
             self._browsers[key] = browser
             self.browser_version = str(browser.version)
         return browser
