@@ -309,8 +309,8 @@ def test_verify_trees_fails_on_a_missing_tree(tmp_path):
 
 def test_the_repository_pins_match_the_trees_on_disk_through_verify_trees(pins):
     pins_mod.verify_trees(pins)
-    with pytest.raises(PinMismatch, match="PIN_NOT_A_CHECKOUT"):
-        pins_mod.verify_trees(pins, require_git=True)       # the read-only snapshots used here are not checkouts
+    # The strict (checkout) form is exercised hermetically above on trees built in tmp_path; what the repository's own pins
+    # resolve to depends on where the suite runs (read-only snapshots locally, git checkouts in CI), so it is not asserted here.
 
 
 def test_the_cli_verify_trees_flag(tmp_path, capsys, monkeypatch):
