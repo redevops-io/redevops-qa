@@ -2,8 +2,8 @@
 # packages/ has its own pyproject.toml.
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests", "packages/qa-bridge/tests"]
-pythonpath = ["packages/qa-bridge/src"]
+testpaths = ["tests", "packages/qa-bridge/tests", "packages/qa-checks/tests"]
+pythonpath = ["packages/qa-bridge/src", "packages/qa-checks/src"]
 addopts = "-ra -p no:cacheprovider --strict-markers --strict-config"
 markers = [
     "check(id): conformance check (CHK1..CHK7, ADR A.2.5 item 4) a test belongs to",
