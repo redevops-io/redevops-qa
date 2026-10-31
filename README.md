@@ -11,3 +11,6 @@ Planned layout: product packages (`qa-api`, `qa-ui`, `qa-runner`,
 `runtime-contracts`, `agent-harness` and `context-runtime`; it does not vendor them.
 
 Licence: see [LICENSE.md](LICENSE.md).
+
+Configuration of the pinned upstream versions: [pins.toml](pins.toml). The contracts bridge is in
+[packages/qa-bridge](packages/qa-bridge/README.md).
