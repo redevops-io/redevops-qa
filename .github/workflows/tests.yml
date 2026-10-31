@@ -157,3 +157,54 @@ jobs:
             ${{ runner.temp }}/out/divergence-report-${{ matrix.pin_set }}.json
             ${{ runner.temp }}/out/divergence-report-${{ matrix.pin_set }}.md
           if-no-files-found: error
+
+  browser:
+    name: browser lane (real Chromium; Playwright pinned; a missing Playwright or browser fails, never skips)
+    # The only job that installs Playwright and a browser. The offline jobs above never collect tests/browser (pytest's
+    # norecursedirs and the explicit paths below). Read-only, no secret, no token input; the browser is installed in its own
+    # prefetch step with no credentials and the tests then run against a fixture served from loopback by the test itself.
+    runs-on: ubuntu-24.04
+    needs: pins
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Read the pinned commits
+        id: pins
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
+      - name: Fetch runtime-contracts at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.contracts_repo }}
+          ref: ${{ steps.pins.outputs.contracts_commit }}
+          path: ${{ steps.pins.outputs.contracts_path }}
+          persist-credentials: false
+      - name: Fetch agent-harness at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.harness_qa_repo }}
+          ref: ${{ steps.pins.outputs.harness_qa_commit }}
+          path: ${{ steps.pins.outputs.harness_qa_path }}
+          persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --verify-trees --require-git
+      - name: Install the pinned test tools and Playwright
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "playwright==1.64.1"
+      - name: Browser install (prefetch; no credentials; the tests never download anything)
+        run: |
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/pw-browsers" >> "$GITHUB_ENV"
+          PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers" python -m playwright install --with-deps chromium
+      - name: Fail unless the pinned Playwright is importable
+        run: python -c "import importlib.metadata as m, playwright.sync_api; assert m.version('playwright') == '1.64.1', m.version('playwright')"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the browser lane (scrubbed environment; only tests marked browser)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" \
+            python -m pytest -q -m browser packages/qa-playwright/tests/browser --junitxml="$RUNNER_TEMP/junit-browser.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-browser.xml"

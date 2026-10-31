@@ -2,11 +2,22 @@
 # packages/ has its own pyproject.toml.
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests", "packages/qa-bridge/tests"]
-pythonpath = ["packages/qa-bridge/src"]
+testpaths = [
+    "tests",
+    "packages/qa-bridge/tests",
+    "packages/qa-playwright/tests",
+]
+pythonpath = [
+    "packages/qa-bridge/src",
+    "packages/qa-playwright/src",
+]
+# The real-browser lane (tests/browser in the browser-backed packages) is never collected by the offline suite: it needs
+# Playwright and Chromium and runs only in its own CI job, which names those directories explicitly.
+norecursedirs = ["browser", ".*", "build", "dist", "*.egg", "venv", "__pycache__"]
 addopts = "-ra -p no:cacheprovider --strict-markers --strict-config"
 markers = [
     "check(id): conformance check (CHK1..CHK7, ADR A.2.5 item 4) a test belongs to",
     "not_applicable: a conformance item declared not applicable at this pin set (a receipt category, never a skip)",
+    "browser: needs a real Chromium and the Playwright package; collected only by the browser CI job, never by the offline suite",
 ]
 filterwarnings = ["error"]
