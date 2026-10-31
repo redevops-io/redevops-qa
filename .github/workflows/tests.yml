@@ -34,12 +34,58 @@ jobs:
         run: |
           branch="${HEAD_REF:-$REF_NAME}"
           case "$branch" in
-            qa-p1/*|feature/*) flag="" ;;
+            qa-p1/*|qa-ea/*|feature/*) flag="" ;;
             *) flag="--forbid-temp-pin" ;;
           esac
           for set in c3 c4; do
             PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --pin-set "$set" $flag
           done
+
+  adapter-licences:
+    name: adapter licence matrix (unknown or incompatible redistributables fail; technical triage, not legal advice)
+    # Offline and independent of the pinned upstreams: reads third_party/adapter-license-matrix.yaml and the install lists of the
+    # packages and workflows. No download, no secret.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Check the matrix against the policy and against what the repository installs
+        run: env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 python tools/check_adapter_licenses.py
+      - name: Run the matrix tests (scrubbed environment)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q tests/test_adapter_license_matrix.py --junitxml="$RUNNER_TEMP/junit-adapter-licences.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-adapter-licences.xml"
+
+  adapter-kit:
+    name: adapter kit (standard library only; fake adapters; supervisor, models, mapping; no skips, at least one test)
+    # Independent of the pinned upstreams and of every framework: the kit imports none. Offline, read-only, no secret. Secret-looking
+    # values in the tests are generated at run time.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the kit tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q packages/qa-adapter-kit/tests --junitxml="$RUNNER_TEMP/junit-adapter-kit.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-adapter-kit.xml"
 
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
@@ -208,3 +254,210 @@ jobs:
             python -m pytest -q -m browser packages/qa-playwright/tests/browser packages/qa-egress/tests/browser --junitxml="$RUNNER_TEMP/junit-browser.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-browser.xml"
+
+  selenium-offline:
+    name: "selenium adapter (offline - fake browser, recorded pytest JUnit reports, real pytest under the supervisor; no Selenium installed)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the offline Selenium adapter tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q packages/qa-selenium/tests --junitxml="$RUNNER_TEMP/junit-selenium-offline.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-selenium-offline.xml"
+
+  selenium-browser:
+    name: selenium browser lane (real Chrome and ChromeDriver; Selenium pinned; NOT a required check until proven; a missing dependency fails, never skips)
+    # The only job that installs Selenium. It needs the runner's Chrome and ChromeDriver and never downloads a browser or a driver
+    # (the adapter passes the driver path explicitly, so Selenium Manager is not used). Read-only, no secret. The tests run against a
+    # page the test serves from loopback.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned test tools and Selenium
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "selenium==4.52.0"
+      - name: Locate the runner's Chrome and ChromeDriver (fail when either is missing)
+        run: |
+          chrome="$(command -v google-chrome || true)"
+          driver=""
+          if [ -n "${CHROMEWEBDRIVER:-}" ] && [ -x "$CHROMEWEBDRIVER/chromedriver" ]; then driver="$CHROMEWEBDRIVER/chromedriver"; fi
+          if [ -z "$driver" ]; then driver="$(command -v chromedriver || true)"; fi
+          if [ ! -x "$chrome" ] || [ ! -x "$driver" ]; then echo "FAIL: Chrome ($chrome) or ChromeDriver ($driver) is missing on this runner"; exit 1; fi
+          "$chrome" --version
+          "$driver" --version
+          echo "QA_CHROME_BINARY=$chrome" >> "$GITHUB_ENV"
+          echo "QA_CHROMEDRIVER_PATH=$driver" >> "$GITHUB_ENV"
+      - name: Fail unless the pinned Selenium is importable
+        run: python -c "import importlib.metadata as m, selenium; assert m.version('selenium') == '4.52.0', m.version('selenium')"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the browser lane (scrubbed environment; only tests marked browser)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            QA_CHROME_BINARY="$QA_CHROME_BINARY" QA_CHROMEDRIVER_PATH="$QA_CHROMEDRIVER_PATH" \
+            python -m pytest -q -m browser packages/qa-selenium/tests/browser --junitxml="$RUNNER_TEMP/junit-selenium-browser.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-selenium-browser.xml"
+
+  robot-offline:
+    name: "robot adapter (offline - recorded output.xml from real runs, allowlist, strict import; no Robot Framework installed)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the offline Robot adapter tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q packages/qa-robot/tests --junitxml="$RUNNER_TEMP/junit-robot-offline.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-offline.xml"
+
+  robot-real:
+    name: "robot real lane (Robot Framework 7.5 pinned; NOT a required check until proven; a missing Robot Framework fails, never skips)"
+    # The only job that installs Robot Framework. No browser, no emulator, no secret; read-only. The suites are written by the tests.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned test tools and Robot Framework
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "robotframework==7.5"
+      - name: Fail unless the pinned Robot Framework is importable
+        run: python -c "import importlib.metadata as m, robot; assert m.version('robotframework') == '7.5', m.version('robotframework')"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the real lane (scrubbed environment; only tests marked robot_real)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q -m robot_real packages/qa-robot/tests/real --junitxml="$RUNNER_TEMP/junit-robot-real.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-real.xml"
+
+  appium-offline:
+    name: "appium adapters (offline - fake device, capabilities, server policy, iOS reports unavailable; no Appium installed)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the offline Appium adapter tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q packages/qa-appium/tests --junitxml="$RUNNER_TEMP/junit-appium-offline.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-appium-offline.xml"
+
+  appium-server:
+    name: "appium server lane (real Appium 3.9.0 server and client 6.1.1, no device; NOT a required check until proven; a missing dependency fails, never skips)"
+    # Real server and client, no Android SDK and no device: shows the client talks to the server, the UiAutomator2 driver accepts the
+    # adapter's capabilities and a worker without a device is reported as unavailable. Read-only, no secret. The server listens on loopback only.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned test tools and Appium Python client
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "Appium-Python-Client==6.1.1"
+      - name: Install the pinned Appium server and the UiAutomator2 driver (no script runs; nothing else is downloaded)
+        run: |
+          npm install --prefix "$RUNNER_TEMP/appium" --ignore-scripts --no-audit --no-fund appium@3.9.0
+          mkdir -p "$RUNNER_TEMP/appium-home"
+          env -i HOME="$RUNNER_TEMP" PATH="$PATH" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" driver install uiautomator2@8.7.3
+      - name: Start the Appium server on loopback without any Android SDK variable
+        run: |
+          nohup env -i HOME="$RUNNER_TEMP" PATH="$PATH" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" --address 127.0.0.1 --port 4723 --log-level warn > "$RUNNER_TEMP/appium-server.log" 2>&1 &
+          python - <<'PY'
+          import time, urllib.request
+          for _ in range(60):
+              try:
+                  urllib.request.urlopen("http://127.0.0.1:4723/status", timeout=2).read()
+                  raise SystemExit(0)
+              except SystemExit:
+                  raise
+              except Exception:
+                  time.sleep(1)
+          raise SystemExit("FAIL: the Appium server did not answer within 60 seconds")
+          PY
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the server lane (scrubbed environment; only tests marked appium_server)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 QA_APPIUM_URL=http://127.0.0.1:4723 \
+            python -m pytest -q -m appium_server packages/qa-appium/tests/real --junitxml="$RUNNER_TEMP/junit-appium-server.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-appium-server.xml"
+      - name: Server log (diagnostics)
+        if: always()
+        run: tail -n 50 "$RUNNER_TEMP/appium-server.log" || true
+
+  appium-android:
+    name: "appium android lane (real emulator or device; EXPECTED RED on runners without one; NOT a required check; a missing emulator fails, never skips)"
+    # Needs an Android emulator or device that the worker's operator provisioned under Google's terms. This job does not install the Android SDK,
+    # accept a licence, download a system image or start an emulator, and it has not been shown to pass. It fails when no device is attached.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require an attached Android emulator or device (fail when there is none)
+        run: |
+          adb="${ANDROID_HOME:-/nonexistent}/platform-tools/adb"
+          if [ ! -x "$adb" ]; then echo "FAIL: no adb at $adb; this lane needs a worker with an operator-provisioned Android SDK"; exit 1; fi
+          "$adb" start-server
+          if ! "$adb" devices | tail -n +2 | grep -q "device$"; then echo "FAIL: no Android emulator or device is attached to this worker"; exit 1; fi
+      - name: Install the pinned test tools and Appium Python client
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "Appium-Python-Client==6.1.1"
+      - name: Install the pinned Appium server and the UiAutomator2 driver (no script runs; nothing else is downloaded)
+        run: |
+          npm install --prefix "$RUNNER_TEMP/appium" --ignore-scripts --no-audit --no-fund appium@3.9.0
+          mkdir -p "$RUNNER_TEMP/appium-home"
+          env -i HOME="$RUNNER_TEMP" PATH="$PATH" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" driver install uiautomator2@8.7.3
+      - name: Start the Appium server on loopback
+        run: |
+          nohup env -i HOME="$RUNNER_TEMP" PATH="$PATH" ANDROID_HOME="$ANDROID_HOME" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" --address 127.0.0.1 --port 4723 --log-level warn > "$RUNNER_TEMP/appium-server.log" 2>&1 &
+          sleep 10
+      - name: Run the Android lane (scrubbed environment; only tests marked appium_android)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 QA_APPIUM_URL=http://127.0.0.1:4723 \
+            python -m pytest -q -m appium_android packages/qa-appium/tests/real --junitxml="$RUNNER_TEMP/junit-appium-android.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-appium-android.xml"
