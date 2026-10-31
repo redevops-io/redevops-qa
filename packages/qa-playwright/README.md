@@ -89,6 +89,18 @@ adapter = PlaywrightAdapter(PlaywrightDriver(), blobs=blob_sink, redactor=redact
 `PlaywrightDriver()` raises `DriverUnavailable` when Playwright is not installed; there is no fallback and the browser is
 never downloaded at run time.
 
+## Threads
+
+Playwright's sync API refuses to start on a thread that already runs an asyncio loop, and its objects belong to the thread that
+started it. `PlaywrightDriver` therefore owns one worker thread (no loop; started on first use; a daemon; joined by `close`) and
+runs every Playwright call on it, including start-up, launch, every page call, tracing, screenshots and teardown. The adapter holds a
+`ThreadedSession` that hands each call to the worker, so the driver can be constructed and used from any thread or loop. A call that
+does not return within its bound (the call's own timeout plus a slack, or `call_timeout_s`) is a `TIMEOUT` and makes the worker
+unusable (`CRASHED` afterwards); a worker that ends is `CRASHED`; a call after `close` is `SESSION_CLOSED` and a new session is
+`DriverUnavailable`. If `close` cannot end a stuck worker it returns after `join_timeout_s` and `leaked_worker` is true. The
+bounds are wall-clock bounds on the hand-off; the adapter's own deadlines stay on the injected clock. Exception text from
+Playwright is classified and dropped on the worker, as before.
+
 ## Install and pins
 
 `pip install "redevops-qa-playwright[browser]"` pulls `playwright==1.64.1`; the browser itself comes from a separate, credential-free

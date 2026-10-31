@@ -9,6 +9,12 @@ This file is exercised only by the real-browser lane (``tests/browser``), which 
 Chromium installed. It maps Playwright's behaviour onto the driver protocol and nothing else: every decision (uniqueness,
 actionability deadlines, redaction, hashing, error codes) lives in ``adapter.py`` and is tested offline.
 
+**Thread ownership.** Playwright's sync API cannot start on a thread that runs an asyncio loop, and its objects belong to the
+thread that started it. ``PlaywrightDriver`` therefore owns one worker thread (no loop, started on first use, joined by
+``close``) and runs every Playwright call on it; ``ThreadedSession`` is the proxy the adapter holds. Callers on any thread or
+loop get results or the typed errors; a call that does not return in time is a ``TIMEOUT`` and makes the worker unusable
+(``CRASHED`` afterwards), a worker that ends is ``CRASHED``, and a call after ``close`` is ``SESSION_CLOSED``.
+
 Page text never leaves this module in an exception message: a failure is classified into a :class:`FaultKind` from the
 exception's type and text and the text is then dropped.
 """
@@ -16,10 +22,15 @@ from __future__ import annotations
 
 import importlib
 import os
+import queue
 import re
 import tempfile
+import threading
+import weakref
 from collections import deque
-from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeout
+from typing import Any, Callable, Deque, Dict, List, Optional, Sequence, Tuple
 
 from .driver import (CloseReport, ConsoleEvent, ContextSpec, DriverFault, ElementInfo, ElementQuery, ElementReading,
                      EventLog, FaultKind, NetworkEvent, PageMeta, RequestInfo)
@@ -89,24 +100,148 @@ def classify_error(exc: BaseException) -> DriverFault:
     return DriverFault(FaultKind.OTHER)
 
 
+class _Worker:
+    """One dedicated thread that owns every Playwright object.
+
+    The Playwright sync API refuses to start on a thread that already runs an asyncio loop, and its objects are tied to the
+    thread that started it (it dispatches through greenlets). So the driver never touches Playwright from a caller's thread: a
+    job (a callable) goes through a queue to this thread, which has no running loop, and the result or the exception comes back
+    to the caller, whichever thread or loop it is on. The thread starts on first use, is a daemon (a wedged browser cannot keep
+    the process alive), is joined by ``shutdown`` and is never used again after it ends or after a call timed out.
+    """
+
+    NAME = "qa-playwright-worker"
+
+    def __init__(self, join_timeout_s: float) -> None:
+        self._jobs: "queue.Queue[Optional[Tuple[Callable[[], Any], Future]]]" = queue.Queue()
+        self._lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
+        self._join_timeout_s = join_timeout_s
+        self.closed = False          # shutdown was requested: no new job is accepted
+        self.dead = False            # the thread has ended
+        self.wedged = False          # a call did not return in time: the worker's state is unknown
+        self.leaked = False          # shutdown could not join the thread
+
+    @property
+    def unusable(self) -> bool:
+        return self.closed or self.dead or self.wedged
+
+    def on_worker(self) -> bool:
+        return self._thread is not None and threading.current_thread() is self._thread
+
+    def _run(self) -> None:
+        try:
+            while True:
+                item = self._jobs.get()
+                if item is None:
+                    return
+                fn, future = item
+                if not future.set_running_or_notify_cancel():
+                    continue
+                try:
+                    future.set_result(fn())
+                except Exception as exc:
+                    future.set_exception(exc)
+                except BaseException:                     # the thread is being torn down: report, then end
+                    future.set_exception(DriverFault(FaultKind.CRASHED))
+                    return
+                del item, fn, future                      # an idle worker must not keep the last job (and its driver) alive
+        finally:
+            self.dead = True
+            while True:                                    # nothing queued behind a dead worker waits for ever
+                try:
+                    item = self._jobs.get_nowait()
+                except queue.Empty:
+                    break
+                if item is not None and item[1].set_running_or_notify_cancel():
+                    item[1].set_exception(DriverFault(FaultKind.CRASHED))
+
+    def _ensure(self) -> None:
+        with self._lock:
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._run, name=self.NAME, daemon=True)
+                self._thread.start()
+
+    def call(self, fn: Callable[..., Any], *args: Any, timeout_s: float) -> Any:
+        """Run ``fn(*args)`` on the worker and return its result. A call made from the worker itself runs inline (an event
+        handler that calls back cannot deadlock). Raises ``DriverFault`` ``SESSION_CLOSED`` after shutdown, ``CRASHED`` if the
+        worker ended or is wedged, ``TIMEOUT`` if the call did not return within ``timeout_s``."""
+        if self.on_worker():
+            return fn(*args)
+        if self.closed:
+            raise DriverFault(FaultKind.SESSION_CLOSED)
+        if self.dead or self.wedged:
+            raise DriverFault(FaultKind.CRASHED)
+        self._ensure()
+        future: Future = Future()
+        self._jobs.put((lambda: fn(*args), future))
+        try:
+            return future.result(timeout=timeout_s)
+        except FutureTimeout:
+            self.wedged = True
+            future.cancel()
+            raise DriverFault(FaultKind.TIMEOUT) from None
+
+    def shutdown(self) -> None:
+        """Stop accepting jobs, let the worker end and join it. A worker that does not end in time is recorded as leaked."""
+        with self._lock:
+            if self.closed:
+                return
+            self.closed = True
+            thread = self._thread
+        if thread is None:
+            self.dead = True
+            return
+        self._jobs.put(None)
+        thread.join(self._join_timeout_s)
+        if thread.is_alive():
+            self.leaked = True
+
+
 class PlaywrightDriver:
-    """A :class:`~qa_playwright.driver.BrowserDriver` for Chromium."""
+    """A :class:`~qa_playwright.driver.BrowserDriver` for Chromium. Safe to construct and use from any thread, including one that
+    runs an asyncio loop: all Playwright work happens on its own worker thread (see :class:`_Worker`).
+
+    ``call_timeout_s`` bounds every call that has no timeout of its own, ``slack_s`` is added to a call that has one (so
+    Playwright's own timeout fires first), ``start_timeout_s`` bounds starting Playwright and launching a browser, and
+    ``join_timeout_s`` bounds ``close``. These are wall-clock bounds on a thread hand-off; the adapter's deadlines stay on the
+    injected clock."""
 
     browser_name = "chromium"
 
     def __init__(self, *, headless: bool = True, executable_path: Optional[str] = None, chromium_sandbox: bool = False,
-                 module: Any = None) -> None:
+                 module: Any = None, call_timeout_s: float = 60.0, slack_s: float = 15.0, start_timeout_s: float = 60.0,
+                 join_timeout_s: float = 15.0) -> None:
         self.browser_version = "unknown"
         self._headless = headless
         self._executable_path = executable_path
         self._chromium_sandbox = chromium_sandbox
+        self._module = module
+        self._call_timeout_s = call_timeout_s
+        self._slack_s = slack_s
+        self._start_timeout_s = start_timeout_s
+        self._worker = _Worker(join_timeout_s)
+        weakref.finalize(self, self._worker.shutdown)     # a driver dropped without close() still ends its thread
+        self._browsers: Dict[Tuple[Any, ...], Any] = {}
+        self._manager: Any = None
+        self._pw: Any = None
         try:
-            mod = module if module is not None else importlib.import_module("playwright.sync_api")
+            self._worker.call(self._start, timeout_s=start_timeout_s)
+        except DriverUnavailable:
+            self._worker.shutdown()
+            raise
+        except Exception as exc:                  # a fault of the worker itself (crash, timeout)
+            self._worker.shutdown()
+            raise DriverUnavailable("the Playwright driver is not available", reason=type(exc).__name__) from None
+
+    # -- everything below this line that touches Playwright runs on the worker thread -----------------------------------
+    def _start(self) -> None:
+        try:
+            mod = self._module if self._module is not None else importlib.import_module("playwright.sync_api")
             self._manager = mod.sync_playwright()
             self._pw = self._manager.start()
         except Exception as exc:
             raise DriverUnavailable("the Playwright driver is not available", reason=type(exc).__name__) from None
-        self._browsers: Dict[Tuple[Any, ...], Any] = {}
 
     def _browser_for(self, spec: ContextSpec) -> Any:
         key = (tuple(spec.launch_args), spec.proxy)
@@ -126,10 +261,10 @@ class PlaywrightDriver:
             self.browser_version = str(browser.version)
         return browser
 
-    def new_session(self, spec: ContextSpec) -> "PlaywrightSession":
+    def _open(self, spec: ContextSpec) -> "PlaywrightSession":
         return PlaywrightSession(self._browser_for(spec), spec)
 
-    def close(self) -> None:
+    def _teardown(self) -> None:
         for browser in list(self._browsers.values()):
             try:
                 browser.close()
@@ -137,9 +272,110 @@ class PlaywrightDriver:
                 pass
         self._browsers.clear()
         try:
-            self._manager.stop()
+            if self._manager is not None:
+                self._manager.stop()
         except Exception:
             pass
+        self._manager = self._pw = None
+
+    # -- the public surface: callable from any thread ---------------------------------------------------------------------
+    @property
+    def leaked_worker(self) -> bool:
+        """True if ``close`` could not end the worker thread (a browser call was stuck)."""
+        return self._worker.leaked
+
+    def new_session(self, spec: ContextSpec) -> "ThreadedSession":
+        if self._worker.closed:
+            raise DriverUnavailable("the Playwright driver is closed")
+        try:
+            inner = self._worker.call(self._open, spec, timeout_s=self._start_timeout_s)
+        except DriverFault as fault:
+            if fault.kind in (FaultKind.SESSION_CLOSED, FaultKind.CRASHED, FaultKind.TIMEOUT):
+                raise DriverUnavailable("the Playwright driver cannot open a session", reason=fault.kind.value) from None
+            raise
+        return ThreadedSession(self._worker, inner, self._call_timeout_s, self._slack_s)
+
+    def close(self) -> None:
+        """Close the browsers, stop Playwright and join the worker thread. Idempotent; never raises. A driver that is dropped
+        without ``close`` still ends its worker thread when it is collected, but only ``close`` stops the browsers."""
+        if self._worker.closed:
+            return
+        if not self._worker.unusable:
+            try:
+                self._worker.call(self._teardown, timeout_s=self._call_timeout_s)
+            except Exception:
+                pass
+        self._worker.shutdown()
+
+
+class ThreadedSession:
+    """The session the adapter sees: every method hands the matching call of the worker-confined :class:`PlaywrightSession` to
+    the worker thread. Nothing of Playwright is touched on the caller's thread."""
+
+    def __init__(self, worker: _Worker, inner: "PlaywrightSession", call_timeout_s: float, slack_s: float) -> None:
+        self._w = worker
+        self._inner = inner
+        self._t = call_timeout_s
+        self._slack = slack_s
+
+    def _run(self, fn: Callable[..., Any], *args: Any, ms: Optional[int] = None) -> Any:
+        timeout = self._t if ms is None else ms / 1000.0 + self._slack
+        return self._w.call(fn, *args, timeout_s=timeout)
+
+    def is_closed(self) -> bool:
+        return self._inner.is_closed() or self._w.unusable
+
+    def current_url(self) -> str:
+        return self._run(self._inner.current_url)
+
+    def goto(self, url: str, timeout_ms: int) -> None:
+        self._run(self._inner.goto, url, timeout_ms, ms=timeout_ms)
+
+    def settle(self, ms: int) -> None:
+        self._run(self._inner.settle, ms, ms=ms)
+
+    def query(self, query: ElementQuery) -> Sequence[ElementInfo]:
+        return self._run(self._inner.query, query)
+
+    def inspect(self, ref: str) -> ElementInfo:
+        return self._run(self._inner.inspect, ref)
+
+    def read(self, ref: str) -> ElementReading:
+        return self._run(self._inner.read, ref)
+
+    def perform(self, ref: str, kind: str, value: Optional[str], timeout_ms: int) -> None:
+        self._run(self._inner.perform, ref, kind, value, timeout_ms, ms=timeout_ms)
+
+    def page_meta(self) -> PageMeta:
+        return self._run(self._inner.page_meta)
+
+    def accessibility_snapshot(self) -> str:
+        return self._run(self._inner.accessibility_snapshot)
+
+    def screenshot(self) -> bytes:
+        return self._run(self._inner.screenshot)
+
+    def console_log(self) -> EventLog:
+        return self._run(self._inner.console_log)
+
+    def network_log(self) -> EventLog:
+        return self._run(self._inner.network_log)
+
+    def export_trace(self) -> bytes:
+        return self._run(self._inner.export_trace)
+
+    def reset(self) -> None:
+        self._run(self._inner.reset)
+
+    def close(self) -> CloseReport:
+        if self._inner.is_closed():
+            return CloseReport(released=("context", "page"), leaked=())
+        if self._w.unusable:                       # the worker is gone: the context cannot be confirmed closed
+            return CloseReport(released=(), leaked=("context", "page"))
+        try:
+            return self._run(self._inner.close)
+        except DriverFault:
+            return CloseReport(released=(), leaked=("context", "page"))
 
 
 class PlaywrightSession:
