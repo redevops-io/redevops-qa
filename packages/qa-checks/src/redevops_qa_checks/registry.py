@@ -40,12 +40,13 @@ from .program_input import ProgramInput
 PACKAGE_ROOT = Path(__file__).resolve().parent
 FRAMEWORK_FILES = ("canonical.py", "manifests.py", "program_input.py")
 #: further framework files a program may declare in ``FRAMEWORK`` (hashed with it; not part of the purity lint, they read files)
-HASHED_FRAMEWORK = ("image_store.py", "tierk/argv.py", "tierk/drivers.py", "tierk/collectors.py")
+HASHED_FRAMEWORK = ("image_store.py", "tierk/argv.py", "tierk/drivers.py", "tierk/collectors.py", "tierk/probes.py", "tierk/subnets.py",
+                    "tierk/connectivity.py")
 ID_PATTERN = re.compile(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*")
 VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 #: modules a program (and its support files) may import
-SUPPORT_MODULES = frozenset({"_common", "_image", "_cluster"})
+SUPPORT_MODULES = frozenset({"_common", "_image", "_cluster", "_connectivity"})
 ALLOWED_IMPORTS = frozenset({"__future__", "re", "fractions", "ipaddress", "typing", "collections", "itertools", "math"})
 FORBIDDEN_CALLS = frozenset({"open", "exec", "eval", "compile", "__import__", "globals", "locals", "vars", "getattr", "setattr",
                              "delattr", "breakpoint", "input", "memoryview"})
@@ -257,7 +258,8 @@ def refuse_expected(payload: Any, where: str = "check input") -> None:
 BUILTIN_MODULES = ("image_references", "image_name_map", "security_context", "resources", "env_and_secret_refs",
                    "gateway_routes", "network_policies", "kyverno_policies", "probes", "cross_references", "structure",
                    "image_user_runtime", "image_ports_health", "image_labels_base", "image_layers", "image_attestations",
-                   "cluster_dry_run", "cluster_admission", "cluster_gateway_status", "cluster_policy_status")
+                   "cluster_dry_run", "cluster_admission", "cluster_gateway_status", "cluster_policy_status",
+                   "connectivity_traffic", "connectivity_policy_state")
 
 
 def builtin_registry(extra_modules: Iterable[str] = ()) -> ProgramRegistry:

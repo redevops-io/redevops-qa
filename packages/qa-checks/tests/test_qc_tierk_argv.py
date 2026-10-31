@@ -19,7 +19,10 @@ ALLOWED = [
     (["create", "namespace", "qa-probe-ab12"], "create-probe-namespace", True),
     (["apply", "-f", "-", "-n", "qa-probe-ab12"], "apply-probe", True),
     (["delete", "namespace", "qa-probe-ab12", "--wait=true", "--timeout=60s"], "delete-probe-namespace", True),
-    (["logs", "probe-a", "-n", "qa-probe-ab12"], "probe-logs", False),
+    (["logs", "qa-probe-0123456789ab", "-n", "qa-probe-ab12"], "probe-logs", False),
+    (["logs", "qa-probe-0123456789ab", "-n", "demo"], "probe-logs", False),
+    (["apply", "-f", "-", "-n", "demo"], "apply-probe", True),
+    (["delete", "pod", "qa-probe-0123456789ab", "-n", "demo", "--wait=true", "--timeout=60s"], "delete-probe-pod", True),
 ]
 
 
@@ -44,8 +47,13 @@ REFUSED = [
     ["rollout", "restart", "deployment/x"], ["replace", "-f", "-"], ["set", "image", "x"], ["drain", "node"], ["cordon", "node"], ["taint", "node"],
     ["apply", "-f", "-"], ["apply", "-f", "manifest.yaml"], ["apply", "--dry-run=client", "-f", "-", "-o", "json"],
     ["apply", "--dry-run=server", "-f", "manifest.yaml", "-o", "json"], ["apply", "--dry-run=server", "--validate=strict", "-f", "-", "-o", "yaml"],
-    ["apply", "--dry-run=server", "--validate=strict", "-f", "-", "-o", "json", "--force"], ["apply", "-f", "-", "-n", "demo"],
-    ["apply", "-f", "-", "-n", "qa-probe-"], ["apply", "-f", "-", "-n", "kube-system"], ["apply", "-k", "dir"], ["apply", "--server-side", "-f", "-"],
+    ["apply", "--dry-run=server", "--validate=strict", "-f", "-", "-o", "json", "--force"], ["apply", "-f", "-", "-n", "qa-probe-"], ["apply", "-f", "-", "-n", "kube-system"], ["apply", "-f", "-", "-n", "default"],
+    ["apply", "-f", "-", "-n", "kyverno"], ["apply", "-f", "-", "-n", "cilium-secrets"], ["apply", "-f", "-", "-n", "qa-disposable-system"],
+    ["apply", "-f", "-", "-n", "kube-public"], ["apply", "-f", "-", "-n", "envoy-gateway-system"], ["apply", "-f", "-", "-n", "metallb-system"],
+    ["delete", "pod", "web-0", "-n", "demo", "--wait=true", "--timeout=60s"], ["delete", "pod", "qa-probe-xyz", "-n", "demo", "--wait=true", "--timeout=60s"],
+    ["delete", "pod", "qa-probe-0123456789ab", "-n", "kube-system", "--wait=true", "--timeout=60s"],
+    ["delete", "pod", "qa-probe-0123456789ab", "-n", "demo"], ["delete", "pod", "qa-probe-0123456789ab", "-n", "demo", "--force"],
+    ["logs", "web-0", "-n", "demo"], ["logs", "qa-probe-0123456789ab", "-n", "kube-system"], ["apply", "-k", "dir"], ["apply", "--server-side", "-f", "-"],
     ["create", "namespace", "demo"], ["create", "namespace", "qa-probe-"], ["create", "namespace", "qa-probe-x", "--dry-run=client"],
     ["create", "deployment", "x", "--image=y"], ["create", "secret", "generic", "x"], ["create", "clusterrolebinding", "x"],
     ["delete", "pod", "x", "-n", "qa-probe-a"], ["delete", "namespace", "default", "--wait=true", "--timeout=60s"], ["delete", "namespace", "kube-system"],
@@ -90,7 +98,12 @@ def test_the_refusal_names_the_rule_not_just_a_message():
 
 def test_only_the_probe_rules_can_persist_anything():
     persisting = {d.rule for args, _r, m in ALLOWED if m for d in [A.validate_argv(args)]}
-    assert persisting == {"create-probe-namespace", "apply-probe", "delete-probe-namespace"}
+    assert persisting == {"create-probe-namespace", "apply-probe", "delete-probe-namespace", "delete-probe-pod"}
     for args, rule, mutating in ALLOWED:
         if mutating:
-            assert A.validate_argv(args).namespace.startswith(A.PROBE_NAMESPACE_PREFIX)
+            ns = A.validate_argv(args).namespace
+            assert ns not in A.SYSTEM_NAMESPACES and not ns.startswith(A.SYSTEM_NAMESPACE_PREFIXES)
+            if rule in ("create-probe-namespace", "delete-probe-namespace"):
+                assert ns.startswith(A.PROBE_NAMESPACE_PREFIX)
+            if rule == "delete-probe-pod":
+                assert A.PROBE_POD_PATTERN.fullmatch(args[2])

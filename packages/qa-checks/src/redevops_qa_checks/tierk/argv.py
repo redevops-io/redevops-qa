@@ -4,8 +4,9 @@
 A command is allowed only if it has exactly the shape of one rule below. Rules are structural (fixed positions, fixed flags,
 validated names); nothing is matched by prefix and no flag is passed through. In particular there is no way to select another
 kubeconfig, context, server, user, token, proxy or impersonation: those are fixed by the runner. Secrets are not readable.
-Server-side dry-run persists nothing. The only commands that persist anything are the probe rules, which are confined to
-namespaces that start with ``qa-probe-`` and are refused unless the session was opened with probe mutation enabled.
+Server-side dry-run persists nothing. The only commands that persist anything are the probe rules: a probe pod is created in a
+non-system namespace and deleted by its fixed name pattern, a probe namespace must start with ``qa-probe-``; all are refused
+unless the session was opened with probe mutation enabled and a policy that accepts only the fixed probe specifications.
 """
 from __future__ import annotations
 
@@ -16,6 +17,10 @@ from typing import Optional, Sequence, Tuple
 from ..errors import PolicyBlocked
 
 PROBE_NAMESPACE_PREFIX = "qa-probe-"
+PROBE_POD_PATTERN = re.compile(r"qa-probe-[0-9a-f]{12}")
+#: namespaces that hold the cluster's own components or the tool's marker: no probe workload is ever placed in them
+SYSTEM_NAMESPACES = frozenset({"default", "qa-disposable-system"})
+SYSTEM_NAMESPACE_PREFIXES = ("kube-", "cilium", "kyverno", "metallb", "envoy-gateway", "cert-manager", "external-secrets")
 MARKER_NAMESPACE = "qa-disposable-system"
 MARKER_NAME = "qa-disposable-marker"
 MAX_ARGS = 14
@@ -68,6 +73,14 @@ def _probe_ns(value: str, args: Sequence[str]) -> str:
     _ns(value, args)
     if not value.startswith(PROBE_NAMESPACE_PREFIX) or len(value) <= len(PROBE_NAMESPACE_PREFIX):
         raise _refuse("ARGV_NAMESPACE_NOT_PROBE", "persisting commands are confined to probe namespaces", args)
+    return value
+
+
+def _workload_ns(value: str, args: Sequence[str]) -> str:
+    """The namespace of a probe pod: any ordinary namespace of the disposable cluster, never a system namespace."""
+    _ns(value, args)
+    if value in SYSTEM_NAMESPACES or value.startswith(SYSTEM_NAMESPACE_PREFIXES):
+        raise _refuse("ARGV_NAMESPACE_SYSTEM", "probe workloads are never placed in a system namespace", args)
     return value
 
 
@@ -135,14 +148,17 @@ def validate_argv(args: Sequence[str]) -> ArgvDecision:
         if list(args) == ["apply", "--dry-run=server", "--validate=strict", "-f", "-", "-o", "json"]:
             return ArgvDecision("apply-dry-run", False, True)
         if len(args) == 5 and args[1:3] == ["-f", "-"] and args[3] == "-n":
-            return ArgvDecision("apply-probe", True, True, _probe_ns(args[4], args))
+            return ArgvDecision("apply-probe", True, True, _workload_ns(args[4], args))
     elif verb == "create":
         if len(args) == 3 and args[1] == "namespace":
             return ArgvDecision("create-probe-namespace", True, False, _probe_ns(args[2], args))
     elif verb == "delete":
         if len(args) == 5 and args[1] == "namespace" and args[3:] == ["--wait=true", "--timeout=60s"]:
             return ArgvDecision("delete-probe-namespace", True, False, _probe_ns(args[2], args))
+        if len(args) == 7 and args[1] == "pod" and args[3] == "-n" and args[5:] == ["--wait=true", "--timeout=60s"] \
+                and PROBE_POD_PATTERN.fullmatch(args[2]):
+            return ArgvDecision("delete-probe-pod", True, False, _workload_ns(args[4], args))
     elif verb == "logs":
-        if len(args) == 4 and args[2] == "-n" and _NAME.fullmatch(args[1]):
-            return ArgvDecision("probe-logs", False, False, _probe_ns(args[3], args))
+        if len(args) == 4 and args[2] == "-n" and PROBE_POD_PATTERN.fullmatch(args[1]):
+            return ArgvDecision("probe-logs", False, False, _workload_ns(args[3], args))
     raise _refuse("ARGV_NOT_ALLOWED", "this kubectl command is not on the allow-list", args)

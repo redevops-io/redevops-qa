@@ -18,6 +18,7 @@ NOT_EXPRESSIBLE: Mapping[str, str] = {
     "secrets.external-sync": "the external secrets controller is not running (CRD-only)",
     "policy.background-scan": "the background, cleanup and reports controllers are disabled",
     "traffic.name-based-unreachable": "without an internet a name that fails to resolve looks the same as a policy block; use an IP-literal probe",
+    "traffic.udp-reachability": "a UDP probe cannot tell a filtered packet from a silent listener; only TCP probes exist",
     "persistence.volume-write-semantics": "storage classes differ from the target platform; ownership on the local volume was not established",
 }
 

@@ -83,6 +83,30 @@ Tier K programs (`cluster.dry-run`, `cluster.admission`, `cluster.gateway-status
 are registered like any other program; their hash also covers the allow-list, the drivers and the collectors. A tier K subject
 must name a tier K program and an offline subject must not.
 
+## Connectivity (`tierk.connectivity`, `tierk.probes`, `tierk.subnets`, `standin`)
+
+A check declares its probes in a reference document (`kind: ConnectivityMatrix`): a source namespace and workload labels, a target
+(an IP literal, or a workload whose pod IP is read from the cluster and then used as a literal), a TCP port, an optional control
+namespace, a range class. Names are never probed; targets must be inside the cluster's pod and service networks or the synthetic
+plan; metadata-address traffic and UDP are refused as not expressible; the count and the timeout are bounded.
+
+| Program | Evidence | What it does |
+|---|---|---|
+| `connectivity.traffic` | traffic | creates one fixed probe pod per probe (and per control), reads its one JSON line, deletes it; rows set the probe result beside the control result |
+| `connectivity.policy-state` | policy-state | reads Kubernetes and Cilium network policy objects, reports which select each source and match each target; sends nothing |
+
+* The probe pod is one constant specification (`probes.probe_pod`): the stand-in base image by digest (never pulled, never
+  pushed), a constant command that makes one TCP connection to an IP literal, a restricted security context, small resources and
+  a deadline. `ProbePolicy` accepts a manifest only if it equals what `probe_pod` builds for the values it carries.
+* The synthetic subnet plan uses two documentation ranges (never routed): one for a "world" container and one standing in for a
+  local-network range. It is data, validated against private, loopback, link-local, carrier-grade and cluster ranges; `check_free`
+  refuses it if the host already has an overlapping network. Policy-state checks on the real local-network range come first and
+  are reported as policy-state; traffic against the synthetic range is reported as traffic, never as proof about the real range.
+* `standin.server` is a minimal stdlib server: a configured port, a configured health path, and an echo of method, path and
+  headers for everything else. `standin.builder` turns `{name, tag, port, health_path}` entries into deterministic build contexts
+  (a Dockerfile on the pinned base digest, the server, a config file) with a context hash; it has no build, registry or network
+  code, so nothing can be pushed.
+
 ## What a program hash covers
 
 `program_hash` is the sha256 of a source bundle: a header naming the program id, version and entry point, the program module,
