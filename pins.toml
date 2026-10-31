@@ -38,14 +38,14 @@ qa_playwright_required = false
 
 [sets.c4.contracts]
 repo = "redevops-io/runtime-contracts"
-version = "0.3.14"
-tag = ""
-temp_pin = true
-commit = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+version = "0.3.16"
+tag = "v0.3.16"
+temp_pin = false
+commit = "d739c1941fd0f03aad9b5c75c6f9b2a0df67cc26"
 package = "runtime_contracts"
 source_path = ".pinned/c4/runtime-contracts"
 distribution_paths = ["runtime_contracts"]
-distribution_sha256 = "58cf920f9caa9d529d3c037ee5d3a26d432425c722e93a7e9ceb718be06b6175"
+distribution_sha256 = "ab9e9d1d7a0c960364037592caca4e81422881890c468218d0faaaff08db9fd2"
 addendum_globs = ["golden/qa_*addendum*.json", "golden/qa_canon_vectors_*.json", "golden/qa_clarifications*.json"]
 
 [sets.c4.contracts.vector_files]
@@ -58,10 +58,10 @@ addendum_globs = ["golden/qa_*addendum*.json", "golden/qa_canon_vectors_*.json",
 
 [sets.c4.harness_qa]
 repo = "redevops-io/agent-harness"
-version = "0.1.0"
-tag = ""
-temp_pin = true
-commit = "2ef285a2d0e00611f78afbe4d94f0bfbf97e3a29"
+version = "0.2.0"
+tag = "v0.2.0"
+temp_pin = false
+commit = "a58ef9efcf2aa61fa92137f6a8dbd589b6e4b183"
 base_pin = "6b8ba3a596a5e2caf0fdf009f2af013517591662"
 package = "agent_harness"
 source_path = ".pinned/c4/agent-harness"
@@ -79,14 +79,14 @@ distribution_sha256 = "844751b5c90be1001a19ab7ac7444187bcadaf6bf4b280e58ad83a8df
 
 [sets.c3.contracts]
 repo = "redevops-io/runtime-contracts"
-version = "0.3.14"
-tag = ""
-temp_pin = true
-commit = "13e00f23da74782af091aec607c47358e9814fc6"
+version = "0.3.15"
+tag = "v0.3.15"
+temp_pin = false
+commit = "5f1e713762d93c866218ded2de7b9c129ce0cf06"
 package = "runtime_contracts"
 source_path = ".pinned/c3/runtime-contracts"
 distribution_paths = ["runtime_contracts"]
-distribution_sha256 = "4004127769143f28cfee10e117573e0c893640a1f43144036d7851d9e2aa9760"
+distribution_sha256 = "afb2c548cd87c0f02f4118121ce6559e8843053b35685a18bb1a65dd6abf6186"
 addendum_globs = ["golden/qa_*addendum*.json", "golden/qa_canon_vectors_*.json", "golden/qa_clarifications*.json"]
 
 [sets.c3.contracts.vector_files]
@@ -97,10 +97,10 @@ addendum_globs = ["golden/qa_*addendum*.json", "golden/qa_canon_vectors_*.json",
 
 [sets.c3.harness_qa]
 repo = "redevops-io/agent-harness"
-version = "0.1.0"
-tag = ""
-temp_pin = true
-commit = "2ef285a2d0e00611f78afbe4d94f0bfbf97e3a29"
+version = "0.2.0"
+tag = "v0.2.0"
+temp_pin = false
+commit = "a58ef9efcf2aa61fa92137f6a8dbd589b6e4b183"
 base_pin = "6b8ba3a596a5e2caf0fdf009f2af013517591662"
 package = "agent_harness"
 source_path = ".pinned/c3/agent-harness"
