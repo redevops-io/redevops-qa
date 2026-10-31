@@ -2,11 +2,37 @@
 # packages/ has its own pyproject.toml.
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests", "packages/qa-bridge/tests", "packages/qa-checks/tests"]
-pythonpath = ["packages/qa-bridge/src", "packages/qa-checks/src"]
+testpaths = [
+    "tests",
+    "packages/qa-bridge/tests",
+    "packages/qa-playwright/tests",
+    "packages/qa-egress/tests",
+    "packages/qa-adapter-kit/tests",
+    "packages/qa-selenium/tests",
+    "packages/qa-robot/tests",
+    "packages/qa-appium/tests",
+    "packages/qa-checks/tests",
+]
+pythonpath = [
+    "packages/qa-bridge/src",
+    "packages/qa-playwright/src",
+    "packages/qa-egress/src",
+    "packages/qa-adapter-kit/src",
+    "packages/qa-selenium/src",
+    "packages/qa-robot/src",
+    "packages/qa-appium/src",
+    "packages/qa-checks/src",
+]
+# The real-browser lane (tests/browser in the browser-backed packages) is never collected by the offline suite: it needs
+# Playwright and Chromium and runs only in its own CI job, which names those directories explicitly.
+norecursedirs = ["browser", "real", ".*", "build", "dist", "*.egg", "venv", "__pycache__"]
 addopts = "-ra -p no:cacheprovider --strict-markers --strict-config"
 markers = [
     "check(id): conformance check (CHK1..CHK7, ADR A.2.5 item 4) a test belongs to",
     "not_applicable: a conformance item declared not applicable at this pin set (a receipt category, never a skip)",
+    "appium_server: needs the Appium server and client installed (no device); collected only by the appium server CI job, never by the offline suite",
+    "appium_android: needs the Appium server, the client and an attached Android emulator or device; collected only by the Android CI job, never by the offline suite",
+    "robot_real: needs Robot Framework installed; collected only by the robot lane CI job, never by the offline suite",
+    "browser: needs a real Chromium and the Playwright package; collected only by the browser CI job, never by the offline suite",
 ]
 filterwarnings = ["error"]

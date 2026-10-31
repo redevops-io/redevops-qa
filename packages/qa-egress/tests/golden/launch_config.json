@@ -1,0 +1,42 @@
+{
+  "chromium_args": [
+    "--proxy-server=http://127.0.0.1:18080",
+    "--proxy-bypass-list=<-loopback>",
+    "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+    "--disable-quic",
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--dns-prefetch-disable",
+    "--no-pings",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-domain-reliability",
+    "--disable-client-side-phishing-detection",
+    "--disable-sync",
+    "--disable-default-apps",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--block-new-web-contents",
+    "--deny-permission-prompts",
+    "--no-first-run",
+    "--no-default-browser-check"
+  ],
+  "context_options": {
+    "accept_downloads": false,
+    "bypass_csp": false,
+    "ignore_https_errors": false,
+    "java_script_enabled": true,
+    "locale": "en-US",
+    "permissions": [],
+    "service_workers": "block",
+    "timezone_id": "UTC",
+    "viewport": {
+      "height": 720,
+      "width": 1280
+    }
+  },
+  "playwright_proxy": {
+    "bypass": "<-loopback>",
+    "server": "http://127.0.0.1:18080"
+  },
+  "proxy_server": "http://127.0.0.1:18080"
+}
