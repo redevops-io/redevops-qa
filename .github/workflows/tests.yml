@@ -34,7 +34,7 @@ jobs:
         run: |
           branch="${HEAD_REF:-$REF_NAME}"
           case "$branch" in
-            qa-p1/*|feature/*) flag="" ;;
+            qa-p1/*|qa-ea/*|feature/*) flag="" ;;
             *) flag="--forbid-temp-pin" ;;
           esac
           for set in c3 c4; do
