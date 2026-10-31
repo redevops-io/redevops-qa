@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot generator="Robot 7.5 (Python 3.15.2 on darwin)" generated="2026-10-31T15:38:29.410811" rpa="false" schemaversion="5">
+<suite id="s1" name="Pass" source="/ws/pass">
+<suite id="s1-s1" name="Ok" source="/ws/pass/ok.robot">
+<test id="s1-s1-t1" name="First" line="2">
+<kw name="Log" owner="BuiltIn">
+<arg>one</arg>
+<doc>Logs the given message with the given level.</doc>
+<status status="PASS" start="2026-10-31T15:38:29.420977" elapsed="0.000100"/>
+</kw>
+<tag>qa-assert:A-1</tag>
+<status status="PASS" start="2026-10-31T15:38:29.420771" elapsed="0.000349"/>
+</test>
+<test id="s1-s1-t2" name="Second" line="5">
+<kw name="Should Be True" owner="BuiltIn">
+<arg>${1} == 1</arg>
+<doc>Fails if the given condition is not true.</doc>
+<status status="PASS" start="2026-10-31T15:38:29.421232" elapsed="0.000162"/>
+</kw>
+<tag>qa-assert:A-2</tag>
+<status status="PASS" start="2026-10-31T15:38:29.421156" elapsed="0.000280"/>
+</test>
+<status status="PASS" start="2026-10-31T15:38:29.420541" elapsed="0.000979"/>
+</suite>
+<status status="PASS" start="2026-10-31T15:38:29.411503" elapsed="0.010088"/>
+</suite>
+<statistics>
+<total>
+<stat pass="2" fail="0" skip="0">All Tests</stat>
+</total>
+<tag>
+<stat pass="1" fail="0" skip="0">qa-assert:A-1</stat>
+<stat pass="1" fail="0" skip="0">qa-assert:A-2</stat>
+</tag>
+<suite>
+<stat name="Pass" id="s1" pass="2" fail="0" skip="0">Pass</stat>
+<stat name="Ok" id="s1-s1" pass="2" fail="0" skip="0">Pass.Ok</stat>
+</suite>
+</statistics>
+<errors>
+</errors>
+</robot>

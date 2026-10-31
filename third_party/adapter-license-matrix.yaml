@@ -1,0 +1,363 @@
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
+#
+# Licence matrix for the optional execution-adapter frameworks (Selenium, Robot Framework, Appium) and the packages and
+# toolchains around them. Technical triage, not legal advice.
+#
+# What it is: a record of what each framework is, at which pinned release, under which licence, what it brings with it, and
+# whether ReDevOps may ship it. tools/check_adapter_licenses.py (run by the `adapter-licences` CI job and by
+# tests/test_adapter_license_matrix.py) fails on an unknown or incompatible redistributable, on a package that an adapter
+# package or a workflow installs but this file does not list, and on a pin that disagrees with this file.
+#
+# What it is not: a legal opinion, and not a statement about any version other than the pinned one. Every fact carries a
+# `verification` block. `verified` means the upstream LICENSE file at the pinned tag (or, for the two commercial terms, the
+# vendor page) was fetched and read on the date given. `registry-metadata` means only the licence field of the package
+# registry was read, for the latest version on that date, not for the pinned one. `unverified` means nothing was checked and
+# no claim is made. A fact that is `unverified` never supports a redistribution status.
+#
+# Redistribution statuses (redistribution.status):
+#   redistributable     ReDevOps may include it in an artifact it publishes. Requires: every licence involved allowed by the
+#                       policy below, licence text verified at the pinned tag, bundled content inspected, notices recorded.
+#   optional_extra      Not shipped by ReDevOps. The operator installs it from the package registry at the pinned version.
+#   excluded_by_default Not shipped, not installed and not downloaded by default (commercial SDKs, Apple toolchains, anything
+#                       whose licence the policy blocks).
+#   unverified          No claim is made either way.
+#
+# Adapter manifests, contracts and the frozen qa/v1 goldens are not touched by this file.
+schema: redevops-qa/adapter-license-matrix
+version: 1
+checked_on: "2026-10-31"
+policy:
+  # Licence identifiers (SPDX) the policy accepts for a redistributable artifact. An expression with OR passes when one
+  # alternative passes; AND needs every part.
+  allowed_spdx: [Apache-2.0, MIT, MIT-0, BSD-2-Clause, BSD-3-Clause, ISC, PSF-2.0, 0BSD, BlueOak-1.0.0, Zlib, Unlicense, CC0-1.0]
+  # Never redistributable without a separate human review, so never `redistributable` here.
+  review_spdx: [MPL-2.0, Unicode-3.0, CDLA-Permissive-2.0, BSL-1.0, bzip2-1.0.6, LGPL-2.1-or-later, LGPL-3.0-only,
+                LGPL-3.0-or-later, EPL-2.0, CC-BY-4.0, GPL-3.0-only, GPL-3.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later]
+  # Incompatible with how this repository is licensed and used. Anything neither listed nor an exception below is treated as blocked.
+  blocked_spdx: [GPL-2.0-only, SSPL-1.0, BUSL-1.1, Elastic-2.0, CC-BY-NC-4.0]
+  blocked_prefixes: ["LicenseRef-Proprietary", "LicenseRef-Commons-Clause"]
+  allowed_exceptions: [LLVM-exception]
+  # Distribution names that CI and the adapter packages may install without being adapter frameworks (not shipped).
+  ci_tooling: [pytest, pyyaml]
+components:
+  # ------------------------------------------------------------------------------------------------ Selenium
+  - id: selenium-python
+    name: Selenium (Python bindings)
+    kind: framework
+    adapter: EA2
+    project: https://github.com/SeleniumHQ/selenium
+    pinned_release: "4.52.0"
+    pinned_ref: selenium-4.52.0
+    spdx: Apache-2.0
+    license_url: https://github.com/SeleniumHQ/selenium/blob/selenium-4.52.0/LICENSE
+    license_file_sha256: "307012b4481479a56605420e81db14686a0274d246d06d224c363ee09297d330"
+    notices:
+      - {file: NOTICE, url: "https://github.com/SeleniumHQ/selenium/blob/selenium-4.52.0/NOTICE", sha256: "0967977ac7278caa64ddd9369e831f4edc7baaca60b35efdfa9edb1e328455d2", content: "copyright lines of the Software Freedom Conservancy and the Selenium committers"}
+      - {file: selenium/webdriver/common/selenium-manager-THIRD-PARTY-NOTICES.txt, sha256: "d526cf9b9c797f13db03756fba05ef775dc8d30d143dd0b3f568c6cc9320bf28", content: "third-party notices for the bundled selenium-manager binary, shipped inside the wheel"}
+    artifacts:
+      - {ecosystem: pypi, name: selenium, version: "4.52.0", file: selenium-4.52.0-py3-none-any.whl, sha256: "caa2860d486f71cdeb21fee3248c2f604bba590120dfb4d3d18c4d7cf97c6f1f"}
+    bundled_deps_check: inspected
+    bundled_deps:
+      - {name: "selenium-manager (prebuilt binaries for linux x86_64, linux arm64, macos, windows)", spdx: Apache-2.0, note: "built from the Selenium repository; it resolves and downloads browsers and drivers on its own, so an adapter must name its driver path explicitly and a sealed run must not invoke it"}
+      - {name: "selenium-manager Rust crates (312 listed in selenium-manager.cdx.json inside the wheel)", spdx: "MPL-2.0", note: "six crates are MPL-2.0 (apple-flat-package, apple-xar, cpio-archive, cryptographic-message-syntax, option-ext, x509-certificate); the others are permissive or dual-licensed, one lists 'MIT OR Apache-2.0 OR LGPL-2.1-or-later'; the full list of expressions is in the SBOM file"}
+      - {name: "browser JavaScript atoms (findElements.js, getAttribute.js, isDisplayed.js and the mutation listeners)", spdx: Apache-2.0, note: "part of the Selenium sources; their individual headers were not read"}
+    trademark: {status: unverified, note: "no trademark policy was read; repository rule: the name identifies the integration only, no logos, no use in a ReDevOps product name"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "the wheel bundles a binary with MPL-2.0 crates, so it is not redistributed without review; the operator installs the pinned wheel"}
+    verification: {status: verified, method: "LICENSE and NOTICE fetched at the pinned tag with the GitHub contents API; wheel downloaded from the package registry and its file list, notices and SBOM read", checked_on: "2026-10-31"}
+  - id: selenium-python-direct-deps
+    name: Selenium direct Python dependencies (as declared by selenium 4.52.0)
+    kind: dependency_group
+    adapter: EA2
+    requires: [selenium-python]
+    members:
+      - {name: certifi, version_constraint: ">=2026.10.23", spdx: MPL-2.0}
+      - {name: trio, version_constraint: ">=0.31.0,<1.0", spdx: "MIT OR Apache-2.0"}
+      - {name: trio-websocket, version_constraint: ">=0.12.2,<1.0", spdx: MIT}
+      - {name: typing_extensions, version_constraint: ">=4.15.0,<5.0", spdx: PSF-2.0}
+      - {name: urllib3, version_constraint: ">=2.6.3,<3.0 (with the socks extra)", spdx: MIT}
+      - {name: websocket-client, version_constraint: ">=1.8.0,<2.0", spdx: Apache-2.0}
+      - {name: PySocks, version_constraint: "via urllib3[socks]", spdx: unverified, note: "the registry says only 'BSD', which names no clause count"}
+    notices: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "installed by the operator with the pinned Selenium wheel; certifi is MPL-2.0 and needs review before it is ever redistributed"}
+    verification: {status: registry-metadata, method: "licence field of each package's registry entry for its latest version on the check date, not the version a resolver would pick; transitive dependencies of these packages were not scanned", checked_on: "2026-10-31"}
+  # ------------------------------------------------------------------------------------------------ Robot Framework
+  - id: robotframework
+    name: Robot Framework
+    kind: framework
+    adapter: EA3
+    project: https://github.com/robotframework/robotframework
+    pinned_release: "7.5"
+    pinned_ref: v7.5
+    spdx: Apache-2.0
+    license_url: https://github.com/robotframework/robotframework/blob/v7.5/LICENSE.txt
+    license_file_sha256: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    notices:
+      - {file: robotframework-7.5.dist-info/AUTHORS.rst, content: "authors list shipped inside the wheel"}
+    artifacts:
+      - {ecosystem: pypi, name: robotframework, version: "7.5", file: robotframework-7.5-py3-none-any.whl, sha256: "5a194db36524604fafa1da89adebc837db9a95adf15ffd746e09ce98251e6c68"}
+    bundled_deps_check: inspected
+    bundled_deps:
+      - {name: "jQuery Highlight plugin (robot/htmldata/lib)", spdx: MIT, note: "file header: 'Licensed under MIT license'"}
+      - {name: "jQuery Templates Plugin 1.0.0pre (robot/htmldata/lib)", spdx: "MIT OR GPL-2.0-only", note: "file header: 'Dual licensed under the MIT or GPL Version 2 licenses'; the MIT alternative would be chosen"}
+      - {name: "JSXCompressor (robot/htmldata/lib)", spdx: "Apache-2.0 OR LGPL-3.0-only", note: "file header: 'Dual licensed under the Apache License Version 2.0, or LGPL Version 3 licenses'"}
+      - {name: "jQuery 3.5.1 (robot/htmldata/lib)", spdx: unverified, note: "header names only 'jquery.org/license'; not compared with the jQuery upstream tag"}
+      - {name: "jQuery tablesorter (robot/htmldata/lib)", spdx: unverified, note: "minified file with no licence header"}
+    trademark: {status: verified, note: "the wheel's package description states that the Robot Framework trademark is owned by the Robot Framework Foundation; repository rule: the name identifies the integration only, no logos, no use in a ReDevOps product name"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "two of the bundled report assets have no licence stated in the file; the operator installs the pinned wheel"}
+    verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; wheel downloaded from the package registry and the headers of its bundled report assets read", checked_on: "2026-10-31"}
+  - id: robotframework-seleniumlibrary
+    name: SeleniumLibrary for Robot Framework (considered, not on the allowlist)
+    kind: library
+    adapter: EA3
+    requires: [robotframework, selenium-python]
+    project: https://github.com/robotframework/SeleniumLibrary
+    pinned_release: "6.9.0"
+    pinned_ref: v6.9.0
+    spdx: Apache-2.0
+    license_url: https://github.com/robotframework/SeleniumLibrary/blob/v6.9.0/LICENSE.txt
+    license_file_sha256: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    notices: []
+    artifacts:
+      - {ecosystem: pypi, name: robotframework-seleniumlibrary, version: "6.9.0"}
+    bundled_deps_check: not_inspected
+    bundled_deps: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "the Robot adapter runs only the libraries it allowlists, and this one is not on that list; the wheel was not inspected"}
+    verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; licence field of the registry entry for the pinned version", checked_on: "2026-10-31"}
+  - id: robotframework-seleniumlibrary-direct-deps
+    name: SeleniumLibrary direct Python dependencies
+    kind: dependency_group
+    adapter: EA3
+    requires: [robotframework-seleniumlibrary]
+    members:
+      - {name: robotframework-pythonlibcore, version_constraint: ">=4.4.1", spdx: Apache-2.0}
+      - {name: click, version_constraint: ">=8.0", spdx: BSD-3-Clause}
+    notices: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "not shipped"}
+    verification: {status: registry-metadata, method: "licence field of each package's registry entry for its latest version on the check date; transitive dependencies were not scanned", checked_on: "2026-10-31"}
+  # ------------------------------------------------------------------------------------------------ Appium
+  - id: appium-server
+    name: Appium server
+    kind: framework
+    adapter: EA4
+    project: https://github.com/appium/appium
+    pinned_release: "3.9.0"
+    pinned_ref: "appium@3.9.0"
+    spdx: Apache-2.0
+    license_url: https://github.com/appium/appium/blob/appium%403.9.0/LICENSE
+    license_file_sha256: "5cb791a45cafc4bdaef57f3ba49fb7691a98c756e8148467f9e241295728490f"
+    notices: []
+    artifacts:
+      - {ecosystem: npm, name: appium, version: "3.9.0"}
+    bundled_deps_check: not_inspected
+    bundled_deps: []
+    trademark: {status: unverified, note: "no trademark policy was read; repository rule: the name identifies the integration only, no logos, no use in a ReDevOps product name"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "the npm package was not unpacked and its transitive dependencies were not scanned; the operator installs the pinned version"}
+    verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; licence field of the registry entry for the pinned version", checked_on: "2026-10-31"}
+  - id: appium-server-direct-deps
+    name: Appium server direct npm dependencies (exact versions declared by appium 3.9.0)
+    kind: dependency_group
+    adapter: EA4
+    requires: [appium-server]
+    members:
+      - {name: "@appium/base-driver", version_constraint: "10.8.2", spdx: Apache-2.0}
+      - {name: "@appium/base-plugin", version_constraint: "3.3.6", spdx: Apache-2.0}
+      - {name: "@appium/docutils", version_constraint: "3.0.2", spdx: Apache-2.0}
+      - {name: "@appium/logger", version_constraint: "2.0.12", spdx: ISC}
+      - {name: "@appium/schema", version_constraint: "1.3.0", spdx: Apache-2.0}
+      - {name: "@appium/support", version_constraint: "7.2.9", spdx: Apache-2.0}
+      - {name: "@appium/types", version_constraint: "1.7.2", spdx: Apache-2.0}
+      - {name: "@sidvind/better-ajv-errors", version_constraint: "5.0.0", spdx: Apache-2.0}
+      - {name: ajv, version_constraint: "8.20.0", spdx: MIT}
+      - {name: ajv-formats, version_constraint: "3.0.1", spdx: MIT}
+      - {name: argparse, version_constraint: "3.0.3", spdx: PSF-2.0}
+      - {name: asyncbox, version_constraint: "6.5.0", spdx: Apache-2.0}
+      - {name: axios, version_constraint: "1.20.0", spdx: MIT}
+      - {name: lilconfig, version_constraint: "3.1.4", spdx: MIT}
+      - {name: lru-cache, version_constraint: "11.5.3", spdx: BlueOak-1.0.0}
+      - {name: ora, version_constraint: "5.4.1", spdx: MIT}
+      - {name: semver, version_constraint: "7.8.5", spdx: ISC}
+      - {name: teen_process, version_constraint: "4.2.1", spdx: Apache-2.0}
+      - {name: type-fest, version_constraint: "5.10.0", spdx: "MIT OR CC0-1.0"}
+      - {name: winston, version_constraint: "3.19.0", spdx: MIT}
+      - {name: ws, version_constraint: "8.22.0", spdx: MIT}
+      - {name: yaml, version_constraint: "2.9.1", spdx: ISC}
+    notices: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "not shipped"}
+    verification: {status: registry-metadata, method: "licence field of each package's registry entry for its latest version on the check date, not the exact version listed; transitive dependencies were not scanned", checked_on: "2026-10-31"}
+  - id: appium-python-client
+    name: Appium Python client
+    kind: library
+    adapter: EA4
+    requires: [selenium-python]
+    project: https://github.com/appium/python-client
+    pinned_release: "6.1.1"
+    pinned_ref: v6.1.1
+    spdx: Apache-2.0
+    license_url: https://github.com/appium/python-client/blob/v6.1.1/LICENSE
+    license_file_sha256: "43178a7d73663d609f172ad78b0755ccc14f14c2b49e506b2a160b52821caa19"
+    notices: []
+    artifacts:
+      - {ecosystem: pypi, name: Appium-Python-Client, version: "6.1.1", file: appium_python_client-6.1.1-py3-none-any.whl, sha256: "770b93424bc0ab0f1d1f1cdcb8739a3f90541a72b52176d6b596fa5c8dff7cd3"}
+    bundled_deps_check: inspected
+    bundled_deps: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "the operator installs the pinned wheel; it requires Selenium, which is not redistributed"}
+    verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; wheel downloaded from the package registry and its file list read (python files, py.typed and the licence file only)", checked_on: "2026-10-31"}
+  - id: appium-python-client-direct-deps
+    name: Appium Python client direct dependencies (besides selenium)
+    kind: dependency_group
+    adapter: EA4
+    requires: [appium-python-client]
+    members:
+      - {name: typing-extensions, version_constraint: "~=4.16", spdx: PSF-2.0}
+    notices: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "not shipped"}
+    verification: {status: registry-metadata, method: "licence field of the package's registry entry for its latest version on the check date", checked_on: "2026-10-31"}
+  - id: appium-uiautomator2-driver
+    name: Appium UiAutomator2 driver (Android)
+    kind: driver
+    adapter: EA4
+    requires: [appium-server]
+    project: https://github.com/appium/appium-uiautomator2-driver
+    pinned_release: "8.7.3"
+    pinned_ref: v8.7.3
+    spdx: Apache-2.0
+    license_url: https://github.com/appium/appium-uiautomator2-driver/blob/v8.7.3/LICENSE
+    license_file_sha256: "43178a7d73663d609f172ad78b0755ccc14f14c2b49e506b2a160b52821caa19"
+    notices: []
+    artifacts:
+      - {ecosystem: npm, name: appium-uiautomator2-driver, version: "8.7.3"}
+    bundled_deps_check: not_inspected
+    bundled_deps: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "the npm package was not unpacked; it drives an Android emulator or device, which this file does not cover (see android-sdk-and-emulator)"}
+    verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; licence field of the registry entry for the pinned version", checked_on: "2026-10-31"}
+  - id: appium-uiautomator2-driver-direct-deps
+    name: Appium UiAutomator2 driver direct npm dependencies
+    kind: dependency_group
+    adapter: EA4
+    requires: [appium-uiautomator2-driver]
+    members:
+      - {name: "@appium/css-locator-to-native", version_constraint: "1.0.7", spdx: Apache-2.0}
+      - {name: appium-adb, version_constraint: "16.1.2", spdx: Apache-2.0}
+      - {name: appium-android-driver, version_constraint: "14.2.5", spdx: Apache-2.0}
+      - {name: appium-uiautomator2-server, version_constraint: "10.7.6", spdx: Apache-2.0}
+      - {name: asyncbox, version_constraint: "6.5.0", spdx: Apache-2.0}
+      - {name: axios, version_constraint: "1.21.0", spdx: MIT}
+      - {name: io.appium.settings, version_constraint: "8.4.5", spdx: Apache-2.0}
+      - {name: portscanner, version_constraint: "2.2.0", spdx: MIT}
+      - {name: teen_process, version_constraint: "4.2.1", spdx: Apache-2.0}
+    notices: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "not shipped"}
+    verification: {status: registry-metadata, method: "licence field of each package's registry entry for its latest version on the check date, not the exact version listed; transitive dependencies were not scanned", checked_on: "2026-10-31"}
+  - id: appium-xcuitest-driver
+    name: Appium XCUITest driver (iOS)
+    kind: driver
+    adapter: EA4
+    requires: [appium-server, apple-toolchain]
+    project: https://github.com/appium/appium-xcuitest-driver
+    pinned_release: "12.22.8"
+    pinned_ref: v12.22.8
+    spdx: Apache-2.0
+    license_url: https://github.com/appium/appium-xcuitest-driver/blob/v12.22.8/LICENSE
+    license_file_sha256: "ae9194687e7f3b7d85e8eeb5c973e22d52c4653b1e4332fa0e5c6e82b038ab29"
+    notices: []
+    artifacts:
+      - {ecosystem: npm, name: appium-xcuitest-driver, version: "12.22.8"}
+    bundled_deps_check: not_inspected
+    bundled_deps: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: excluded_by_default, default_enabled: false, reason: "it cannot run without an Apple toolchain on a real, licensed worker; ReDevOps ships only an interface that reports `unavailable` when no such worker exists"}
+    verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API", checked_on: "2026-10-31"}
+  # ------------------------------------------------------------------------------------------------ Playwright (already used by qa-playwright)
+  - id: playwright-python
+    name: Playwright for Python
+    kind: framework
+    adapter: qa-playwright
+    project: https://github.com/microsoft/playwright-python
+    pinned_release: "1.64.1"
+    pinned_ref: v1.64.1
+    spdx: Apache-2.0
+    license_url: https://github.com/microsoft/playwright-python/blob/v1.64.1/LICENSE
+    license_file_sha256: "7fab1461b41970ff376f1c9303a637076bfaaeb71cd12dd3a1c44aaf59a1a2b9"
+    notices: []
+    artifacts:
+      - {ecosystem: pypi, name: playwright, version: "1.64.1"}
+    bundled_deps_check: not_inspected
+    bundled_deps: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "the platform wheels were not unpacked, so what they bundle is not known; the operator installs the pinned version"}
+    verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; the registry entry for the pinned version lists its dependencies", checked_on: "2026-10-31"}
+  - id: playwright-python-direct-deps
+    name: Playwright for Python direct dependencies
+    kind: dependency_group
+    adapter: qa-playwright
+    requires: [playwright-python]
+    members:
+      - {name: pyee, version_constraint: ">=13,<15", spdx: MIT}
+      - {name: greenlet, version_constraint: ">=3.1.1,<4.0.0", spdx: "MIT AND PSF-2.0"}
+    notices: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: optional_extra, default_enabled: false, reason: "not shipped"}
+    verification: {status: registry-metadata, method: "licence field of each package's registry entry for its latest version on the check date, which is outside the declared range for pyee", checked_on: "2026-10-31"}
+  # ------------------------------------------------------------------------------------------------ CI tooling (never shipped)
+  - id: ci-pytest
+    name: pytest
+    kind: ci_tool
+    adapter: all
+    members:
+      - {name: pytest, version_constraint: ">=8,<10", spdx: MIT, note: "test tooling, never shipped"}
+    notices: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: excluded_by_default, default_enabled: false, reason: "test tooling installed in CI only"}
+    verification: {status: registry-metadata, method: "licence field of the package's registry entry for its latest version on the check date", checked_on: "2026-10-31"}
+  - id: ci-pyyaml
+    name: PyYAML
+    kind: ci_tool
+    adapter: all
+    members:
+      - {name: pyyaml, version_constraint: ">=6,<7", spdx: MIT, note: "test tooling, never shipped"}
+    notices: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: excluded_by_default, default_enabled: false, reason: "test tooling installed in CI only"}
+    verification: {status: registry-metadata, method: "licence field of the package's registry entry for its latest version on the check date", checked_on: "2026-10-31"}
+  # ------------------------------------------------------------------------------------------------ Excluded by default
+  - id: android-sdk-and-emulator
+    name: Android SDK, emulator and system images (Google)
+    kind: commercial_toolchain
+    adapter: EA4
+    notices: []
+    spdx: LicenseRef-Proprietary-Android-SDK-License
+    license_url: https://developer.android.com/studio/terms
+    license_text_dated: "April 28, 2026"
+    license_note: "section 3.4: the SDK may not be copied (except for backup), modified, adapted, redistributed, decompiled, reverse engineered, disassembled or used to create derivative works; section 3.5 says components under an open source licence are governed by that licence instead. The page does not say whether emulator and system images count as part of the SDK."
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: excluded_by_default, default_enabled: false, reason: "not redistributed, not bundled in an image and not downloaded by default; a lane that needs it provisions it on a worker whose operator accepted Google's terms"}
+    verification: {status: verified, method: "the vendor terms page was fetched and the quoted clauses read; page text only, no wording beyond the quoted clauses is relied on", checked_on: "2026-10-31"}
+  - id: apple-toolchain
+    name: Xcode, Apple SDKs and Simulator (Apple)
+    kind: commercial_toolchain
+    adapter: EA4
+    notices: []
+    spdx: LicenseRef-Proprietary-Apple-Xcode-SLA
+    license_url: https://www.apple.com/legal/sla/docs/xcode.pdf
+    license_note: "the PDF could not be read as text during this check, so no clause is quoted or relied on"
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: excluded_by_default, default_enabled: false, reason: "never bundled; iOS lanes report `unavailable` unless an operator provides a real, licensed worker"}
+    verification: {status: unverified, method: "document fetched but not readable", checked_on: "2026-10-31"}
+  - id: google-chrome
+    name: Google Chrome and Chrome for Testing binaries
+    kind: commercial_toolchain
+    adapter: EA2
+    notices: []
+    spdx: LicenseRef-Proprietary-Google-Chrome
+    license_url: https://www.google.com/chrome/terms/
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: excluded_by_default, default_enabled: false, reason: "not bundled and not downloaded by an adapter; the browser and its driver come from the operator's pinned image or worker"}
+    verification: {status: unverified, method: "terms not read for this check", checked_on: "2026-10-31"}
