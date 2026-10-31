@@ -106,3 +106,15 @@ def test_the_adapter_kit_job_is_offline_pin_free_and_fails_on_skips():
     steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
     assert "packages/qa-adapter-kit/tests" in steps and "env -i HOME=" in steps and "tools/check_junit.py" in steps
     assert not any("repository" in s.get("with", {}) for s in job["steps"]) and "needs" not in job and "playwright" not in steps.lower()
+
+
+def test_the_selenium_offline_job_installs_no_selenium_and_the_browser_job_never_skips_or_downloads():
+    offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["selenium-offline"]["steps"])
+    assert "selenium==" not in offline and "packages/qa-selenium/tests" in offline and "tools/check_junit.py" in offline
+    steps = WF["jobs"]["selenium-browser"]["steps"]
+    run = "\n".join(str(s.get("run", "")) for s in steps)
+    assert '"selenium==4.52.0"' in run and "exit 1" in run and "-m browser packages/qa-selenium/tests/browser" in run
+    assert "tools/check_junit.py" in run and "playwright install" not in run and "chrome-for-testing" not in run.lower() and "wget" not in run and "curl" not in run
+    assert "continue-on-error" not in TEXT and "needs" not in WF["jobs"]["selenium-browser"]
+    assert "NOT a required check until proven" in WF["jobs"]["selenium-browser"]["name"]
+    assert not any("repository" in s.get("with", {}) for s in steps)
