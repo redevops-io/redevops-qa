@@ -107,6 +107,25 @@ plan; metadata-address traffic and UDP are refused as not expressible; the count
   (a Dockerfile on the pinned base digest, the server, a config file) with a context hash; it has no build, registry or network
   code, so nothing can be pushed.
 
+## Views and seeding
+
+**Views (`views`).** `run_data(results, manifest=None, assertions=None)` holds the assertion results of one run (records or
+plain mappings) as immutable rows with a digest. `full_view(run)` lists every result; `playwright_view(run)` lists exactly the
+rows whose `executor` is `PLAYWRIGHT`, from the same run data (never a second run: a view takes the run data and nothing else
+and imports no adapter, process or file code). `reconciliation(run)` shows that the views name the same source run, that the
+Playwright rows are a subset of the full rows, and that Playwright + script + unknown-executor rows equal all rows. An executor
+value this version does not know is non-certifying: it is in the full view only. Results of two assertion sets are refused.
+`redevops-qa-checks view --results FILE --view full|playwright|script|reconciliation` prints a view and writes nothing.
+
+**`seed-copy` (`seed_copy`).** Makes a copy of a manifest directory and applies one named, deterministic transformation to the
+copy, for development variants with a known defect. The input is a plain tree (no symbolic links, no special files, no
+version-control metadata) and is never modified; the output is a new directory inside a work root that the tool created
+(`seed-copy create-work-root`), never inside a version-control checkout or the source tree, never at an existing path, and never
+under a path that names a protected corpus. The diff and a record (source and output tree digests, transformation, files changed)
+are written next to the copy, and the copy carries a development-variant marker. The library has five generic transformations:
+replace a digest with a tag, remove a `securityContext` field, change a port, remove a probe, remove resource limits; each
+fails with `NO_MATCH` instead of changing nothing. There is no option to edit in place or to choose an output path.
+
 ## What a program hash covers
 
 `program_hash` is the sha256 of a source bundle: a header naming the program id, version and entry point, the program module,
