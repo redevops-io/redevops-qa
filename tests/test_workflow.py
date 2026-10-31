@@ -99,3 +99,10 @@ def test_the_adapter_licence_job_runs_the_checker_and_its_tests_offline_and_fail
     assert "tools/check_junit.py" in steps and "--verify-upstream" not in steps      # offline: no download
     assert not any("repository" in s.get("with", {}) for s in job["steps"])          # no pinned upstream is fetched
     assert "needs" not in job and "continue-on-error" not in job
+
+
+def test_the_adapter_kit_job_is_offline_pin_free_and_fails_on_skips():
+    job = WF["jobs"]["adapter-kit"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert "packages/qa-adapter-kit/tests" in steps and "env -i HOME=" in steps and "tools/check_junit.py" in steps
+    assert not any("repository" in s.get("with", {}) for s in job["steps"]) and "needs" not in job and "playwright" not in steps.lower()
