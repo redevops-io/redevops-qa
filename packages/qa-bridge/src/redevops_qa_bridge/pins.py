@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """``pins.toml``: the single configuration of what the bridge and the conformance suite are pinned to.
 
-Nothing about a dependency is hard-coded elsewhere. For each of ``contracts`` (``runtime-contracts``, qa/v1) and
-``harness_qa`` (``agent_harness.qa``) the file lists a git tag or commit, the source tree to import from, the sha256 of
-the installed distribution tree and the sha256 of every vector file. Paths may be overridden per machine with
-``QA_PIN_CONTRACTS_PATH`` and ``QA_PIN_HARNESS_QA_PATH``; digests and commits never are.
+Nothing about a dependency is hard-coded elsewhere. The file holds one or more named **pin sets** (``[sets.<name>]``);
+``default_set`` names the one used unless ``REDEVOPS_QA_PIN_SET`` (or an explicit argument) selects another. A pin set
+names, for each of ``contracts`` (``runtime-contracts``, qa/v1) and ``harness_qa`` (``agent_harness.qa``), a git tag or
+commit, the source tree to import from, the sha256 of the installed distribution tree and the sha256 of every vector
+file. Paths may be overridden per machine with ``QA_PIN_CONTRACTS_PATH`` and ``QA_PIN_HARNESS_QA_PATH`` (they apply to
+the selected set); digests and commits never are. ``[conformance]`` holds settings shared by all sets.
 
 A draft pin is marked ``temp_pin = true`` (no tag yet). ``check_forbid_temp_pin`` is what CI runs on ``main``.
 """
@@ -21,8 +23,9 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from .errors import PinMismatch, PinsInvalid
 
 PINS_SCHEMA = "redevops-qa/pins"
-PINS_VERSION = 1
+PINS_VERSION = 2
 PINS_FILE_ENV = "REDEVOPS_QA_PINS"
+PIN_SET_ENV = "REDEVOPS_QA_PIN_SET"
 PATH_ENV = {"contracts": "QA_PIN_CONTRACTS_PATH", "harness_qa": "QA_PIN_HARNESS_QA_PATH"}
 
 _HEX40 = re.compile(r"[0-9a-f]{40}")
@@ -82,6 +85,8 @@ class DependencyPin:
 @dataclass(frozen=True)
 class Pins:
     path: Path
+    pin_set: str
+    available_sets: Tuple[str, ...]
     contracts: DependencyPin
     harness_qa: DependencyPin
     conformance: Mapping[str, Any]
@@ -162,7 +167,7 @@ def _dependency(name: str, table: Mapping[str, Any], root: Path) -> DependencyPi
         base_pin=base_pin, extra={k: v for k, v in table.items() if k not in known})
 
 
-def load_pins(path: Optional[Path] = None) -> Pins:
+def load_pins(path: Optional[Path] = None, pin_set: Optional[str] = None) -> Pins:
     pins_path = Path(path) if path is not None else find_pins_file()
     try:
         with open(pins_path, "rb") as handle:
@@ -173,9 +178,20 @@ def load_pins(path: Optional[Path] = None) -> Pins:
         raise PinsInvalid(f"pins file is not valid TOML: {exc}") from None
     if raw.get("schema") != PINS_SCHEMA or raw.get("version") != PINS_VERSION:
         raise PinsInvalid(f"pins file must declare schema = {PINS_SCHEMA!r} and version = {PINS_VERSION}")
+    sets = _req(raw, "sets", dict, "pins")
+    if not sets:
+        raise PinsInvalid("pins: at least one [sets.<name>] is required")
+    default = _req(raw, "default_set", str, "pins")
+    chosen = pin_set or os.environ.get(PIN_SET_ENV) or default
+    if chosen not in sets:
+        raise PinsInvalid(f"pins: no pin set {chosen!r} (available: {', '.join(sorted(sets))})")
+    table = sets[chosen]
+    if not isinstance(table, dict):
+        raise PinsInvalid(f"pins: [sets.{chosen}] must be a table")
     root = pins_path.resolve().parent
-    return Pins(path=pins_path.resolve(), contracts=_dependency("contracts", _req(raw, "contracts", dict, "pins"), root),
-                harness_qa=_dependency("harness_qa", _req(raw, "harness_qa", dict, "pins"), root),
+    return Pins(path=pins_path.resolve(), pin_set=chosen, available_sets=tuple(sorted(sets)),
+                contracts=_dependency("contracts", _req(table, "contracts", dict, f"sets.{chosen}"), root),
+                harness_qa=_dependency("harness_qa", _req(table, "harness_qa", dict, f"sets.{chosen}"), root),
                 conformance=dict(raw.get("conformance", {})), raw=raw)
 
 
@@ -191,16 +207,26 @@ def main(argv: Optional[list] = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(prog="python -m redevops_qa_bridge.pins")
     parser.add_argument("--file", default=None)
+    parser.add_argument("--pin-set", default=None)
     parser.add_argument("--forbid-temp-pin", action="store_true")
+    parser.add_argument("--github-output", action="store_true",
+                        help="print repo/commit/path of both dependencies as key=value lines for a CI step output")
     args = parser.parse_args(argv)
     try:
-        pins = load_pins(Path(args.file) if args.file else None)
+        pins = load_pins(Path(args.file) if args.file else None, args.pin_set)
         if args.forbid_temp_pin:
             check_forbid_temp_pin(pins)
+        if args.github_output:
+            for dep in (pins.contracts, pins.harness_qa):
+                print(f"{dep.name}_repo={dep.repo}")
+                print(f"{dep.name}_commit={dep.commit}")
+                print(f"{dep.name}_path={dep.source_path}")
+            print(f"pin_set={pins.pin_set}")
+            return 0
     except (PinsInvalid, PinMismatch) as exc:
         print(f"FAIL {exc.code}: {exc.message}")
         return 1
-    print("OK pins.toml is well formed" + ("" if not args.forbid_temp_pin else " and has no TEMP-PIN"))
+    print(f"OK pins.toml (set {pins.pin_set}) is well formed" + ("" if not args.forbid_temp_pin else " and has no TEMP-PIN"))
     return 0
 
 
