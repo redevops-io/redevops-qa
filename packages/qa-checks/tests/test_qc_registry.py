@@ -16,9 +16,9 @@ HASH = re.compile(r"sha256:[0-9a-f]{64}")
 
 def test_every_program_has_a_full_sha256_and_ids_and_hashes_are_unique(registry):
     entries = registry.entries()
-    assert len(entries) == 32
+    assert len(entries) == 40
     assert all(HASH.fullmatch(e.program_hash) for e in entries)
-    assert len({e.id for e in entries}) == 32 and len({e.program_hash for e in entries}) == 32
+    assert len({e.id for e in entries}) == 40 and len({e.program_hash for e in entries}) == 40
 
 
 def test_the_registry_satisfies_the_harness_program_registry_protocol(registry, neutral):
@@ -180,7 +180,7 @@ def test_no_builtin_program_output_has_a_verdict_shaped_key_on_a_rich_input(regi
     docs["40-odd.yaml"] = [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "x", "labels": {"status": "ok", "pass": "1"}}}]
     root = write_tree(tmp_path / "c", docs)
     engine = CheckEngine(root, registry)
-    for spec in registry.entries():
+    for spec in (e for e in registry.entries() if e.tier == "OFFLINE"):
         out = engine.run_check({"check_program_ref": spec.ref, "inputs": [{"kind": "MANIFEST_PATH", "path": "."}], "tier": "OFFLINE"})
         assert out.resolution == "RESOLVED"
         reg.validate_output(out.value)

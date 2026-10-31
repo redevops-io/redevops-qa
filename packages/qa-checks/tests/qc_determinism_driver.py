@@ -15,7 +15,7 @@ root = F.write_tree(Path(tempfile.mkdtemp()) / "case", F.good_set())
 reg = builtin_registry()
 engine = CheckEngine(root, reg)
 h = hashlib.sha256()
-for spec in reg.entries():
+for spec in (x for x in reg.entries() if x.id.startswith("manifest.")):
     out = engine.run_check({"check_program_ref": spec.ref, "inputs": [{"kind": "MANIFEST_PATH", "path": "."}], "tier": "OFFLINE"})
     h.update(spec.program_hash.encode())
     h.update(canonical_bytes(out.value))

@@ -265,7 +265,7 @@ def test_a_run_changes_nothing_in_the_case_tree_even_when_it_is_read_only(case_r
         before = _snapshot(case_root)
         a = CheckAdapter(case_root, registry=registry)
         w = a.open_workspace(profile(R, case_root))
-        for spec in registry.entries():
+        for spec in (e for e in registry.entries() if e.tier == "OFFLINE"):
             a.run_check(w, R.CheckSubject(check_program_ref=R.CheckProgramRef(id=spec.id, version=spec.version, program_hash=spec.program_hash),
                                           inputs=(R.ResourceRef(kind=R.ResourceKind.MANIFEST_PATH, path="."),), tier=R.CheckTier.OFFLINE))
         a.resolve(w, R.ResourceRef(kind=R.ResourceKind.MANIFEST_PATH, path="10-app.yaml"))

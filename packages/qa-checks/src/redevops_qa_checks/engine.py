@@ -22,8 +22,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .canonical import canonical_bytes, json_digest, sha256_ref
-from .errors import CheckError, LimitExceeded, ResourceAmbiguous, ResourceNotFound, Unsupported
+from .errors import CheckError, LimitExceeded, PolicyBlocked, ResourceAmbiguous, ResourceNotFound, Unsupported
 from .manifests import Manifest, ManifestSet, freeze, load_tree, thaw, tree_digest
+from .not_expressible import ensure_expressible
 from .program_input import ProgramInput
 from .registry import ProgramRegistry, refuse_expected
 
@@ -159,7 +160,10 @@ class CheckEngine:
             raise Unsupported(f"unknown tier {subject.get('tier')!r}")
         if subject["tier"] != "OFFLINE":
             raise Unsupported("this engine runs offline checks; tier K checks go through the disposable-cluster gate")
-        self._registry.resolve(subject["check_program_ref"])           # verified before anything is read or executed
+        ensure_expressible(subject["check_program_ref"].get("id"))
+        spec = self._registry.resolve(subject["check_program_ref"])    # verified before anything is read or executed
+        if spec.tier != "OFFLINE":
+            raise PolicyBlocked("this program reads a disposable cluster; it runs only through the tier K gate", program=spec.id)
         data, resolution, count, digests = self.load_inputs(list(subject.get("inputs") or ()))
         if data is None:
             return Outcome(resolution=resolution, match_count=count, inputs=digests)
