@@ -251,7 +251,7 @@ jobs:
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
             PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" \
-            python -m pytest -q -m browser packages/qa-playwright/tests/browser --junitxml="$RUNNER_TEMP/junit-browser.xml"
+            python -m pytest -q -m browser packages/qa-playwright/tests/browser packages/qa-egress/tests/browser --junitxml="$RUNNER_TEMP/junit-browser.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-browser.xml"
 

@@ -6,6 +6,7 @@ testpaths = [
     "tests",
     "packages/qa-bridge/tests",
     "packages/qa-playwright/tests",
+    "packages/qa-egress/tests",
     "packages/qa-adapter-kit/tests",
     "packages/qa-selenium/tests",
     "packages/qa-robot/tests",
@@ -14,6 +15,7 @@ testpaths = [
 pythonpath = [
     "packages/qa-bridge/src",
     "packages/qa-playwright/src",
+    "packages/qa-egress/src",
     "packages/qa-adapter-kit/src",
     "packages/qa-selenium/src",
     "packages/qa-robot/src",
