@@ -19,4 +19,9 @@ def pytest_generate_tests(metafunc):
         return
     check = metafunc.module.CHECK
     items = _items()[check]
-    metafunc.parametrize("item", [pytest.param(i, id=i.item_id, marks=pytest.mark.check(check)) for i in items])
+    def marks(i):
+        out = [pytest.mark.check(check)]
+        if i.kind == "not_applicable":
+            out.append(pytest.mark.not_applicable)
+        return out
+    metafunc.parametrize("item", [pytest.param(i, id=i.item_id, marks=marks(i)) for i in items])

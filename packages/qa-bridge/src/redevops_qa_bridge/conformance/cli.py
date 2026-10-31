@@ -56,9 +56,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     receipt = build_receipt(pins, summary, model.EVIDENCE, availability, root)
     _write(args.receipt, receipt)
     print(f"receipt {args.receipt}: result {receipt['result']}, {receipt['collected_tests']} collected, "
-          f"{receipt['skipped_tests']} skipped, {receipt['failed_tests']} failed, receipt_hash {receipt['receipt_hash']}")
+          f"{receipt['skipped_tests']} skipped, {receipt['failed_tests']} failed, {receipt['not_applicable_tests']} "
+          f"not applicable, receipt_hash {receipt['receipt_hash']}")
     for c in receipt["checks"]:
         print(f"  {c['check_id']} {c['name']}: {c['status']} ({c['passed']}/{c['collected']} passed"
+              f"{', ' + str(c['not_applicable']) + ' n/a' if c['not_applicable'] else ''}"
               f"{', codes ' + ','.join(c['failure_codes']) if c['failure_codes'] else ''})")
     if args.report:
         report = build_report(summary, receipt)
@@ -80,7 +82,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
             pass
     deps.prepare_paths(pins)
     root = None if args.skip_redevops_commit else pins.root
-    status, reasons = verify_receipt(Path(args.receipt), pins, redevops_root=root)
+    status, reasons = verify_receipt(Path(args.receipt), pins, redevops_root=root, accept_equal_tree=args.accept_equal_tree,
+                                     forbid_not_applicable=args.forbid_not_applicable)
     print(status)
     for reason in reasons:
         print(f"  {reason}")
@@ -103,6 +106,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     ver.add_argument("receipt")
     ver.add_argument("--skip-redevops-commit", action="store_true",
                      help="do not compare the receipt's redevops-qa commit with the working tree's HEAD")
+    ver.add_argument("--accept-equal-tree", action="store_true",
+                     help="a different redevops-qa commit with the same git tree is current (patches re-applied with git am)")
+    ver.add_argument("--forbid-not-applicable", action="store_true",
+                     help="the pin set must have no not-applicable item: a receipt that lists one is FAILED")
     ver.set_defaults(func=cmd_verify)
     args = parser.parse_args(argv)
     try:

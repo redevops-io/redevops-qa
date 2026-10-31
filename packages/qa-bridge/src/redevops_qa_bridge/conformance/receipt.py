@@ -69,7 +69,9 @@ def redevops_qa_state(root: Path) -> Dict[str, Any]:
     commit = _git(["rev-parse", "HEAD"], root)
     dirty = bool(_git(["status", "--porcelain"], root)) if commit else True
     tag = _git(["describe", "--tags", "--exact-match", "HEAD"], root) if commit else ""
-    return {"repo": REDEVOPS_QA_REPO, "version": __version__, "commit": commit, "tag": tag, "worktree_clean": not dirty}
+    tree = _git(["rev-parse", "HEAD^{tree}"], root) if commit else ""
+    return {"repo": REDEVOPS_QA_REPO, "version": __version__, "commit": commit, "tree": tree, "tag": tag,
+            "worktree_clean": not dirty}
 
 
 def _dependency_subject(dep: DependencyPin) -> Dict[str, Any]:
@@ -105,16 +107,32 @@ def _checks_section(tests: List[Dict[str, Any]], collected_total: int) -> List[D
         collected = len(mine)
         passed = sum(1 for t in mine if t["outcome"] == "passed")
         skipped = sum(1 for t in mine if t["outcome"] == "skipped")
+        na = sum(1 for t in mine if t["outcome"] == "not_applicable")
         failed = sum(1 for t in mine if t["outcome"] == "failed")
         codes = sorted({t["code"] for t in mine if t["outcome"] == "failed" and t["code"]})
         if collected == 0:
             codes = sorted(set(codes) | {NO_TESTS})
-        status = "PASS" if collected > 0 and failed == 0 and skipped == 0 and passed == collected else "FAIL"
+        status = "PASS" if collected > 0 and failed == 0 and skipped == 0 and passed > 0 and passed + na == collected \
+            else "FAIL"
         if skipped:
             codes = sorted(set(codes) | {"SKIPPED_TESTS"})
         rows.append({"check_id": check_id, "name": name, "collected": collected, "passed": passed, "failed": failed,
-                     "skipped": skipped, "status": status, "failure_codes": codes})
+                     "skipped": skipped, "not_applicable": na, "status": status, "failure_codes": codes})
     return rows
+
+
+def _not_applicable_section(pins: Pins, tests: List[Dict[str, Any]], evidence: Evidence) -> List[Dict[str, Any]]:
+    declared = {(n.check, n.item): n for n in pins.not_applicable}
+    out = []
+    for t in tests:
+        if t["outcome"] != "not_applicable":
+            continue
+        key = (t["check"], t.get("item"))
+        n = declared.get(key)
+        out.append({"check_id": t["check"], "item_id": t.get("item") or "", "introduced_in": n.introduced_in if n else "",
+                    "probe": n.probe if n else "", "reason": n.reason if n else "",
+                    "real_item_result": evidence.not_applicable.get(key, {}).get("real_item_result", "")})
+    return sorted(out, key=lambda e: (e["check_id"], e["item_id"]))
 
 
 def build_receipt(pins: Pins, summary: Dict[str, Any], evidence: Evidence, availability: Dict[str, bool],
@@ -132,7 +150,9 @@ def build_receipt(pins: Pins, summary: Dict[str, Any], evidence: Evidence, avail
     schemas = evidence.schemas if evidence.schemas is not None else []
     info = evidence.schema_info
     all_checks_pass = all(c["status"] == "PASS" for c in checks)
-    result = "PASS" if (all_checks_pass and collected > 0 and skipped == 0 and failed == 0 and not unmapped
+    na_section = _not_applicable_section(pins, tests, evidence)
+    na_complete = all(e["introduced_in"] and e["reason"] and e["real_item_result"].startswith("FAIL:") for e in na_section)
+    result = "PASS" if (all_checks_pass and collected > 0 and skipped == 0 and failed == 0 and not unmapped and na_complete
                         and all(availability.values()) and state["worktree_clean"] and bool(state["commit"])) else "FAIL"
     receipt = {
         "receipt_schema": RECEIPT_SCHEMA, "receipt_version": RECEIPT_VERSION, "result": result,
@@ -149,7 +169,9 @@ def build_receipt(pins: Pins, summary: Dict[str, Any], evidence: Evidence, avail
                     "contracts_vector_files_sha256": dict(sorted(cstate.get("vector_files", {}).items())),
                     "harness_vector_files_sha256": dict(sorted(hstate.get("vector_files", {}).items()))},
         "checks": checks,
+        "not_applicable": na_section,
         "collected_tests": collected, "skipped_tests": skipped, "failed_tests": failed,
+        "not_applicable_tests": len(na_section),
         "timestamp_utc": timestamp or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "runner": runner_info(),
     }

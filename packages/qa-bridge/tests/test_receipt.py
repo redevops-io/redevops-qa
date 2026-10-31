@@ -16,16 +16,16 @@ def repo(tmp_path):
 
 
 def build(pins, repo, **kw):
-    s = kw.pop("summary", summary())
-    return R.build_receipt(pins, s, kw.pop("evidence", evidence()), kw.pop("availability", AVAILABLE), repo,
+    s = kw.pop("summary", None) or summary(pins=pins)
+    return R.build_receipt(pins, s, kw.pop("evidence", evidence(pins)), kw.pop("availability", AVAILABLE), repo,
                            timestamp="2026-10-30T12:00:00Z")
 
 
 def test_the_top_level_fields_are_exactly_the_adr_list(pins, repo):
     r = build(pins, repo)
     assert set(r) == {"receipt_schema", "receipt_version", "result", "subjects", "environment", "schema_ids",
-                      "dependencies_available", "vectors", "checks", "collected_tests", "skipped_tests", "failed_tests",
-                      "timestamp_utc", "runner", "receipt_hash"}
+                      "dependencies_available", "vectors", "checks", "not_applicable", "collected_tests", "skipped_tests",
+                      "failed_tests", "not_applicable_tests", "timestamp_utc", "runner", "receipt_hash"}
     assert (r["receipt_schema"], r["receipt_version"]) == ("redevops-qa/compat-receipt", "1")
 
 
@@ -74,8 +74,10 @@ def test_there_are_seven_checks_with_the_adr_fields(pins, repo):
     r = build(pins, repo)
     assert [c["check_id"] for c in r["checks"]] == [f"CHK{i}" for i in range(1, 8)]
     for c in r["checks"]:
-        assert set(c) == {"check_id", "name", "collected", "passed", "failed", "skipped", "status", "failure_codes"}
-        assert (c["collected"], c["passed"], c["failed"], c["skipped"], c["status"]) == (3, 3, 0, 0, "PASS")
+        assert set(c) == {"check_id", "name", "collected", "passed", "failed", "skipped", "not_applicable", "status",
+                          "failure_codes"}
+        assert (c["passed"], c["failed"], c["skipped"], c["status"]) == (3, 0, 0, "PASS")
+        assert c["collected"] == 3 + c["not_applicable"]
 
 
 def test_no_floats_and_integers_for_counts(pins, repo):
@@ -86,20 +88,26 @@ def test_no_floats_and_integers_for_counts(pins, repo):
 
 def test_a_clean_run_passes(pins, repo):
     r = build(pins, repo)
-    assert r["result"] == "PASS" and (r["collected_tests"], r["skipped_tests"], r["failed_tests"]) == (21, 0, 0)
+    assert r["result"] == "PASS" and (r["skipped_tests"], r["failed_tests"]) == (0, 0)
+    assert r["collected_tests"] == 21 + len(pins.not_applicable) == 21 + r["not_applicable_tests"]
 
 
 @pytest.mark.parametrize("kwargs,why", [
-    ({"summary": summary(failed=("CHK3",))}, "a failed check"),
-    ({"summary": summary(skipped=("CHK5",))}, "a skipped test"),
-    ({"summary": summary(drop=("CHK2",))}, "a check with no test"),
-    ({"summary": summary(unmapped=1)}, "a test outside the seven checks"),
-    ({"summary": summary(collection_errors=("t.py",))}, "a collection error"),
+    ({"summary": "failed"}, "a failed check"),
+    ({"summary": "skipped"}, "a skipped test"),
+    ({"summary": "drop"}, "a check with no test"),
+    ({"summary": "unmapped"}, "a test outside the seven checks"),
+    ({"summary": "collection"}, "a collection error"),
     ({"availability": {"contracts": False, "harness_qa": True}}, "contracts unavailable"),
     ({"availability": {"contracts": True, "harness_qa": False}}, "harness unavailable"),
     ({"summary": {"collected": 0, "collection_errors": [], "tests": []}}, "zero collected tests"),
 ])
 def test_result_is_fail_unless_everything_holds(pins, repo, kwargs, why):
+    kwargs = dict(kwargs)
+    named = {"failed": dict(failed=("CHK3",)), "skipped": dict(skipped=("CHK5",)), "drop": dict(drop=("CHK2",)),
+             "unmapped": dict(unmapped=1), "collection": dict(collection_errors=("t.py",))}
+    if isinstance(kwargs.get("summary"), str):
+        kwargs["summary"] = summary(pins=pins, **named[kwargs["summary"]])
     assert build(pins, repo, **kwargs)["result"] == "FAIL", why
 
 
@@ -109,14 +117,14 @@ def test_zero_collected_is_reported_per_check_and_in_the_totals(pins, repo):
 
 
 def test_a_skip_is_counted_and_named(pins, repo):
-    r = build(pins, repo, summary=summary(skipped=("CHK5",)))
+    r = build(pins, repo, summary=summary(skipped=("CHK5",), pins=pins))
     assert r["skipped_tests"] == 1
     chk5 = r["checks"][4]
     assert chk5["status"] == "FAIL" and chk5["skipped"] == 1 and "SKIPPED_TESTS" in chk5["failure_codes"]
 
 
 def test_failure_codes_are_collected_per_check(pins, repo):
-    r = build(pins, repo, summary=summary(failed=("CHK1", "CHK4")))
+    r = build(pins, repo, summary=summary(failed=("CHK1", "CHK4"), pins=pins))
     assert r["checks"][0]["failure_codes"] == ["HASH_DIVERGENCE"] and r["checks"][3]["failure_codes"] == ["HASH_DIVERGENCE"]
     assert r["failed_tests"] == 2
 

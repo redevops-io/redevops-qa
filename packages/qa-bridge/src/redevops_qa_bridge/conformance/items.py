@@ -175,6 +175,26 @@ def enumerate_items() -> Dict[str, List[Item]]:
     for code in sorted(ctx_adapter_codes(ctx)):
         add("CHK6", f"error-class:{code}", "error_class", {"code": code})
     add("CHK6", "error-vocabulary", "error_vocabulary", None)
+    return _finish(ctx, items)
+
+
+def _finish(ctx: Context, items: Dict[str, List[Item]]) -> Dict[str, List[Item]]:
+    """Mark the declared not-applicable items, then add one completeness item per check."""
+    declared = {(n.check, n.item): n for n in ctx.pins.not_applicable}
+    seen = set()
+    for check, lst in items.items():
+        for i, it in enumerate(lst):
+            entry = declared.get((check, it.item_id))
+            if entry is not None:
+                lst[i] = Item(check, it.item_id, "not_applicable", {"entry": entry, "real": it})
+                seen.add((check, it.item_id))
+    for (check, item_id), entry in declared.items():
+        if (check, item_id) not in seen:
+            items[check].append(Item(check, f"na-missing:{item_id}", "na_missing", {"entry": entry}))
+    for check, lst in items.items():
+        lst.append(Item(check, f"completeness:{check}", "completeness",
+                        {"check": check, "actual": len(lst), "expected": ctx.pins.expected_items.get(check),
+                         "pin_set": ctx.pins.pin_set}))
     return items
 
 

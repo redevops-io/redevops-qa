@@ -20,7 +20,8 @@ def repo(tmp_path):
 
 
 def make(pins, repo, **kw):
-    return R.build_receipt(pins, kw.pop("summary", summary()), evidence(), AVAILABLE, repo, timestamp="2026-10-30T12:00:00Z")
+    return R.build_receipt(pins, kw.pop("summary", None) or summary(pins=pins), evidence(pins), AVAILABLE, repo,
+                           timestamp="2026-10-30T12:00:00Z")
 
 
 def write(tmp_path, receipt, name="receipt.json"):
@@ -75,7 +76,7 @@ def test_unreadable_files_are_invalid(pins, tmp_path):
 # -- consistency (hash re-sealed, so only the content rules can catch these) ------------------------------------------------
 
 def test_a_forged_pass_with_a_failing_check_is_invalid_even_if_resealed(pins, repo, tmp_path):
-    r = make(pins, repo, summary=summary(failed=("CHK1",)))
+    r = make(pins, repo, summary=summary(failed=("CHK1",), pins=pins))
     assert r["result"] == "FAIL"
     forged = copy.deepcopy(r)
     forged["result"] = "PASS"
@@ -109,7 +110,7 @@ def test_a_receipt_containing_a_float_is_invalid(pins, repo, tmp_path):
 
 
 def test_a_failing_but_current_receipt_is_reported_as_failed(pins, repo, tmp_path):
-    r = make(pins, repo, summary=summary(failed=("CHK3",)))
+    r = make(pins, repo, summary=summary(failed=("CHK3",), pins=pins))
     status, reasons = V.verify_receipt(write(tmp_path, r), pins, redevops_root=repo)
     assert status == "FAILED" and any("CHK3" in x for x in reasons)
 

@@ -7,5 +7,6 @@ pythonpath = ["packages/qa-bridge/src"]
 addopts = "-ra -p no:cacheprovider --strict-markers --strict-config"
 markers = [
     "check(id): conformance check (CHK1..CHK7, ADR A.2.5 item 4) a test belongs to",
+    "not_applicable: a conformance item declared not applicable at this pin set (a receipt category, never a skip)",
 ]
 filterwarnings = ["error"]
