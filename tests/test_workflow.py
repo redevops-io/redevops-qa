@@ -118,3 +118,13 @@ def test_the_selenium_offline_job_installs_no_selenium_and_the_browser_job_never
     assert "continue-on-error" not in TEXT and "needs" not in WF["jobs"]["selenium-browser"]
     assert "NOT a required check until proven" in WF["jobs"]["selenium-browser"]["name"]
     assert not any("repository" in s.get("with", {}) for s in steps)
+
+
+def test_the_robot_offline_job_installs_no_robot_and_the_real_job_never_skips():
+    offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["robot-offline"]["steps"])
+    assert "robotframework==" not in offline and "packages/qa-robot/tests" in offline and "tools/check_junit.py" in offline
+    steps = WF["jobs"]["robot-real"]["steps"]
+    run = "\n".join(str(s.get("run", "")) for s in steps)
+    assert '"robotframework==7.5"' in run and "-m robot_real packages/qa-robot/tests/real" in run and "tools/check_junit.py" in run
+    assert "needs" not in WF["jobs"]["robot-real"] and "NOT a required check until proven" in WF["jobs"]["robot-real"]["name"]
+    assert not any("repository" in s.get("with", {}) for s in steps)

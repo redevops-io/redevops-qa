@@ -39,6 +39,7 @@ class ErrorCode(str, Enum):
     MALFORMED_RESULT = "MALFORMED_RESULT"
     MISSING_ARTIFACT = "MISSING_ARTIFACT"
     ARTIFACT_REFUSED = "ARTIFACT_REFUSED"
+    LIBRARY_REFUSED = "LIBRARY_REFUSED"    # a suite imports or used a library, resource or construct the adapter does not allow
     STEP_LIMIT = "STEP_LIMIT"
     RETRY_LIMIT = "RETRY_LIMIT"
     ADAPTER_CRASH = "ADAPTER_CRASH"
