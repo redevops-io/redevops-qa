@@ -10,25 +10,32 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, Callable, List, Sequence
+from typing import Any, Callable, List, Optional, Sequence
 
 from ..canonical import canonical_bytes, sha256_ref
 from ..engine import MAX_VALUE_BYTES, CheckEngine, Outcome
-from ..errors import LimitExceeded, PolicyBlocked
+from ..errors import EnvironmentFault, LimitExceeded, PolicyBlocked
 from ..manifests import freeze
 from ..not_expressible import ensure_expressible
 from ..program_input import ProgramInput
 from ..registry import refuse_expected
 from .collectors import COLLECTORS, NEEDS_INPUTS
+from .connectivity import CONNECTIVITY_COLLECTORS, ProbeContext
 from .guard import GuardedSession
 
 
 class TierKGate:
-    def __init__(self, session: GuardedSession) -> None:
+    def __init__(self, session: GuardedSession, *, target_policy: Optional[Any] = None, sleep: Optional[Callable[[float], None]] = None) -> None:
         if not isinstance(session, GuardedSession):
             raise PolicyBlocked("a gate needs a guarded session", guard_code="SESSION_REQUIRED")
         self._s = session
         self._cleanups: List[Callable[[], Sequence[str]]] = []
+        kw: dict = {"register_cleanup": self.register_cleanup}
+        if target_policy is not None:
+            kw["target_policy"] = target_policy
+        if sleep is not None:
+            kw["sleep"] = sleep
+        self._ctx = ProbeContext(**kw)
 
     @property
     def lane(self) -> str:
@@ -50,17 +57,20 @@ class TierKGate:
         if subject.get("tier") != "K":
             raise PolicyBlocked("the gate runs tier K subjects only", guard_code="TIER_MISMATCH")
         spec = engine.registry.resolve(ref)                       # hash verified before anything is read or collected
-        if spec.tier != "K" or spec.collector not in COLLECTORS:
+        if spec.tier != "K" or (spec.collector not in COLLECTORS and spec.collector not in CONNECTIVITY_COLLECTORS):
             raise PolicyBlocked("a tier K subject must name a tier K program", guard_code="TIER_MISMATCH", program=spec.id)
         inputs = list(subject.get("inputs") or ())
         digests = ()
         data = ProgramInput()
-        if spec.collector in NEEDS_INPUTS or inputs:
+        if spec.collector in NEEDS_INPUTS or spec.collector in CONNECTIVITY_COLLECTORS or inputs:
             loaded, resolution, count, digests = engine.load_inputs(inputs)
             if loaded is None:
                 return Outcome(resolution=resolution, match_count=count, inputs=digests)
             data = loaded
-        observations = COLLECTORS[spec.collector](self._s, data.manifests)
+        if spec.collector in CONNECTIVITY_COLLECTORS:
+            observations = CONNECTIVITY_COLLECTORS[spec.collector](self._s, data, self._ctx)
+        else:
+            observations = COLLECTORS[spec.collector](self._s, data.manifests)
         data = replace(data, cluster=tuple(freeze(o) for o in observations))
         value = engine.registry.run(ref, data)
         raw = canonical_bytes(value)
@@ -70,7 +80,9 @@ class TierKGate:
                        inputs=tuple(digests) + (("disposable-proof", self._s.proof_ref),))
 
     def reset(self, scope: str) -> None:
-        self._run_cleanups()
+        leaked = self._run_cleanups()
+        if leaked:
+            raise EnvironmentFault("probe workloads could not be removed", leaked=",".join(sorted(leaked))[:200])
 
     def _run_cleanups(self) -> List[str]:
         leaked: List[str] = []

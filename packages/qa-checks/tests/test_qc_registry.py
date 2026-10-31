@@ -16,9 +16,9 @@ HASH = re.compile(r"sha256:[0-9a-f]{64}")
 
 def test_every_program_has_a_full_sha256_and_ids_and_hashes_are_unique(registry):
     entries = registry.entries()
-    assert len(entries) == 40
+    assert len(entries) == 44
     assert all(HASH.fullmatch(e.program_hash) for e in entries)
-    assert len({e.id for e in entries}) == 40 and len({e.program_hash for e in entries}) == 40
+    assert len({e.id for e in entries}) == 44 and len({e.program_hash for e in entries}) == 44
 
 
 def test_the_registry_satisfies_the_harness_program_registry_protocol(registry, neutral):
