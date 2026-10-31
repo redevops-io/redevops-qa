@@ -17,3 +17,4 @@ Configuration of the pinned upstream versions: [pins.toml](pins.toml). The contr
 The browser adapter is in [packages/qa-playwright](packages/qa-playwright/README.md).
 The licence matrix for optional adapter frameworks is in [third_party](third_party/README.md).
 The shared adapter protocol, models and supervisor are in [packages/qa-adapter-kit](packages/qa-adapter-kit/README.md).
+The Selenium adapters are in [packages/qa-selenium](packages/qa-selenium/README.md).

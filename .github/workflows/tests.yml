@@ -254,3 +254,62 @@ jobs:
             python -m pytest -q -m browser packages/qa-playwright/tests/browser --junitxml="$RUNNER_TEMP/junit-browser.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-browser.xml"
+
+  selenium-offline:
+    name: "selenium adapter (offline - fake browser, recorded pytest JUnit reports, real pytest under the supervisor; no Selenium installed)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the offline Selenium adapter tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q packages/qa-selenium/tests --junitxml="$RUNNER_TEMP/junit-selenium-offline.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-selenium-offline.xml"
+
+  selenium-browser:
+    name: selenium browser lane (real Chrome and ChromeDriver; Selenium pinned; NOT a required check until proven; a missing dependency fails, never skips)
+    # The only job that installs Selenium. It needs the runner's Chrome and ChromeDriver and never downloads a browser or a driver
+    # (the adapter passes the driver path explicitly, so Selenium Manager is not used). Read-only, no secret. The tests run against a
+    # page the test serves from loopback.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned test tools and Selenium
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "selenium==4.52.0"
+      - name: Locate the runner's Chrome and ChromeDriver (fail when either is missing)
+        run: |
+          chrome="$(command -v google-chrome || true)"
+          driver=""
+          if [ -n "${CHROMEWEBDRIVER:-}" ] && [ -x "$CHROMEWEBDRIVER/chromedriver" ]; then driver="$CHROMEWEBDRIVER/chromedriver"; fi
+          if [ -z "$driver" ]; then driver="$(command -v chromedriver || true)"; fi
+          if [ ! -x "$chrome" ] || [ ! -x "$driver" ]; then echo "FAIL: Chrome ($chrome) or ChromeDriver ($driver) is missing on this runner"; exit 1; fi
+          "$chrome" --version
+          "$driver" --version
+          echo "QA_CHROME_BINARY=$chrome" >> "$GITHUB_ENV"
+          echo "QA_CHROMEDRIVER_PATH=$driver" >> "$GITHUB_ENV"
+      - name: Fail unless the pinned Selenium is importable
+        run: python -c "import importlib.metadata as m, selenium; assert m.version('selenium') == '4.52.0', m.version('selenium')"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the browser lane (scrubbed environment; only tests marked browser)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            QA_CHROME_BINARY="$QA_CHROME_BINARY" QA_CHROMEDRIVER_PATH="$QA_CHROMEDRIVER_PATH" \
+            python -m pytest -q -m browser packages/qa-selenium/tests/browser --junitxml="$RUNNER_TEMP/junit-selenium-browser.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-selenium-browser.xml"
