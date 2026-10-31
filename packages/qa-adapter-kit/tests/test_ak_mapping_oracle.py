@@ -149,3 +149,17 @@ def test_end_to_end_a_run_error_gives_no_evidence_at_all(tmp_path):
     result, _ = run(tmp_path, "malformed")
     assert result.status is Status.ERROR
     assert map_to_canonical(result, ("A-1",), {"T1": "A-1"}).evidence[0].native_status is Status.UNVERIFIED
+
+
+def test_an_interactive_check_is_evidence_only_when_it_declares_the_assertion_and_is_mapped(tmp_path):
+    from qa_adapter_kit import InteractiveActionRequest, InteractiveSession
+    from qa_adapter_kit.testing.fakes import FakeInteractiveAdapter
+    (tmp_path / "o").mkdir()
+    s = InteractiveSession(FakeInteractiveAdapter(), output_dir=tmp_path / "o")
+    declared = s.perform(InteractiveActionRequest(session_id="s1", adapter_id="fake-interactive", step_index=0, kind="check", target="assert_pass",
+                                                  assertion_id="A-1"))
+    undeclared = s.perform(InteractiveActionRequest(session_id="s1", adapter_id="fake-interactive", step_index=1, kind="check", target="assert_pass"))
+    [good] = map_to_canonical(declared, ("A-1",), {"S0": "A-1"}).evidence
+    [bad] = map_to_canonical(undeclared, ("A-1",), {"S1": "A-1"}).evidence
+    assert good.native_status is Status.PASS and canonical_status(good) is Status.UNVERIFIED
+    assert bad.native_status is Status.UNVERIFIED

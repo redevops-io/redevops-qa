@@ -141,7 +141,7 @@ def test_interactive_request_hides_its_secret_everywhere():
 
 
 @pytest.mark.parametrize("kw", [dict(kind="Click"), dict(kind="click!"), dict(step_index=-1), dict(step_index=10_000), dict(timeout_s=0),
-                                dict(timeout_s=float("nan")), dict(value="x", secret_value="yyyy"), dict(secret_value=""), dict(target="a\x00b")])
+                                dict(timeout_s=float("nan")), dict(value="x", secret_value="yyyy"), dict(secret_value=""), dict(assertion_id="bad id"), dict(target="a\x00b")])
 def test_interactive_request_validation(kw):
     base = dict(session_id="s1", adapter_id="fake-interactive", step_index=0, kind="click")
     base.update(kw)
@@ -214,3 +214,8 @@ def test_artifact_validation(kw):
     base.update(kw)
     with pytest.raises(ModelError):
         EvidenceArtifact(**base)
+
+
+def test_an_action_can_declare_the_assertion_it_is_evidence_for():
+    r = InteractiveActionRequest(session_id="s1", adapter_id="fake-interactive", step_index=0, kind="check", assertion_id="A-1")
+    assert InteractiveActionRequest.from_dict(r.to_dict()) == r and r.to_dict()["assertion_id"] == "A-1"

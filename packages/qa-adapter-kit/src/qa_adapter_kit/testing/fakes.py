@@ -124,7 +124,7 @@ class FakeInteractiveAdapter:
         if target.startswith("assert_"):
             status = {"assert_pass": "PASS", "assert_fail": "FAIL", "assert_error": "ERROR"}[target]
             return ActionOutcome(assertions=[NativeAssertion(native_id=f"S{request.step_index}", name=target, status=Status(status),
-                                                            declared_assertion_ids=("A-1",))])
+                                                            declared_assertion_ids=((request.assertion_id,) if request.assertion_id else ()))])
         raise AdapterFault("unknown target", retryable=False)
 
     def abort(self) -> None:

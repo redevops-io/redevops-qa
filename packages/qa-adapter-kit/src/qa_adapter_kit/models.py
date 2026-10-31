@@ -348,6 +348,7 @@ class InteractiveActionRequest:
     value: Optional[str] = None
     secret_value: Optional[str] = None   # redacted everywhere; never serialised
     timeout_s: float = 10.0
+    assertion_id: Optional[str] = None   # the canonical assertion an assertion-like action (a check) declares itself evidence for
     schema: str = "redevops-qa/interactive-action-request/1"
 
     def __post_init__(self) -> None:
@@ -361,6 +362,8 @@ class InteractiveActionRequest:
             _text("secret_value", self.secret_value, maxlen=MAX_TEXT, allow_empty=False)
         if self.value is not None and self.secret_value is not None:
             raise ModelError("an action carries a value or a secret value, not both")
+        if self.assertion_id is not None:
+            _match("assertion_id", self.assertion_id, _ID)
 
     @classmethod
     def from_dict(cls, data: Any) -> "InteractiveActionRequest":
