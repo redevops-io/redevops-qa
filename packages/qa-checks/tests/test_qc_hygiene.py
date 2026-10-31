@@ -93,7 +93,7 @@ def test_repeat_runs_in_one_process_are_byte_identical(case_root, registry):
     from redevops_qa_checks.canonical import canonical_bytes
     from redevops_qa_checks.engine import CheckEngine
     e = CheckEngine(case_root, registry)
-    for spec in registry.entries():
+    for spec in (x for x in registry.entries() if x.tier == "OFFLINE"):
         s = {"check_program_ref": spec.ref, "inputs": [{"kind": "MANIFEST_PATH", "path": "."}], "tier": "OFFLINE"}
         assert canonical_bytes(e.run_check(s).value) == canonical_bytes(CheckEngine(case_root, registry).run_check(s).value)
 
@@ -105,6 +105,6 @@ def test_the_result_does_not_depend_on_the_order_files_were_created(tmp_path, re
     docs = good_set()
     a = write_tree(tmp_path / "a", docs)
     b = write_tree(tmp_path / "b", dict(reversed(list(docs.items()))))
-    for spec in registry.entries():
+    for spec in (x for x in registry.entries() if x.tier == "OFFLINE"):
         s = {"check_program_ref": spec.ref, "inputs": [{"kind": "MANIFEST_PATH", "path": "."}], "tier": "OFFLINE"}
         assert canonical_bytes(CheckEngine(a, registry).run_check(s).value) == canonical_bytes(CheckEngine(b, registry).run_check(s).value), spec.id

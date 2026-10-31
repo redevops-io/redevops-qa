@@ -1,0 +1,3 @@
+# Helm values for the Envoy Gateway chart v1.9.2. The chart ships the Gateway API and Envoy Gateway CRDs.
+crds:
+  enabled: true

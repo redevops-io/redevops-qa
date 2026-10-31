@@ -62,6 +62,27 @@ and configuration files, and `image inspect` output. An `IMAGE_DIGEST` reference
 the digest an `inspect` document reports). Two documents answering to one digest are `AMBIGUOUS`, never first-wins. Variable
 values and build commands are not kept (names and counts only). There is no registry access, no daemon call and no network.
 
+## Disposable-cluster tier (`tierk`)
+
+No persistent write happens outside a disposable, isolated cluster that this tool generated. Inside one, only server-side
+dry-run (persists nothing) and fixed probe workloads are allowed. **The real cluster lane is disabled by default and nothing in
+this package starts a cluster**; every test uses a fake runner.
+
+| Part | What it does |
+|---|---|
+| `guard` | accepts only a cluster this tool generated, proven locally (state directory sentinel, marker list with fixed cluster and context names per lane, the kubeconfig that was generated: exactly one cluster, context and user, embedded client certificate data only, https on loopback or a configured sandbox network) and in the cluster (a marker object carrying the nonce hash, names, lane and plan hash, and the server version the lane declares). An ambient kubeconfig, a context not on the allow-list, a non-loopback server, a missing or different marker object are all refused. `disposable_proof_ref` is the sha256 of a canonical proof record, recomputed from the live cluster. |
+| `argv` | the allow-list of kubectl commands, structural and exact; secrets are not readable; no flag selects another kubeconfig, context, server, user or proxy; only the probe rules persist anything and only in `qa-probe-` namespaces |
+| `runner` | `KubectlRunner` protocol; the real runner needs the real lane enabled, a valid disposable-host acknowledgement for this host, an absolute kubectl path and the guard's local result; it runs with an empty environment and a timeout |
+| `GuardedSession` | the only handle drivers get: every command is checked against the allow-list, the marker object is re-read before each one, the number of commands is bounded |
+| `plan` | the bring-up plan as data: components, digests, charts, CRD bundles, tool checksums, apply order, nine readiness gates, determinism requirements, two node lanes; Helm values and kind configurations under `tierk/data/` are hashed into it |
+| `drivers`, `collectors` | server-side dry-run per object, rejection classification (webhook policy, Pod Security, quota, limit range, schema, unknown kind), Gateway, route, policy and quota status |
+| `gate`, `lanes` | the adapter's route into the cluster; per-lane result sets that are never merged (no pooled count, no attribution of a lane difference) |
+| `not_expressible` | properties the disposable cluster cannot show (closed-world completeness, signature admission, metadata-endpoint traffic proof, certificate issuance, secret sync, background scans, name-based unreachable probes, volume write semantics) are refused with `UnsupportedOperation`, never answered with a pass |
+
+Tier K programs (`cluster.dry-run`, `cluster.admission`, `cluster.gateway-status`, `cluster.policy-status`, each with `.counts`)
+are registered like any other program; their hash also covers the allow-list, the drivers and the collectors. A tier K subject
+must name a tier K program and an offline subject must not.
+
 ## What a program hash covers
 
 `program_hash` is the sha256 of a source bundle: a header naming the program id, version and entry point, the program module,

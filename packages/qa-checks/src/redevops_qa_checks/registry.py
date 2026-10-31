@@ -40,12 +40,12 @@ from .program_input import ProgramInput
 PACKAGE_ROOT = Path(__file__).resolve().parent
 FRAMEWORK_FILES = ("canonical.py", "manifests.py", "program_input.py")
 #: further framework files a program may declare in ``FRAMEWORK`` (hashed with it; not part of the purity lint, they read files)
-HASHED_FRAMEWORK = ("image_store.py",)
+HASHED_FRAMEWORK = ("image_store.py", "tierk/argv.py", "tierk/drivers.py", "tierk/collectors.py")
 ID_PATTERN = re.compile(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*")
 VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 #: modules a program (and its support files) may import
-SUPPORT_MODULES = frozenset({"_common", "_image"})
+SUPPORT_MODULES = frozenset({"_common", "_image", "_cluster"})
 ALLOWED_IMPORTS = frozenset({"__future__", "re", "fractions", "ipaddress", "typing", "collections", "itertools", "math"})
 FORBIDDEN_CALLS = frozenset({"open", "exec", "eval", "compile", "__import__", "globals", "locals", "vars", "getattr", "setattr",
                              "delattr", "breakpoint", "input", "memoryview"})
@@ -139,6 +139,8 @@ class ProgramSpec:
     program_hash: str
     source_files: Tuple[str, ...]
     fn: Callable[[ProgramInput], Any]
+    tier: str = "OFFLINE"
+    collector: str = ""
 
     @property
     def ref(self) -> Dict[str, str]:
@@ -173,6 +175,10 @@ def spec_from_module(module_name: str) -> Tuple[ProgramSpec, ...]:
         if rel not in HASHED_FRAMEWORK:
             raise ProgramRefused(f"{module_name}: FRAMEWORK entry {rel!r} is not an allowed framework file")
         files[rel] = _framework_bytes(rel)
+    tier = getattr(mod, "TIER", "OFFLINE")
+    collector = getattr(mod, "COLLECTOR", "")
+    if tier not in ("OFFLINE", "K") or (tier == "OFFLINE" and collector) or (tier == "K" and not collector):
+        raise ProgramRefused(f"{module_name}: TIER and COLLECTOR are inconsistent")
     entries = [("run", pid, mod.run)]
     if hasattr(mod, "run_counts"):
         entries.append(("run_counts", pid + ".counts", mod.run_counts))
@@ -181,9 +187,10 @@ def spec_from_module(module_name: str) -> Tuple[ProgramSpec, ...]:
     out = []
     for entry, eid, fn in entries:
         assert_run_signature(rel_own, files[rel_own], entry)
-        header = f"program {eid}@{ver} entry {entry}\n".encode("utf-8")
+        header = f"program {eid}@{ver} entry {entry}\n" + (f"tier {tier} collector {collector}\n" if tier != "OFFLINE" else "")
         out.append(ProgramSpec(id=eid, version=ver, description=str(mod.DESCRIPTION), source_files=tuple(sorted(files)),
-                               program_hash=sha256_ref(header + source_bundle(files.items())), fn=fn))
+                               program_hash=sha256_ref(header.encode("utf-8") + source_bundle(files.items())), fn=fn, tier=tier,
+                               collector=collector))
     return tuple(out)
 
 
@@ -249,7 +256,8 @@ def refuse_expected(payload: Any, where: str = "check input") -> None:
 
 BUILTIN_MODULES = ("image_references", "image_name_map", "security_context", "resources", "env_and_secret_refs",
                    "gateway_routes", "network_policies", "kyverno_policies", "probes", "cross_references", "structure",
-                   "image_user_runtime", "image_ports_health", "image_labels_base", "image_layers", "image_attestations")
+                   "image_user_runtime", "image_ports_health", "image_labels_base", "image_layers", "image_attestations",
+                   "cluster_dry_run", "cluster_admission", "cluster_gateway_status", "cluster_policy_status")
 
 
 def builtin_registry(extra_modules: Iterable[str] = ()) -> ProgramRegistry:

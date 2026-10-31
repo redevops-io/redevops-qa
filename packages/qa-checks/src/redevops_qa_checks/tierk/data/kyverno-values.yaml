@@ -1,0 +1,12 @@
+# Helm values for the Kyverno chart 3.9.2: the admission controller only, one replica, no hook image (the cluster is deleted,
+# not uninstalled).
+admissionController:
+  replicas: 1
+backgroundController:
+  enabled: false
+cleanupController:
+  enabled: false
+reportsController:
+  enabled: false
+webhooksCleanup:
+  enabled: false

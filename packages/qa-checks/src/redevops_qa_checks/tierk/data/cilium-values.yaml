@@ -1,0 +1,14 @@
+# Helm values for the Cilium chart 1.19.6. Settings come from the component inventory; images are verified against the plan's
+# digests at the readiness gate rather than through chart-specific digest keys.
+kubeProxyReplacement: true
+ipam:
+  mode: kubernetes
+routingMode: tunnel
+operator:
+  replicas: 1
+envoy:
+  enabled: false
+hubble:
+  enabled: false
+gatewayAPI:
+  enabled: false
