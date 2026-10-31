@@ -1,32 +1,62 @@
 # redevops-qa pins: what the bridge and the conformance suite are tied to. See packages/qa-bridge/README.md.
 # Read by redevops_qa_bridge.pins; nothing about a dependency is hard-coded anywhere else.
 #
-# While a dependency has no release tag the pin is a TEMP-PIN (temp_pin = true, tag = ""): CI refuses a TEMP-PIN on main.
-# source_path is relative to this file's directory; QA_PIN_CONTRACTS_PATH / QA_PIN_HARNESS_QA_PATH override it per machine.
-# distribution_sha256 is the digest of the tree(s) in distribution_paths (see redevops_qa_bridge.pins.tree_digest);
-# vector_files lists the sha256 of every vector file, and a file that matches addendum_globs but is not listed is a failure.
+# A pin set names an exact commit (and tag, once one exists) of each dependency. While a dependency has no release tag the
+# pin is a TEMP-PIN (temp_pin = true, tag = ""): CI refuses a TEMP-PIN on main. default_set is used unless
+# REDEVOPS_QA_PIN_SET (or --pin-set) selects another set.
+#   c4 : runtime-contracts with the additive clarifications (addendum vectors, integrity refusal codes, reason_code)
+#   c3 : runtime-contracts at the frozen interface commit (IF-1)
+# Both sets pin the same harness QA module snapshot.
+#
+# source_path is relative to this file's directory; QA_PIN_CONTRACTS_PATH / QA_PIN_HARNESS_QA_PATH override it per machine
+# for the selected set. distribution_sha256 is the digest of the tree(s) in distribution_paths (see
+# redevops_qa_bridge.pins.tree_digest); vector_files lists the sha256 of every vector file, and a file that matches
+# addendum_globs but is not listed is a failure (the pin is stale).
 schema = "redevops-qa/pins"
-version = 1
+version = 2
+default_set = "c4"
 
-[contracts]
+# Settings shared by every pin set. The allow-lists are the *recorded, reviewed* differences the parity checks accept; any
+# difference not listed here fails the check.
+[conformance]
+# schemas and enums that exist only in contracts, by design: the harness receives no plan record (ADR A.2.4 item 7)
+contracts_only_schemas = ["runtime-contracts/qa/qa-plan"]
+contracts_only_values = ["PlanGate", "PlanItem", "ResourceClaim"]
+contracts_only_enums = ["CoverageContract", "EvidenceLevel"]
+neutral_only_enums = []
+# generic structural codes contracts raises that the neutral module folds into SPEC_INVALID
+contracts_only_error_codes = ["INVALID_FIELD", "MISSING_FIELD", "DUPLICATE_ENTRY", "FLOAT_REFUSED", "SCHEMA_MISMATCH",
+                              "PLAN_INVALID", "RECORD_INCONSISTENT", "ASSERTION_INTEGRITY"]
+# codes only the neutral module raises (canonicalisation; BATCH_HALTED until the contracts side defines it)
+neutral_only_error_codes = ["CANON_REFUSED", "BATCH_HALTED"]
+# the real qa-playwright adapter, as "module:ClassName"; empty until that package exists. When non-empty it must resolve
+# and satisfy both protocols; qa_playwright_required = true makes an empty value a failure.
+qa_playwright_class = ""
+qa_playwright_required = false
+
+[sets.c4]
+
+[sets.c4.contracts]
 repo = "redevops-io/runtime-contracts"
 version = "0.3.14"
 tag = ""
 temp_pin = true
-commit = "13e00f23da74782af091aec607c47358e9814fc6"
+commit = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
 package = "runtime_contracts"
-source_path = ".pinned/runtime-contracts"
+source_path = ".pinned/c4/runtime-contracts"
 distribution_paths = ["runtime_contracts"]
-distribution_sha256 = "4004127769143f28cfee10e117573e0c893640a1f43144036d7851d9e2aa9760"
-addendum_globs = ["golden/qa_*addendum*.json", "golden/qa_canon_vectors_*.json"]
+distribution_sha256 = "58cf920f9caa9d529d3c037ee5d3a26d432425c722e93a7e9ceb718be06b6175"
+addendum_globs = ["golden/qa_*addendum*.json", "golden/qa_canon_vectors_*.json", "golden/qa_clarifications*.json"]
 
-[contracts.vector_files]
+[sets.c4.contracts.vector_files]
+"golden/qa.inventory.json" = "ce8709f40642be7513bd5a80dbd8711acd1f56cce61b3403bada3ec3b5179c6e"
 "golden/qa.json" = "2aaed7aace5b9952ef56f43f73edc1745a15da4d1f83db92c7aad5af279bf5e1"
+"golden/qa.schema.json" = "ce1146529e2d3e31ff89083dea11f6cc2719c872c2a653a640976ecd485855c4"
 "golden/qa_canon_vectors.json" = "7241c570746a63e75431591b88e42562f6604fc2a8586474a267eedb51908a13"
-"golden/qa.schema.json" = "8d61738f488ddca2cad6a0eebd688f1d1fa2d5f2b1b7fd3904b97f93abc0cb22"
-"golden/qa.inventory.json" = "8ebd0be1488233966ba66dc2cbb7c46b42ec3973a246f405e905130a4d28ba57"
+"golden/qa_canon_vectors_addendum.json" = "c2f5faf7c132c4cdeb14a6708676a4167ddfbd5e60ccfdb96ebe4612f72564d8"
+"golden/qa_clarifications.json" = "a486ffcb0117e1cbb72600da1404761ac718f3d07df750db97bfa31bd88f9a3e"
 
-[harness_qa]
+[sets.c4.harness_qa]
 repo = "redevops-io/agent-harness"
 version = "0.1.0"
 tag = ""
@@ -34,10 +64,46 @@ temp_pin = true
 commit = "212c5a1f4948e87046a7a7220159c31910869643"
 base_pin = "6b8ba3a596a5e2caf0fdf009f2af013517591662"
 package = "agent_harness"
-source_path = ".pinned/agent-harness"
+source_path = ".pinned/c4/agent-harness"
 distribution_paths = ["agent_harness"]
 distribution_sha256 = "ffea55a61ab44a67987092b40d089669fed27cd79a7343f9edd3ac948f67e034"
 
-[harness_qa.vector_files]
+[sets.c4.harness_qa.vector_files]
+"tests/qa/golden/qa_canon_vectors.json" = "7241c570746a63e75431591b88e42562f6604fc2a8586474a267eedb51908a13"
+"tests/qa/golden/qa.inventory.json" = "8ebd0be1488233966ba66dc2cbb7c46b42ec3973a246f405e905130a4d28ba57"
+
+[sets.c3]
+
+[sets.c3.contracts]
+repo = "redevops-io/runtime-contracts"
+version = "0.3.14"
+tag = ""
+temp_pin = true
+commit = "13e00f23da74782af091aec607c47358e9814fc6"
+package = "runtime_contracts"
+source_path = ".pinned/c3/runtime-contracts"
+distribution_paths = ["runtime_contracts"]
+distribution_sha256 = "4004127769143f28cfee10e117573e0c893640a1f43144036d7851d9e2aa9760"
+addendum_globs = ["golden/qa_*addendum*.json", "golden/qa_canon_vectors_*.json", "golden/qa_clarifications*.json"]
+
+[sets.c3.contracts.vector_files]
+"golden/qa.inventory.json" = "8ebd0be1488233966ba66dc2cbb7c46b42ec3973a246f405e905130a4d28ba57"
+"golden/qa.json" = "2aaed7aace5b9952ef56f43f73edc1745a15da4d1f83db92c7aad5af279bf5e1"
+"golden/qa.schema.json" = "8d61738f488ddca2cad6a0eebd688f1d1fa2d5f2b1b7fd3904b97f93abc0cb22"
+"golden/qa_canon_vectors.json" = "7241c570746a63e75431591b88e42562f6604fc2a8586474a267eedb51908a13"
+
+[sets.c3.harness_qa]
+repo = "redevops-io/agent-harness"
+version = "0.1.0"
+tag = ""
+temp_pin = true
+commit = "212c5a1f4948e87046a7a7220159c31910869643"
+base_pin = "6b8ba3a596a5e2caf0fdf009f2af013517591662"
+package = "agent_harness"
+source_path = ".pinned/c3/agent-harness"
+distribution_paths = ["agent_harness"]
+distribution_sha256 = "ffea55a61ab44a67987092b40d089669fed27cd79a7343f9edd3ac948f67e034"
+
+[sets.c3.harness_qa.vector_files]
 "tests/qa/golden/qa_canon_vectors.json" = "7241c570746a63e75431591b88e42562f6604fc2a8586474a267eedb51908a13"
 "tests/qa/golden/qa.inventory.json" = "8ebd0be1488233966ba66dc2cbb7c46b42ec3973a246f405e905130a4d28ba57"

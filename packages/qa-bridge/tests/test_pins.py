@@ -7,49 +7,82 @@ import pytest
 from redevops_qa_bridge import deps, pins as pins_mod
 from redevops_qa_bridge.errors import DependencyUnavailable, PinMismatch, PinsInvalid
 
+@pytest.fixture(autouse=True)
+def _no_pin_set_in_the_environment(monkeypatch):
+    monkeypatch.delenv(pins_mod.PIN_SET_ENV, raising=False)
+
+
 HEX40 = "a" * 40
 HEX64 = "b" * 64
 
 
-def _write_pins(tmp_path, *, contracts_extra="", harness_extra="", contracts_commit=HEX40, temp_pin="true", tag=""):
-    text = f'''
-schema = "redevops-qa/pins"
-version = 1
-[contracts]
-repo = "r/c"
+def _dep_block(prefix, repo, extra="", commit=HEX40, tag="", temp_pin="true", base_pin=False):
+    head = f'''
+[sets.{prefix}.{repo[0]}]
+repo = "r/{repo[0]}"
 version = "1"
 tag = "{tag}"
 temp_pin = {temp_pin}
-commit = "{contracts_commit}"
-package = "pkg_c"
-source_path = "c"
-distribution_paths = ["pkg_c"]
+commit = "{commit}"
+package = "pkg_{repo[1]}"
+source_path = "{repo[1]}"
+distribution_paths = ["pkg_{repo[1]}"]
 distribution_sha256 = "{HEX64}"
-{contracts_extra}
-[contracts.vector_files]
-"golden/v.json" = "{HEX64}"
-[harness_qa]
-repo = "r/h"
-version = "1"
-tag = ""
-temp_pin = true
-commit = "{HEX40}"
-base_pin = "{HEX40}"
-package = "pkg_h"
-source_path = "h"
-distribution_paths = ["pkg_h"]
-distribution_sha256 = "{HEX64}"
-{harness_extra}
-[harness_qa.vector_files]
+'''
+    if base_pin:
+        head += f'base_pin = "{HEX40}"\n'
+    return head + extra + f'''
+[sets.{prefix}.{repo[0]}.vector_files]
 "golden/v.json" = "{HEX64}"
 '''
+
+
+def _write_pins(tmp_path, *, contracts_extra="", harness_extra="", contracts_commit=HEX40, temp_pin="true", tag="",
+                default_set="a", extra_sets=()):
+    text = f'''
+schema = "redevops-qa/pins"
+version = 2
+default_set = "{default_set}"
+'''
+    for name in ("a", *extra_sets):
+        text += _dep_block(name, ("contracts", "c"), contracts_extra, contracts_commit, tag, temp_pin)
+        text += _dep_block(name, ("harness_qa", "h"), harness_extra, HEX40, "", "true", base_pin=True)
     path = tmp_path / "pins.toml"
     path.write_text(text, encoding="utf-8")
     return path
 
 
+def test_the_repository_pins_file_has_both_sets_and_c4_is_the_default():
+    c3 = pins_mod.load_pins(pin_set="c3")
+    c4 = pins_mod.load_pins(pin_set="c4")
+    assert c3.available_sets == c4.available_sets == ("c3", "c4")
+    assert c3.contracts.commit == "13e00f23da74782af091aec607c47358e9814fc6"
+    assert c4.contracts.commit == "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+    assert c3.harness_qa.commit == c4.harness_qa.commit
+    assert "golden/qa_canon_vectors_addendum.json" in c4.contracts.vector_files
+    assert "golden/qa_canon_vectors_addendum.json" not in c3.contracts.vector_files
+    assert c3.pin_set == "c3" and c4.pin_set == "c4"
+    assert c3.contracts.vector_files["golden/qa.json"] == c4.contracts.vector_files["golden/qa.json"]
+
+
+def test_the_default_set_is_c4(monkeypatch):
+    monkeypatch.delenv(pins_mod.PIN_SET_ENV, raising=False)
+    assert pins_mod.load_pins().pin_set == "c4"
+
+
+def test_the_pin_set_environment_variable_selects_a_set(monkeypatch):
+    monkeypatch.setenv(pins_mod.PIN_SET_ENV, "c3")
+    assert pins_mod.load_pins().pin_set == "c3"
+    assert pins_mod.load_pins(pin_set="c4").pin_set == "c4"       # an explicit argument wins
+
+
+def test_an_unknown_pin_set_is_refused():
+    with pytest.raises(PinsInvalid):
+        pins_mod.load_pins(pin_set="nope")
+
+
 def test_the_repository_pins_file_loads(pins):
-    assert pins.contracts.commit == "13e00f23da74782af091aec607c47358e9814fc6"
+    assert pins.contracts.commit in {"13e00f23da74782af091aec607c47358e9814fc6", "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"}
     assert pins.harness_qa.base_pin == "6b8ba3a596a5e2caf0fdf009f2af013517591662"
     assert pins.contracts.temp_pin and pins.harness_qa.temp_pin
     assert "golden/qa.json" in pins.contracts.vector_files
@@ -59,7 +92,8 @@ def test_a_minimal_valid_file_loads(tmp_path, monkeypatch):
     for name in pins_mod.PATH_ENV.values():
         monkeypatch.delenv(name, raising=False)
     loaded = pins_mod.load_pins(_write_pins(tmp_path))
-    assert loaded.contracts.resolved_path == (tmp_path / "c").resolve() or loaded.contracts.resolved_path == tmp_path / "c"
+    assert loaded.contracts.resolved_path in {(tmp_path / "c").resolve(), tmp_path / "c"}
+    assert loaded.pin_set == "a"
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -100,6 +134,22 @@ def test_a_temp_pin_is_forbidden_on_main(tmp_path):
     released = pins_mod.load_pins(_write_pins(tmp_path, temp_pin="false", tag="v0.3.15"))
     with pytest.raises(PinMismatch):       # the harness is still a TEMP-PIN
         pins_mod.check_forbid_temp_pin(released)
+
+
+def test_a_second_set_in_one_file_is_selectable(tmp_path, monkeypatch):
+    monkeypatch.delenv(pins_mod.PIN_SET_ENV, raising=False)
+    path = _write_pins(tmp_path, extra_sets=("b",), default_set="a")
+    assert pins_mod.load_pins(path, "b").pin_set == "b"
+    assert pins_mod.load_pins(path).pin_set == "a"
+    with pytest.raises(PinsInvalid):
+        pins_mod.load_pins(_write_pins(tmp_path, default_set="zz"))
+
+
+def test_the_github_output_mode_prints_the_commits(tmp_path, capsys):
+    path = _write_pins(tmp_path)
+    assert pins_mod.main(["--file", str(path), "--github-output"]) == 0
+    out = capsys.readouterr().out
+    assert f"contracts_commit={HEX40}" in out and "pin_set=a" in out and "harness_qa_path=h" in out
 
 
 def test_the_pins_cli_reports_ok_and_failure(tmp_path, capsys):

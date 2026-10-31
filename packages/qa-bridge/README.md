@@ -43,8 +43,9 @@ Plan refusals keep the contracts reason code (`UNSUPPORTED_COVERAGE_CONTRACT`, `
 
 ## Pins
 
-`pins.toml` at the repository root is the single configuration of what the bridge is tied to. For `contracts` and
-`harness_qa` it lists the repository, version, git tag (empty while the pin is a draft `TEMP-PIN`), full commit sha, the
+`pins.toml` at the repository root is the single configuration of what the bridge is tied to. It holds named **pin sets**
+(`[sets.c3]`, `[sets.c4]`; `default_set` is used unless `REDEVOPS_QA_PIN_SET` or `--pin-set` selects one). For `contracts`
+and `harness_qa` a pin set lists the repository, version, git tag (empty while the pin is a draft `TEMP-PIN`), full commit sha, the
 source tree to import from, the sha256 of the distribution tree and the sha256 of every vector file. Nothing about a
 dependency is hard-coded elsewhere.
 
@@ -77,3 +78,34 @@ env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 p
 ```
 
 `tools/check_junit.py` turns a JUnit report into a failure on zero collected tests or any skip (CI uses it).
+
+## Conformance suite (release-critical)
+
+`tests/conformance/` makes the contracts `qa/v1` schemas and the harness neutral mirror one contract (ADR A.2.5). It runs
+against the **exact** pinned versions, fails (never skips) when either dependency is unavailable or inexact, and a run is
+only valid with a nonzero collected count and zero skips. Seven checks, one test per item:
+
+| id | check |
+|---|---|
+| CHK1 | hash equality, contracts to neutral: every golden case and value, assertion sets and relations, every vector of every pinned canonical vector file (the 97 frozen vectors and any addendum), predicate and value digests, set ordering |
+| CHK2 | hash equality, neutral to contracts: the harness vector files and neutral parses of the golden inputs; a contracts vector without a matching harness vector fails |
+| CHK3 | identity and custody field parity per schema, schema ids and versions |
+| CHK4 | enum parity |
+| CHK5 | protocol parity (`QAAdapter`, `CheckAdapter`, `BlobStore`, `Redactor`), a reference adapter against both forms, `qa-playwright` once configured |
+| CHK6 | mutation-refusal parity (every refusal fixture, same reason code on both sides) and error-code parity |
+| CHK7 | round trip, contracts to neutral to contracts is the identity |
+
+Derived variants (legal payloads built from golden cases) cover the optional fields of the three reused repository types.
+The allow-lists the parity checks accept (contracts-only schemas, enums and error codes) are in `[conformance]` of
+`pins.toml`; anything not listed fails.
+
+```text
+python -m redevops_qa_bridge.conformance.cli run --pin-set c4 --receipt compat-receipt.json \
+    --report divergence-report.json --report-md divergence-report.md
+python -m redevops_qa_bridge.conformance.cli verify compat-receipt.json --pin-set c4
+```
+
+`run` writes one `compat-receipt/1` JSON (fields per ADR A.2.7; `receipt_hash` is the sha256 of the canonical JSON of every
+other field) and exits 0 only if its `result` is `PASS`. `verify` re-checks the hash and the receipt's own consistency and
+reports `VALID`, `STALE` (some pin differs from what the receipt was made against; exit 2), `TAMPERED`, `INVALID` or
+`FAILED`. A receipt is evidence for exactly the pins and the `redevops-qa` commit it records.
