@@ -1,0 +1,23 @@
+[project]
+name = "redevops-qa-checks"
+version = "0.1.0.dev0"
+description = "Read-only resource-target checks (manifests, image metadata, disposable-cluster tier) for the QA runner"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
+# The check programs use the standard library and PyYAML (safe loader only). The neutral QA module is imported lazily by
+# redevops_qa_checks.adapter and is located through the repository's pins.toml, like the bridge; it is not a pip dependency.
+dependencies = ["pyyaml>=6,<7"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+redevops-qa-checks = "redevops_qa_checks.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
