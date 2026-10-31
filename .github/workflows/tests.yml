@@ -313,3 +313,48 @@ jobs:
             python -m pytest -q -m browser packages/qa-selenium/tests/browser --junitxml="$RUNNER_TEMP/junit-selenium-browser.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-selenium-browser.xml"
+
+  robot-offline:
+    name: "robot adapter (offline - recorded output.xml from real runs, allowlist, strict import; no Robot Framework installed)"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the offline Robot adapter tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q packages/qa-robot/tests --junitxml="$RUNNER_TEMP/junit-robot-offline.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-offline.xml"
+
+  robot-real:
+    name: "robot real lane (Robot Framework 7.5 pinned; NOT a required check until proven; a missing Robot Framework fails, never skips)"
+    # The only job that installs Robot Framework. No browser, no emulator, no secret; read-only. The suites are written by the tests.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the pinned test tools and Robot Framework
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "robotframework==7.5"
+      - name: Fail unless the pinned Robot Framework is importable
+        run: python -c "import importlib.metadata as m, robot; assert m.version('robotframework') == '7.5', m.version('robotframework')"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the real lane (scrubbed environment; only tests marked robot_real)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q -m robot_real packages/qa-robot/tests/real --junitxml="$RUNNER_TEMP/junit-robot-real.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-real.xml"

@@ -8,20 +8,23 @@ testpaths = [
     "packages/qa-playwright/tests",
     "packages/qa-adapter-kit/tests",
     "packages/qa-selenium/tests",
+    "packages/qa-robot/tests",
 ]
 pythonpath = [
     "packages/qa-bridge/src",
     "packages/qa-playwright/src",
     "packages/qa-adapter-kit/src",
     "packages/qa-selenium/src",
+    "packages/qa-robot/src",
 ]
 # The real-browser lane (tests/browser in the browser-backed packages) is never collected by the offline suite: it needs
 # Playwright and Chromium and runs only in its own CI job, which names those directories explicitly.
-norecursedirs = ["browser", ".*", "build", "dist", "*.egg", "venv", "__pycache__"]
+norecursedirs = ["browser", "real", ".*", "build", "dist", "*.egg", "venv", "__pycache__"]
 addopts = "-ra -p no:cacheprovider --strict-markers --strict-config"
 markers = [
     "check(id): conformance check (CHK1..CHK7, ADR A.2.5 item 4) a test belongs to",
     "not_applicable: a conformance item declared not applicable at this pin set (a receipt category, never a skip)",
+    "robot_real: needs Robot Framework installed; collected only by the robot lane CI job, never by the offline suite",
     "browser: needs a real Chromium and the Playwright package; collected only by the browser CI job, never by the offline suite",
 ]
 filterwarnings = ["error"]

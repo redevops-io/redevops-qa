@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot generator="Robot 7.5 (Python 3.15.2 on darwin)" generated="2026-10-31T15:38:29.222372" rpa="false" schemaversion="5">
+<suite id="s1" name="Suite" source="/ws/suite">
+<suite id="s1-s1" name="Mixed" source="/ws/suite/mixed.robot">
+<kw name="Log" owner="BuiltIn" type="SETUP">
+<arg>suite setup</arg>
+<doc>Logs the given message with the given level.</doc>
+<status status="PASS" start="2026-10-31T15:38:29.237758" elapsed="0.000110"/>
+</kw>
+<test id="s1-s1-t1" name="Login Works" line="11">
+<kw name="Log" owner="BuiltIn">
+<arg>logging in with ${PASSWORD}</arg>
+<doc>Logs the given message with the given level.</doc>
+<status status="PASS" start="2026-10-31T15:38:29.238029" elapsed="0.000090"/>
+</kw>
+<kw name="Should Be Equal" owner="BuiltIn">
+<arg>1</arg>
+<arg>1</arg>
+<doc>Fails if the given objects are unequal.</doc>
+<status status="PASS" start="2026-10-31T15:38:29.238166" elapsed="0.000065"/>
+</kw>
+<tag>qa-assert:A-1</tag>
+<tag>ui</tag>
+<status status="PASS" start="2026-10-31T15:38:29.237915" elapsed="0.000347"/>
+</test>
+<test id="s1-s1-t2" name="Total Is Correct" line="16">
+<kw name="Create List" owner="BuiltIn">
+<var>${list}</var>
+<arg>1</arg>
+<arg>2</arg>
+<arg>3</arg>
+<doc>Creates and returns a list containing the given items.</doc>
+<status status="PASS" start="2026-10-31T15:38:29.238364" elapsed="0.000076"/>
+</kw>
+<kw name="Length Should Be" owner="BuiltIn">
+<arg>${list}</arg>
+<arg>3</arg>
+<doc>Verifies that the length of the given item is correct.</doc>
+<status status="PASS" start="2026-10-31T15:38:29.238468" elapsed="0.000100"/>
+</kw>
+<tag>qa-assert:A-2</tag>
+<tag>qa-assert:A-3</tag>
+<status status="PASS" start="2026-10-31T15:38:29.238298" elapsed="0.000297"/>
+</test>
+<test id="s1-s1-t3" name="Banner Text Is Wrong" line="21">
+<kw name="Should Be Equal" owner="BuiltIn">
+<msg time="2026-10-31T15:38:29.238792" level="FAIL">Banner differs: Welcome != Welcome back</msg>
+<arg>Welcome</arg>
+<arg>Welcome back</arg>
+<arg>Banner differs</arg>
+<doc>Fails if the given objects are unequal.</doc>
+<status status="FAIL" start="2026-10-31T15:38:29.238695" elapsed="0.005121">Banner differs: Welcome != Welcome back</status>
+</kw>
+<tag>qa-assert:A-4</tag>
+<status status="FAIL" start="2026-10-31T15:38:29.238624" elapsed="0.005257">Banner differs: Welcome != Welcome back</status>
+</test>
+<test id="s1-s1-t4" name="Untagged Pass" line="25">
+<kw name="No Operation" owner="BuiltIn">
+<doc>Does absolutely nothing.</doc>
+<status status="PASS" start="2026-10-31T15:38:29.243990" elapsed="0.000073"/>
+</kw>
+<tag>smoke</tag>
+<status status="PASS" start="2026-10-31T15:38:29.243917" elapsed="0.000173"/>
+</test>
+<test id="s1-s1-t5" name="Skipped On Purpose" line="28">
+<kw name="Skip" owner="BuiltIn">
+<msg time="2026-10-31T15:38:29.244248" level="SKIP">not on this platform</msg>
+<arg>not on this platform</arg>
+<doc>Stops the current test or task and sets its status to SKIP.</doc>
+<status status="SKIP" start="2026-10-31T15:38:29.244175" elapsed="0.000100">not on this platform</status>
+</kw>
+<tag>qa-assert:A-5</tag>
+<status status="SKIP" start="2026-10-31T15:38:29.244117" elapsed="0.000192">not on this platform</status>
+</test>
+<test id="s1-s1-t6" name="Skip If Condition" line="32">
+<kw name="Skip If" owner="BuiltIn">
+<msg time="2026-10-31T15:38:29.244481" level="SKIP">condition says skip</msg>
+<arg>${True}</arg>
+<arg>condition says skip</arg>
+<doc>Conditionally stops the current test or task and sets its status to SKIP.</doc>
+<status status="SKIP" start="2026-10-31T15:38:29.244391" elapsed="0.000109">condition says skip</status>
+</kw>
+<tag>smoke</tag>
+<status status="SKIP" start="2026-10-31T15:38:29.244336" elapsed="0.000193">condition says skip</status>
+</test>
+<test id="s1-s1-t7" name="Templated" line="35">
+<kw name="Should Be Equal" owner="BuiltIn">
+<arg>a</arg>
+<arg>a</arg>
+<doc>Fails if the given objects are unequal.</doc>
+<status status="PASS" start="2026-10-31T15:38:29.244628" elapsed="0.000068"/>
+</kw>
+<kw name="Should Be Equal" owner="BuiltIn">
+<msg time="2026-10-31T15:38:29.244801" level="FAIL">b != c</msg>
+<arg>b</arg>
+<arg>c</arg>
+<doc>Fails if the given objects are unequal.</doc>
+<status status="FAIL" start="2026-10-31T15:38:29.244737" elapsed="0.000082">b != c</status>
+</kw>
+<tag>smoke</tag>
+<status status="FAIL" start="2026-10-31T15:38:29.244553" elapsed="0.000302">b != c</status>
+</test>
+<status status="FAIL" start="2026-10-31T15:38:29.232599" elapsed="0.012345"/>
+</suite>
+<suite id="s1-s2" name="Sub" source="/ws/suite/sub">
+<suite id="s1-s2-s1" name="Failing Setup" source="/ws/suite/sub/failing_setup.robot">
+<kw name="Fail" owner="BuiltIn" type="SETUP">
+<msg time="2026-10-31T15:38:29.245533" level="FAIL">setup exploded</msg>
+<arg>setup exploded</arg>
+<doc>Fails the test or task with the given message and optionally alters its tags.</doc>
+<status status="FAIL" start="2026-10-31T15:38:29.245464" elapsed="0.000087">setup exploded</status>
+</kw>
+<test id="s1-s2-s1-t1" name="Never Runs" line="5">
+<tag>qa-assert:A-6</tag>
+<status status="FAIL" start="2026-10-31T15:38:29.245570" elapsed="0.000059">Parent suite setup failed:
+setup exploded</status>
+</test>
+<status status="FAIL" start="2026-10-31T15:38:29.245261" elapsed="0.000410">Suite setup failed:
+setup exploded</status>
+</suite>
+<status status="FAIL" start="2026-10-31T15:38:29.245008" elapsed="0.000734"/>
+</suite>
+<status status="FAIL" start="2026-10-31T15:38:29.223175" elapsed="0.022628"/>
+</suite>
+<statistics>
+<total>
+<stat pass="3" fail="3" skip="2">All Tests</stat>
+</total>
+<tag>
+<stat pass="1" fail="0" skip="0">qa-assert:A-1</stat>
+<stat pass="1" fail="0" skip="0">qa-assert:A-2</stat>
+<stat pass="1" fail="0" skip="0">qa-assert:A-3</stat>
+<stat pass="0" fail="1" skip="0">qa-assert:A-4</stat>
+<stat pass="0" fail="0" skip="1">qa-assert:A-5</stat>
+<stat pass="0" fail="1" skip="0">qa-assert:A-6</stat>
+<stat pass="1" fail="1" skip="1">smoke</stat>
+<stat pass="1" fail="0" skip="0">ui</stat>
+</tag>
+<suite>
+<stat name="Suite" id="s1" pass="3" fail="3" skip="2">Suite</stat>
+<stat name="Mixed" id="s1-s1" pass="3" fail="2" skip="2">Suite.Mixed</stat>
+<stat name="Sub" id="s1-s2" pass="0" fail="1" skip="0">Suite.Sub</stat>
+<stat name="Failing Setup" id="s1-s2-s1" pass="0" fail="1" skip="0">Suite.Sub.Failing Setup</stat>
+</suite>
+</statistics>
+<errors>
+</errors>
+</robot>
