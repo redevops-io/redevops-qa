@@ -15,3 +15,4 @@ Licence: see [LICENSE.md](LICENSE.md).
 Configuration of the pinned upstream versions: [pins.toml](pins.toml). The contracts bridge is in
 [packages/qa-bridge](packages/qa-bridge/README.md).
 The browser adapter is in [packages/qa-playwright](packages/qa-playwright/README.md).
+The egress gateway and the browser launch configuration are in [packages/qa-egress](packages/qa-egress/README.md).
