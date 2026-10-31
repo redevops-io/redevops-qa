@@ -95,9 +95,12 @@ jobs:
       fail-fast: false
       matrix:
         pin_set: [c3, c4]
+    env:
+      OUT: ${{ runner.temp }}/out
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -124,31 +127,31 @@ jobs:
       - name: Install test tools
         run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
       - name: Fail if the working tree is dirty
-        run: test -z "$(git status --porcelain)"
+        run: test -z "$(git status --porcelain)" && mkdir -p "$OUT"
       - name: Run the conformance suite and write the compat-receipt/1
         # A missing or inexact dependency, zero collected tests, any skip, a dirty tree and any failed check all give a non-zero exit.
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/qa-bridge/src \
             REDEVOPS_QA_PIN_SET="${{ matrix.pin_set }}" QA_CI_WORKFLOW="${{ github.workflow }}" QA_CI_RUN_ID="${{ github.run_id }}" \
-            python -m redevops_qa_bridge.conformance.cli run --receipt compat-receipt-${{ matrix.pin_set }}.json \
-              --report divergence-report-${{ matrix.pin_set }}.json --report-md divergence-report-${{ matrix.pin_set }}.md \
-              --junit junit-conformance-${{ matrix.pin_set }}.xml
+            python -m redevops_qa_bridge.conformance.cli run --receipt "$OUT/compat-receipt-${{ matrix.pin_set }}.json" \
+              --report "$OUT/divergence-report-${{ matrix.pin_set }}.json" --report-md "$OUT/divergence-report-${{ matrix.pin_set }}.md" \
+              --junit "$OUT/junit-conformance-${{ matrix.pin_set }}.xml"
       - name: Fail on zero collected tests or any skip (second, independent check of the JUnit report)
-        run: python tools/check_junit.py junit-conformance-${{ matrix.pin_set }}.xml
+        run: python tools/check_junit.py "$OUT/junit-conformance-${{ matrix.pin_set }}.xml"
       - name: Verify the receipt (hash, consistency, not stale; c4 must list no not-applicable item)
         run: |
           flag=""
           if [ "${{ matrix.pin_set }}" = "c4" ]; then flag="--forbid-not-applicable"; fi
           env -i HOME="$(mktemp -d)" PATH="$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/qa-bridge/src \
             REDEVOPS_QA_PIN_SET="${{ matrix.pin_set }}" \
-            python -m redevops_qa_bridge.conformance.cli verify compat-receipt-${{ matrix.pin_set }}.json $flag
+            python -m redevops_qa_bridge.conformance.cli verify "$OUT/compat-receipt-${{ matrix.pin_set }}.json" $flag
       - name: Upload the receipt and the divergence report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: compat-receipt-${{ matrix.pin_set }}
           path: |
-            compat-receipt-${{ matrix.pin_set }}.json
-            divergence-report-${{ matrix.pin_set }}.json
-            divergence-report-${{ matrix.pin_set }}.md
+            ${{ runner.temp }}/out/compat-receipt-${{ matrix.pin_set }}.json
+            ${{ runner.temp }}/out/divergence-report-${{ matrix.pin_set }}.json
+            ${{ runner.temp }}/out/divergence-report-${{ matrix.pin_set }}.md
           if-no-files-found: error
