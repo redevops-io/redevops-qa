@@ -5,7 +5,7 @@
 # pin is a TEMP-PIN (temp_pin = true, tag = ""): CI refuses a TEMP-PIN on main. default_set is used unless
 # REDEVOPS_QA_PIN_SET (or --pin-set) selects another set.
 #   c4 : runtime-contracts with the additive clarifications (addendum vectors, integrity refusal codes, reason_code)
-#   c3 : runtime-contracts at the frozen interface commit (IF-1)
+#   c3 : runtime-contracts at the earlier commit that the first interface was frozen at
 # Both sets pin the same harness QA module snapshot.
 #
 # source_path is relative to this file's directory; QA_PIN_CONTRACTS_PATH / QA_PIN_HARNESS_QA_PATH override it per machine
