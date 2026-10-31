@@ -1,0 +1,43 @@
+# redevops-qa pins: what the bridge and the conformance suite are tied to. See packages/qa-bridge/README.md.
+# Read by redevops_qa_bridge.pins; nothing about a dependency is hard-coded anywhere else.
+#
+# While a dependency has no release tag the pin is a TEMP-PIN (temp_pin = true, tag = ""): CI refuses a TEMP-PIN on main.
+# source_path is relative to this file's directory; QA_PIN_CONTRACTS_PATH / QA_PIN_HARNESS_QA_PATH override it per machine.
+# distribution_sha256 is the digest of the tree(s) in distribution_paths (see redevops_qa_bridge.pins.tree_digest);
+# vector_files lists the sha256 of every vector file, and a file that matches addendum_globs but is not listed is a failure.
+schema = "redevops-qa/pins"
+version = 1
+
+[contracts]
+repo = "redevops-io/runtime-contracts"
+version = "0.3.14"
+tag = ""
+temp_pin = true
+commit = "13e00f23da74782af091aec607c47358e9814fc6"
+package = "runtime_contracts"
+source_path = ".pinned/runtime-contracts"
+distribution_paths = ["runtime_contracts"]
+distribution_sha256 = "4004127769143f28cfee10e117573e0c893640a1f43144036d7851d9e2aa9760"
+addendum_globs = ["golden/qa_*addendum*.json", "golden/qa_canon_vectors_*.json"]
+
+[contracts.vector_files]
+"golden/qa.json" = "2aaed7aace5b9952ef56f43f73edc1745a15da4d1f83db92c7aad5af279bf5e1"
+"golden/qa_canon_vectors.json" = "7241c570746a63e75431591b88e42562f6604fc2a8586474a267eedb51908a13"
+"golden/qa.schema.json" = "8d61738f488ddca2cad6a0eebd688f1d1fa2d5f2b1b7fd3904b97f93abc0cb22"
+"golden/qa.inventory.json" = "8ebd0be1488233966ba66dc2cbb7c46b42ec3973a246f405e905130a4d28ba57"
+
+[harness_qa]
+repo = "redevops-io/agent-harness"
+version = "0.1.0"
+tag = ""
+temp_pin = true
+commit = "212c5a1f4948e87046a7a7220159c31910869643"
+base_pin = "6b8ba3a596a5e2caf0fdf009f2af013517591662"
+package = "agent_harness"
+source_path = ".pinned/agent-harness"
+distribution_paths = ["agent_harness"]
+distribution_sha256 = "ffea55a61ab44a67987092b40d089669fed27cd79a7343f9edd3ac948f67e034"
+
+[harness_qa.vector_files]
+"tests/qa/golden/qa_canon_vectors.json" = "7241c570746a63e75431591b88e42562f6604fc2a8586474a267eedb51908a13"
+"tests/qa/golden/qa.inventory.json" = "8ebd0be1488233966ba66dc2cbb7c46b42ec3973a246f405e905130a4d28ba57"
