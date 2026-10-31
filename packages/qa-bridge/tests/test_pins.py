@@ -225,3 +225,98 @@ def test_an_unimportable_dependency_is_a_failure_not_a_skip(monkeypatch):
 def test_the_harness_python_floor_guard_counts_as_unavailable(monkeypatch):
     monkeypatch.setattr(deps, "_MODULES", {"contracts": "runtime_contracts.qa", "harness_qa": "no_such_harness"})
     assert deps.availability() == {"contracts": True, "harness_qa": False}
+
+
+# -- verify_trees: what CI runs after fetching the pinned upstreams by commit --------------------------------------------------
+
+def _checkout(root, package, vector):
+    from receipt_helpers import git, make_repo
+    make_repo(root)
+    (root / package).mkdir()
+    (root / package / "__init__.py").write_text("x = 1\n")
+    (root / vector).parent.mkdir(parents=True, exist_ok=True)
+    (root / vector).write_text("{}\n")
+    (root / ".gitignore").write_text("__pycache__/\n")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "tree")
+    return git(root, "rev-parse", "HEAD")
+
+
+def _pins_for(tmp_path):
+    c, h = tmp_path / "c", tmp_path / "h"
+    c_commit, h_commit = _checkout(c, "pkg_c", "golden/v.json"), _checkout(h, "pkg_h", "golden/v.json")
+    text = _write_pins(tmp_path).read_text()
+    text = text.replace("a" * 40, c_commit, 1)
+    text = text.replace('commit = "' + "a" * 40 + '"', 'commit = "' + h_commit + '"', 1)
+    vec = pins_mod.sha256_file(c / "golden" / "v.json")
+    text = text.replace("b" * 64, vec)
+    path = tmp_path / "pins.toml"
+    path.write_text(text)
+    loaded = pins_mod.load_pins(path, "a")
+    import dataclasses
+    return dataclasses.replace(
+        loaded,
+        contracts=dataclasses.replace(loaded.contracts, commit=c_commit, resolved_path=c, distribution_sha256=pins_mod.tree_digest(c, ("pkg_c",))),
+        harness_qa=dataclasses.replace(loaded.harness_qa, commit=h_commit, resolved_path=h, distribution_sha256=pins_mod.tree_digest(h, ("pkg_h",)))), c, h
+
+
+def test_verify_trees_accepts_clean_checkouts_at_the_pinned_commits(tmp_path):
+    loaded, c, h = _pins_for(tmp_path)
+    pins_mod.verify_trees(loaded, require_git=True)
+
+
+def test_verify_trees_requires_a_git_checkout_when_asked(tmp_path):
+    loaded, c, h = _pins_for(tmp_path)
+    import shutil
+    shutil.rmtree(c / ".git")
+    with pytest.raises(PinMismatch, match="PIN_NOT_A_CHECKOUT"):
+        pins_mod.verify_trees(loaded, require_git=True)
+    pins_mod.verify_trees(loaded)           # without the requirement the digests alone decide
+
+
+def test_verify_trees_fails_on_a_different_head(tmp_path):
+    from receipt_helpers import git
+    loaded, c, h = _pins_for(tmp_path)
+    (c / "other.txt").write_text("x")
+    git(c, "add", "other.txt")
+    git(c, "commit", "-q", "-m", "moved")
+    with pytest.raises(PinMismatch, match="PIN_COMMIT_MISMATCH"):
+        pins_mod.verify_trees(loaded, require_git=True)
+
+
+def test_verify_trees_fails_on_a_dirty_checkout(tmp_path):
+    loaded, c, h = _pins_for(tmp_path)
+    (h / "stray.txt").write_text("x")
+    with pytest.raises(PinMismatch, match="PIN_TREE_DIRTY"):
+        pins_mod.verify_trees(loaded, require_git=True)
+
+
+def test_verify_trees_fails_on_a_changed_tree_even_when_the_head_is_right(tmp_path):
+    loaded, c, h = _pins_for(tmp_path)
+    (c / "pkg_c" / "__init__.py").write_text("x = 2\n")
+    with pytest.raises(PinMismatch) as info:
+        pins_mod.verify_trees(loaded, require_git=True)
+    assert "PIN_DIGEST_MISMATCH" in str(info.value)
+
+
+def test_verify_trees_fails_on_a_missing_tree(tmp_path):
+    import dataclasses
+    loaded, c, h = _pins_for(tmp_path)
+    gone = dataclasses.replace(loaded, contracts=dataclasses.replace(loaded.contracts, resolved_path=tmp_path / "absent"))
+    with pytest.raises(PinMismatch, match="PIN_SOURCE_MISSING"):
+        pins_mod.verify_trees(gone, require_git=True)
+
+
+def test_the_repository_pins_match_the_trees_on_disk_through_verify_trees(pins):
+    pins_mod.verify_trees(pins)
+    with pytest.raises(PinMismatch, match="PIN_NOT_A_CHECKOUT"):
+        pins_mod.verify_trees(pins, require_git=True)       # the read-only snapshots used here are not checkouts
+
+
+def test_the_cli_verify_trees_flag(tmp_path, capsys, monkeypatch):
+    _pins_for(tmp_path)
+    for name in pins_mod.PATH_ENV.values():
+        monkeypatch.delenv(name, raising=False)
+    # without source overrides the default paths (tmp/c, tmp/h) are the checkouts, but the digests in the file are placeholders
+    assert pins_mod.main(["--file", str(tmp_path / "pins.toml"), "--verify-trees", "--require-git"]) == 1
+    assert "FAIL PIN_MISMATCH" in capsys.readouterr().out

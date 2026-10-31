@@ -83,6 +83,19 @@ class DependencyPin:
 
 
 @dataclass(frozen=True)
+class NotApplicable:
+    """A conformance item that cannot apply at this pin set because the contracts commit pinned here predates the feature
+    it checks. Declared, named and justified; the suite still runs a probe that proves the feature is absent (and fails if
+    it is present), so an item can never be hidden this way."""
+
+    check: str
+    item: str
+    introduced_in: str          # the contracts commit that introduces the feature (never the commit pinned in this set)
+    probe: str                  # name of a probe in conformance.checks.NA_PROBES
+    reason: str
+
+
+@dataclass(frozen=True)
 class Pins:
     path: Path
     pin_set: str
@@ -91,6 +104,8 @@ class Pins:
     harness_qa: DependencyPin
     conformance: Mapping[str, Any]
     raw: Mapping[str, Any]
+    not_applicable: Tuple[NotApplicable, ...] = ()
+    expected_items: Mapping[str, int] = field(default_factory=dict)
 
     def dependency(self, name: str) -> DependencyPin:
         if name == "contracts":
@@ -167,6 +182,46 @@ def _dependency(name: str, table: Mapping[str, Any], root: Path) -> DependencyPi
         base_pin=base_pin, extra={k: v for k, v in table.items() if k not in known})
 
 
+_CHECK_ID = re.compile(r"CHK[1-7]")
+
+
+def _expected_items(table: Any, where: str) -> Mapping[str, int]:
+    """Exact number of conformance items each check has at this pin set (the completeness item compares)."""
+    if not isinstance(table, dict):
+        raise PinsInvalid(f"{where}.expected_items must be a table")
+    for key, value in table.items():
+        if not _CHECK_ID.fullmatch(key) or type(value) is not int or value < 1:
+            raise PinsInvalid(f"{where}.expected_items[{key!r}] must be a positive integer for a check id CHK1..CHK7")
+    return dict(sorted(table.items()))
+
+
+def _not_applicable(entries: Any, contracts_commit: str, where: str) -> Tuple[NotApplicable, ...]:
+    if not isinstance(entries, list):
+        raise PinsInvalid(f"{where}.not_applicable must be an array of tables")
+    out = []
+    seen = set()
+    for i, e in enumerate(entries):
+        w = f"{where}.not_applicable[{i}]"
+        if not isinstance(e, dict):
+            raise PinsInvalid(f"{w}: expected a table")
+        item = NotApplicable(check=_req(e, "check", str, w), item=_req(e, "item", str, w),
+                             introduced_in=_req(e, "introduced_in", str, w), probe=_req(e, "probe", str, w),
+                             reason=_req(e, "reason", str, w))
+        if set(e) - {"check", "item", "introduced_in", "probe", "reason"}:
+            raise PinsInvalid(f"{w}: unknown key(s) {sorted(set(e) - {'check', 'item', 'introduced_in', 'probe', 'reason'})}")
+        if not _CHECK_ID.fullmatch(item.check) or not item.item or not item.reason.strip() or not item.probe:
+            raise PinsInvalid(f"{w}: a check id (CHK1..CHK7), an item, a probe and a reason are required")
+        if not _HEX40.fullmatch(item.introduced_in):
+            raise PinsInvalid(f"{w}.introduced_in must be the full 40-hex contracts commit that introduces the feature")
+        if item.introduced_in == contracts_commit:
+            raise PinsInvalid(f"{w}: an item cannot be not-applicable at the contracts commit that introduces it")
+        if (item.check, item.item) in seen:
+            raise PinsInvalid(f"{w}: {item.check} {item.item} is declared twice")
+        seen.add((item.check, item.item))
+        out.append(item)
+    return tuple(sorted(out, key=lambda n: (n.check, n.item)))
+
+
 def load_pins(path: Optional[Path] = None, pin_set: Optional[str] = None) -> Pins:
     pins_path = Path(path) if path is not None else find_pins_file()
     try:
@@ -189,10 +244,25 @@ def load_pins(path: Optional[Path] = None, pin_set: Optional[str] = None) -> Pin
     if not isinstance(table, dict):
         raise PinsInvalid(f"pins: [sets.{chosen}] must be a table")
     root = pins_path.resolve().parent
-    return Pins(path=pins_path.resolve(), pin_set=chosen, available_sets=tuple(sorted(sets)),
-                contracts=_dependency("contracts", _req(table, "contracts", dict, f"sets.{chosen}"), root),
+    contracts = _dependency("contracts", _req(table, "contracts", dict, f"sets.{chosen}"), root)
+    return Pins(path=pins_path.resolve(), pin_set=chosen, available_sets=tuple(sorted(sets)), contracts=contracts,
                 harness_qa=_dependency("harness_qa", _req(table, "harness_qa", dict, f"sets.{chosen}"), root),
-                conformance=dict(raw.get("conformance", {})), raw=raw)
+                conformance=dict(raw.get("conformance", {})), raw=raw,
+                not_applicable=_not_applicable(table.get("not_applicable", []), contracts.commit, f"sets.{chosen}"),
+                expected_items=_expected_items(table.get("expected_items", {}), f"sets.{chosen}"))
+
+
+def verify_trees(pins: Pins, *, require_git: bool = False) -> None:
+    """Fail unless both pinned trees are exactly what ``pins.toml`` says. With ``require_git`` each tree must be a git
+    checkout whose ``HEAD`` is the pinned commit and whose working tree is clean (what CI does after fetching by SHA)."""
+    from . import deps
+    problems = []
+    for dep in (pins.contracts, pins.harness_qa):
+        if require_git and not (dep.resolved_path / ".git").exists():
+            problems.append(f"{dep.name}: {dep.resolved_path} is not a git checkout (PIN_NOT_A_CHECKOUT)")
+        problems.extend(f"{code}: {message}" for code, message in deps.pin_problems(dep))
+    if problems:
+        raise PinMismatch("; ".join(problems), problems=problems)
 
 
 def check_forbid_temp_pin(pins: Pins) -> None:
@@ -209,6 +279,10 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--file", default=None)
     parser.add_argument("--pin-set", default=None)
     parser.add_argument("--forbid-temp-pin", action="store_true")
+    parser.add_argument("--verify-trees", action="store_true",
+                        help="check the pinned source trees against pins.toml (commit, tree digest, vector digests)")
+    parser.add_argument("--require-git", action="store_true",
+                        help="with --verify-trees: each tree must be a clean git checkout at the pinned commit")
     parser.add_argument("--github-output", action="store_true",
                         help="print repo/commit/path of both dependencies as key=value lines for a CI step output")
     args = parser.parse_args(argv)
@@ -216,6 +290,8 @@ def main(argv: Optional[list] = None) -> int:
         pins = load_pins(Path(args.file) if args.file else None, args.pin_set)
         if args.forbid_temp_pin:
             check_forbid_temp_pin(pins)
+        if args.verify_trees:
+            verify_trees(pins, require_git=args.require_git)
         if args.github_output:
             for dep in (pins.contracts, pins.harness_qa):
                 print(f"{dep.name}_repo={dep.repo}")
