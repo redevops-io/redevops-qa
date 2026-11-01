@@ -12,7 +12,7 @@ from qa_runner.errors import PlanError
 from qa_runner.golden import golden_plan
 from qa_runner.plan import freeze_plan, load_plan_or_lock, materialise_spec, thaw_lock
 
-GOLDEN_PLAN_DIGEST = "sha256:378257b9f4a89e763c85dd043aa20487e57b3075d3abf53539f0a847413b8fc6"
+GOLDEN_PLAN_DIGEST = "sha256:3a2d7bde21fabf805ea2bb6b580219e97faa6f45ba8a3bbde1b6f0f54df6d6e8"
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "golden-plan.json"
 
 
@@ -101,6 +101,7 @@ def test_an_assertion_id_in_two_lanes_is_refused_so_every_assertion_is_accounted
     plan = golden_plan()
     other = copy.deepcopy(plan["lanes"][0])
     other["lane_id"] = "second"
+    other["probes"] = {}
     plan["lanes"].append(other)
     refused(up, plan, "DUPLICATE_ASSERTION")
     other["spec"]["id"] = "second-spec"
@@ -186,3 +187,48 @@ def test_the_origin_replaces_the_placeholder_at_the_start_of_a_value_only(golden
 
 def test_the_scope_of_this_release_is_playwright_chromium_only_here():
     assert K.ENGINES == (K.ENGINE_PLAYWRIGHT,)
+
+
+def test_assertion_ids_that_differ_only_in_case_are_refused_at_freeze_not_after_the_run(up):
+    """Review finding M3: the evidence format refuses them when the bundle is built, which used to be after the whole run (internal error, exit 6)."""
+    plan = golden_plan()
+    other = copy.deepcopy(plan["lanes"][0])
+    other["lane_id"] = "second"
+    other["probes"] = {}
+    other["spec"]["id"] = "second-spec"
+    for a in other["spec"]["assertions"]:
+        a["assertion_id"] = a["assertion_id"].lower()
+    plan["lanes"].append(other)
+    err = refused(up, plan, "DUPLICATE_ASSERTION")
+    assert "without case" in str(err)
+
+
+@pytest.mark.parametrize("name,edit,code", [
+    ("no requests", lambda l: l.pop("requests"), "MISSING_FIELD"),
+    ("no required request", lambda l: l["requests"].update(required=[]), "BAD_REQUESTS"),
+    ("a query in a request", lambda l: l["requests"].update(required=["GET /login?x=1"]), "BAD_REQUESTS"),
+    ("a method that is not GET or POST", lambda l: l["requests"].update(required=["DELETE /login"]), "BAD_REQUESTS"),
+    ("a duplicate request", lambda l: l["requests"].update(required=["GET /login", "GET /login"]), "BAD_REQUESTS"),
+    ("an unknown key", lambda l: l["requests"].update(forbidden=[]), "BAD_REQUESTS"),
+    ("a probe of an unknown fact", lambda l: l.update(probes={"A-SAVED": "everything"}), "BAD_PROBES"),
+    ("a probe of an assertion that is not in the lane", lambda l: l.update(probes={"A-NOPE": "settings-persistence"}), "BAD_PROBES"),
+])
+def test_the_requests_and_probes_of_a_lane_are_validated(up, name, edit, code):
+    plan = golden_plan()
+    edit(plan["lanes"][0])
+    refused(up, plan, code)
+
+
+@pytest.mark.parametrize("name,edit", [
+    ("a step of the spec", lambda p: p["lanes"][0]["spec"]["steps"][1]["action"].update(value="mallory@example.test")),
+    ("the plan id", lambda p: p.update(plan_id="renamed")),
+    ("the deadline of a lane", lambda p: p["lanes"][0].update(deadline_s=3600)),
+    ("a required request", lambda p: p["lanes"][0]["requests"]["required"].pop()),
+    ("a probe", lambda p: p["lanes"][0].update(probes={})),
+])
+def test_everything_that_defines_the_run_is_in_the_plan_digest(up, golden_frozen, name, edit):
+    """Review findings B1 and H2 (one design): the digest `freeze` prints and `--plan-digest` checks covers the whole plan, not only the assertions."""
+    plan = golden_plan()
+    edit(plan)
+    changed = freeze_plan(up, plan)
+    assert changed.plan_digest != golden_frozen.plan_digest, name

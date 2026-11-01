@@ -184,3 +184,59 @@ def test_doctor_with_a_plan_checks_only_the_engines_the_plan_uses(tmp_path, monk
     code, out, err = cli("doctor", "--plan", plan_file(tmp_path), "--json")
     names = {r["check"] for r in json.loads(out)}
     assert "robot framework" not in names and "playwright" in names and code == 0
+
+
+# ---- the output location (review finding M4) and the options (M5) ---------------------------------------------------------------------------
+def test_an_unwritable_output_location_fails_before_anything_runs(tmp_path, monkeypatch):
+    import qa_runner.cli as cli_module
+    ran = []
+    monkeypatch.setattr(cli_module, "run_plan", lambda *a, **k: ran.append(1))
+    (tmp_path / "ro").mkdir()
+    (tmp_path / "ro").chmod(0o500)
+    try:
+        code, out, err = cli("run", plan_file(tmp_path), "--out", str(tmp_path / "ro" / "x"), "--run-id", "r0-x")
+    finally:
+        (tmp_path / "ro").chmod(0o700)
+    assert code == K.EXIT_USAGE and "OUTPUT_UNWRITABLE" in err and ran == []
+
+
+def test_a_second_run_with_the_same_id_fails_fast_before_it_executes(tmp_path, monkeypatch):
+    import qa_runner.cli as cli_module
+    ran = []
+    monkeypatch.setattr(cli_module, "run_plan", lambda *a, **k: ran.append(1))
+    (tmp_path / "o" / "r0-same").mkdir(parents=True)            # what a concurrent run with this id holds while it is running
+    code, out, err = cli("run", plan_file(tmp_path), "--out", str(tmp_path / "o"), "--run-id", "r0-same")
+    assert code == K.EXIT_USAGE and "OUTPUT_EXISTS" in err and "another run may be using this run id" in err and ran == []
+
+
+def test_the_reservation_is_removed_when_the_run_does_not_produce_a_bundle(tmp_path, monkeypatch):
+    import qa_runner.cli as cli_module
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(cli_module, "run_plan", boom)
+    code, out, err = cli("run", plan_file(tmp_path), "--out", str(tmp_path / "o"), "--run-id", "r0-gone")
+    assert code == K.EXIT_INTERNAL and not (tmp_path / "o" / "r0-gone").exists() and not list((tmp_path / "o").glob(".*"))
+
+
+def test_the_bundle_appears_whole_or_not_at_all(tmp_path, up):
+    from qa_runner.cli import _reserve, _write_atomically
+    from qa_evidence.build import BuiltBundle
+    reserved = _reserve(tmp_path / "o", "r0-atomic")
+    assert reserved.is_dir() and list(reserved.iterdir()) == []
+
+    class Bad:
+        def write_directory(self, dest):
+            import os
+            os.makedirs(dest, exist_ok=True)
+            open(os.path.join(dest, "half"), "w").close()
+            raise OSError("disk full")
+    with pytest.raises(OSError):
+        _write_atomically(Bad(), reserved)
+    assert list(reserved.iterdir()) == [] and not (tmp_path / "o" / ".r0-atomic.partial").exists()
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "3601", "abc", "1.5"])
+def test_a_bad_lane_deadline_is_a_usage_error_before_anything_starts(tmp_path, value):
+    assert cli("run", plan_file(tmp_path), "--out", str(tmp_path / "o"), "--lane-deadline", value)[0] == K.EXIT_USAGE
+    assert not (tmp_path / "o").exists()

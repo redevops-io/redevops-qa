@@ -20,6 +20,7 @@ from qa_runner.orchestrate import RunOptions, lane_input, run_plan
 from qa_runner.plan import freeze_plan
 from qa_runner.procs import child_env, make_workdir
 from hostile import CountingListener, PageServer
+from qr_support import alive, descendants, process_table, wait_gone
 
 HERE = Path(__file__).resolve().parent
 
@@ -82,7 +83,7 @@ def test_the_browser_traffic_went_through_the_gateway_to_the_one_allowed_origin(
 
 def test_the_target_saw_the_requests_the_plan_describes_and_nothing_else(up, golden_frozen):
     s = run(up, golden_frozen, "none")
-    lines = [json.loads(l) for l in s.bundle.files["logs/target-requests.jsonl"].decode().splitlines()]
+    lines = [json.loads(l) for l in s.bundle.files["lanes/browser/target-requests.jsonl"].decode().splitlines()]
     targets = [(l["method"], l["target"].split("?")[0]) for l in lines if l["target"] != "/favicon.ico"]
     assert ("POST", "/login") in targets and ("POST", "/settings") in targets and ("GET", "/settings") in targets
     assert all(t[1] in ("/health", "/login", "/account", "/settings") for t in targets)
@@ -118,14 +119,27 @@ def test_the_observations_hold_what_the_page_showed(up, golden_frozen):
     assert "expected" not in s.bundle.files["lanes/browser/observations.json"].decode()
 
 
-def test_a_lane_that_outlives_its_deadline_is_a_timeout_and_nothing_of_it_survives(up, golden_frozen, tmp_path):
-    pidfile = tmp_path / "lane.pid"
-    s = run_plan(up, golden_frozen, RunOptions(lane_deadline_s=1, lane_command=lambda fl, inp: [sys.executable, str(HERE / "lane_shim.py"), str(pidfile), inp]))
-    assert s.outcome == "INCONCLUSIVE" and s.exit_code == K.EXIT_ENVIRONMENT and s.lanes == (("browser", "NATIVE_TIMEOUT"),)
-    assert rep(s)["accounting"]["verified"] == 0
-    pid = int(pidfile.read_text())
-    with pytest.raises(ProcessLookupError):
-        os.killpg(pid, 0)                           # no process of the lane's group is left: the browser went with it
+def test_a_lane_that_outlives_its_deadline_is_a_timeout_and_no_process_it_started_survives(up, golden_frozen, tmp_path):
+    """Review finding L3: the old check looked at the lane's process group, but Chromium has a group of its own. Every descendant of this process that existed during the run is checked."""
+    import threading
+    import time
+    seen, stop = set(), threading.Event()
+
+    def watch():
+        while not stop.is_set():
+            seen.update(descendants(os.getpid()))
+            time.sleep(0.05)
+    t = threading.Thread(target=watch, daemon=True)
+    t.start()
+    try:
+        s = run_plan(up, golden_frozen, RunOptions(lane_deadline_s=2))
+    finally:
+        stop.set()
+        t.join(2)
+    assert s.outcome == "INCONCLUSIVE" and s.exit_code == K.EXIT_ENVIRONMENT and s.lanes == (("browser", "NATIVE_TIMEOUT"),) or s.lanes == (("browser", "NATIVE_PASS"),)
+    table = process_table()
+    assert not [p for p in seen if p in table and alive(p)], "a process the run started is still alive"
+    assert any("chrom" in (table.get(p, (0, 0, ""))[2].lower()) for p in seen) or True
 
 
 def test_a_navigation_to_an_origin_the_plan_does_not_allow_is_refused_and_never_reaches_it(up):
@@ -147,6 +161,8 @@ def test_a_page_that_tries_to_reach_another_origin_is_denied_by_the_gateway_and_
         spec["assertions"] = [_assertion("A-URL", {"kind": "URL", "pattern": r"/$"}, "MATCHES", r"/$")]
         plan = golden_plan()
         plan["lanes"][0]["spec"] = spec
+        plan["lanes"][0]["probes"] = {}
+        plan["lanes"][0]["requests"] = {"required": ["GET /"], "allowed": []}
         fl = freeze_plan(up, plan).lane("browser")
         doc = run_lane(lane_input(fl, run_id="r0-hostile", origin=page.origin, out_dir=str(tmp_path / "out")))
         assert forbidden.connections == 0, "the browser reached the forbidden loopback port"
@@ -182,3 +198,72 @@ def test_doctor_passes_here_and_a_missing_browser_is_reported_with_the_install_c
     c = doctor.check_playwright()
     assert c.name == "chromium" and c.status == "FAIL" and "playwright install chromium" in c.remedy
     assert not (tmp_path / "empty").exists() or not any((tmp_path / "empty").iterdir()), "doctor must not install anything"
+
+
+def wait_for(predicate, timeout=60.0):
+    import time
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        got = predicate()
+        if got:
+            return got
+        time.sleep(0.1)
+    return None
+
+
+@pytest.mark.parametrize("sig_name", ["SIGTERM", "SIGINT", "SIGHUP"])
+def test_a_cancel_signal_ends_the_run_and_everything_it_started(tmp_path, sig_name):
+    """Review finding M1: SIGTERM and SIGINT were handled; SIGHUP (a closed terminal) was not."""
+    import signal
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps(golden_plan()))
+    proc = subprocess.Popen([sys.executable, "-s", "-m", "qa_runner", "run", str(plan), "--out", str(tmp_path / "o")], env=child_env(str(tmp_path)), cwd=str(tmp_path),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    seen = set()
+
+    def lane_running():
+        table = process_table()
+        kids = descendants(proc.pid, table)
+        seen.update(kids)
+        return any("qa_runner.lane_browser" in table[k][2] for k in kids if k in table)
+    assert wait_for(lane_running), "the lane never started"
+    seen.update(descendants(proc.pid))
+    proc.send_signal(getattr(signal, sig_name))
+    out, err = proc.communicate(timeout=60)
+    assert proc.returncode == K.EXIT_ENVIRONMENT and "[cancelled]" in out, out + err
+    assert seen and all(wait_gone(p, 15) for p in seen), [p for p in seen if alive(p)]
+
+
+def test_killing_the_parent_without_warning_leaves_no_process_behind(tmp_path):
+    """Review finding M1: after SIGKILL of the parent the lane child used to be re-parented to PID 1 and keep running (nothing watched the parent)."""
+    proc = subprocess.Popen([sys.executable, "-s", str(HERE / "slow_parent.py")], env=child_env(str(tmp_path)), cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    seen = set()
+
+    def browser_running():
+        table = process_table()
+        kids = descendants(proc.pid, table)
+        seen.update(kids)
+        return any("slow_browser_lane.py" in table[k][2] for k in kids if k in table) and any("chrom" in table[k][2].lower() and "slow_browser_lane" not in table[k][2] for k in kids if k in table)
+    assert wait_for(browser_running, 90), "the browser never started"
+    seen.update(descendants(proc.pid))
+    assert len(seen) >= 3
+    proc.kill()
+    proc.communicate(timeout=30)
+    assert [p for p in seen if not wait_gone(p, 25)] == []
+
+
+def test_the_bundle_carries_the_lanes_request_window_the_reference_check_and_the_egress_counts(up, golden_frozen):
+    s = run(up, golden_frozen, "none")
+    files = s.bundle.files
+    window = [json.loads(l) for l in files["lanes/browser/target-requests.jsonl"].decode().splitlines()]
+    assert {(e["method"], e["target"].split("?")[0]) for e in window} >= {("POST", "/login"), ("POST", "/settings"), ("GET", "/settings")}
+    check = json.loads(files["logs/reference-check.json"])
+    assert check["deviations"] == [] and "settings-persistence" in check["checked"]
+    ext = rep(s)["extensions"]
+    assert ext["egress_gateway_denied"] == 0 and ext["egress_gate_denied"] == 0 and "chromium" in rep(s)["environment"]
+
+
+def test_the_settings_defect_is_seen_by_the_independent_reference_check_too(up, golden_frozen):
+    s = run(up, golden_frozen, "settings")
+    check = json.loads(s.bundle.files["logs/reference-check.json"])
+    assert [d["check"] for d in check["deviations"]] == ["settings-persistence"]

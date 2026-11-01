@@ -26,7 +26,7 @@ what this release claims: any platform but Linux x86_64) or `FAIL`, with the com
 protection that cannot be provided is a `FAIL`: the egress gateway that every browser lane depends on must start. Exit status 0, or 3 if a check failed.
 
 **`run`** freezes the plan (or reads a lock), starts the fixture app on loopback with the defect you name, runs each lane as a supervised child process, stops
-the app, and writes the bundle to `DIR/<run id>` (a directory that must not exist). It prints the outcome, what each engine reported, what the independent
+the app, and writes the bundle to `DIR/<run id>` (a directory that must not exist; it is reserved before anything runs and the bundle is renamed into place, so a reader sees no bundle or a whole one). It prints the outcome, what each engine reported, what the independent
 verdicts are, the plan digest (the value to give `verify --plan-digest`) and the manifest digest (the value an external anchor should hold).
 
 | Exit | Meaning |
@@ -45,8 +45,11 @@ expected values. Freezing:
 
 * refuses a plan or lane field it does not know, and a spec field the **runtime-contracts parser** does not know. The parser runs before the harness
   mirror because the mirror tolerates unknown spec fields and they change the spec hash (`tests/test_qr_plan.py` shows both);
-* gives every assertion a digest (sha256 of its canonical JSON, expected value included), computes the assertion lock and the plan digest with the
-  conventions of `qa-evidence`, and requires the contracts and the harness to agree on the assertion-set pin;
+* gives every assertion a digest (sha256 of its canonical JSON, expected value included) together with a binding to everything else that defines the lane: the
+  whole spec (steps included), the egress profile, the deadline, the request expectations and probes below, the plan id and the target. The assertion lock and
+  the plan digest follow the conventions of `qa-evidence`, so the plan digest covers all of it, and the contracts and the harness must agree on the assertion-set pin;
+* needs, per lane, the `requests` the target must have seen (`required`) and may see (`allowed`) as `METHOD /path` strings, and may name `probes`: assertions tied
+  to a fact of the independent reference check (`settings-persistence`, `discount-math`);
 * refuses an assertion id that appears in two lanes (every assertion is accounted exactly once).
 
 A step value may start with `{origin}`; the origin of this start of the target is substituted when the lane runs, so one frozen plan serves every start of
@@ -62,8 +65,14 @@ the app (a different port each time).
    browser and the adapter's request gate behind it, an action policy that allows only the plan's origin, and attestations answered from facts (the
    target's `/health`; declared preconditions or fixtures that nothing can attest are *unknown*, which blocks a pass).
 4. Everything the lane wrote is collected as native artifacts. The observed values the harness verifier read are recorded in an observation file.
-5. The verdicts are computed by `judge_lane` over the observation file and the frozen assertions, using the harness `DeterministicVerifier`. The in-run
-   verifier's verdicts are a cross-check: a disagreement certifies nothing.
+5. The verdicts are computed by `judge_lane` over the observation file and the frozen assertions, using the harness `DeterministicVerifier`. Before a value
+   counts, what the lane claims is checked against what the run itself recorded (`corroborate.py`): the harness run record passes the harness integrity check, is sealed
+   and not cancelled, belongs to this run, names the frozen assertion set and the frozen spec, and agrees with every observation; the target's own request
+   log for the lane shows the required requests and none the plan does not allow; and an assertion tied to a probe is not verified when the independent reference
+   check (run against the target after the lanes) finds that fact deviating, or when there is no reference check. Anything that does not hold leaves the lane's
+   assertions `INCONCLUSIVE` (`EVIDENCE_UNUSABLE`). The in-run verifier's verdicts are a cross-check: a disagreement certifies nothing.
+   A lane produced by a test double (`RunOptions.lane_command`, used by tests only) carries only `INCONCLUSIVE` with the reason `TEST_DOUBLE` and the report says so
+   (`extensions.test_double`).
 6. The bundle is built by a pure function (`bundle.build_run_bundle`, no clock, no environment, no file system) with `qa-evidence`, which checks its own output.
 
 Every lane and every frozen assertion is accounted for whatever happens. A lane that cannot start, times out, is cancelled or crashes is recorded with a
@@ -82,7 +91,8 @@ lanes/browser/observations.json        the observed values the verdicts are comp
 lanes/browser/egress-profile.json      the allow-list the lane ran under, as data (record)
 lanes/browser/gateway-log.jsonl        decisions of the egress gateway: scheme, host, port, verdict; no path, query or header (log)
 lanes/browser/browser-guard-log.jsonl  decisions of the adapter's in-browser request gate, the second layer (log)
-logs/                                  orchestration log, tails of the lane output, the target's request log (log)
+lanes/browser/target-requests.jsonl    the target's own log of the requests it served during this lane (log)
+logs/                                  orchestration log, tails of the lane output, the reference check of the target (log)
 ```
 
 Plus the files `qa-evidence` writes: `report.json`, `bundle-manifest.json`, `assertion-lock.json`, `BUNDLE-FORMAT.txt`.

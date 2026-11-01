@@ -25,3 +25,17 @@ def observation_bytes(rows=None, lane="browser", run=RUN, **overrides):
 
 def files_with(data, lane="browser"):
     return {observation_path(lane): data}
+
+
+# ---- real browser-lane files (from a real run; see golden/regen_browser.py) ------------------------------------------------------------------------------------------------
+from pathlib import Path as _Path
+
+from qa_evidence.build import read_files as _read_files
+
+GOLDEN_DIR = _Path(__file__).resolve().parent / "golden"
+BROWSER_RUN = {"none": "r0-golden-browser-none", "settings": "r0-golden-browser-settings"}
+
+
+def browser_files(defect="none"):
+    """The files the judge reads for the browser lane of a REAL run against the target with ``defect`` (bundle path -> bytes), and the run id they belong to."""
+    return dict(_read_files(str(GOLDEN_DIR / f"browser-{defect}.tar")))
