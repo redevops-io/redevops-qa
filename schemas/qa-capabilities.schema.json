@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "redevops-qa/capabilities/1",
+  "title": "ReDevOps QA engine capability manifest",
+  "description": "One entry per test engine, every claim tied to evidence that lives in this repository or in a named CI run. Checked offline by tools/check_capabilities.py (strict subset validator in tools/qa_jsonschema.py) and, in a dedicated CI step, by the full jsonschema package.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "manifest_version", "repository", "main_branch", "distribution", "test_levels", "caveats", "examples", "engines"],
+  "properties": {
+    "schema": {"const": "redevops-qa/capabilities/1"},
+    "manifest_version": {"type": "integer", "minimum": 1},
+    "repository": {"type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"},
+    "main_branch": {"type": "string", "pattern": "^[A-Za-z0-9._/-]+$"},
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["published_packages", "install_from", "licence_wording", "note"],
+      "properties": {
+        "published_packages": {"const": false},
+        "install_from": {"const": "source-checkout"},
+        "licence_wording": {"const": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source"},
+        "note": {"type": "string", "minLength": 1}
+      }
+    },
+    "test_levels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["none", "offline-fake", "engine-backed-ci", "device-backed-local", "device-backed-ci"],
+      "properties": {
+        "none": {"$ref": "#/$defs/level_meaning"},
+        "offline-fake": {"$ref": "#/$defs/level_meaning"},
+        "engine-backed-ci": {"$ref": "#/$defs/level_meaning"},
+        "device-backed-local": {"$ref": "#/$defs/level_meaning"},
+        "device-backed-ci": {"$ref": "#/$defs/level_meaning"}
+      }
+    },
+    "caveats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appium_android", "appium_ios", "appium_general"],
+      "properties": {
+        "appium_android": {"$ref": "#/$defs/text_list"},
+        "appium_ios": {"$ref": "#/$defs/text_list"},
+        "appium_general": {"$ref": "#/$defs/text_list"}
+      }
+    },
+    "examples": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind", "description"],
+        "properties": {
+          "path": {"$ref": "#/$defs/repo_path"},
+          "kind": {"enum": ["test-lane"]},
+          "description": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "engines": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/engine"}}
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "date": {"type": "string", "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"},
+    "slug": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$"},
+    "repo_path": {"type": "string", "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/-]+$"},
+    "text_list": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "level": {"enum": ["none", "offline-fake", "engine-backed-ci", "device-backed-local", "device-backed-ci"]},
+    "os_arch": {"enum": ["linux-x86_64", "linux-arm64", "macos-arm64", "macos-x86_64", "windows-x86_64", "windows-wsl-x86_64"]},
+    "level_meaning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "meaning", "does_not_mean"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1},
+        "meaning": {"type": "string", "minLength": 1},
+        "does_not_mean": {"type": "string", "minLength": 1}
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "pin", "pin_literal", "pin_source", "provided_by", "note"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["interpreter", "source-package", "pip", "npm", "pinned-source-tree", "browser-binary", "driver", "toolchain"]},
+        "pin": {"type": ["string", "null"]},
+        "pin_literal": {"type": ["string", "null"]},
+        "pin_source": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/repo_path"}]},
+        "provided_by": {"enum": ["install", "operator"]},
+        "note": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"pin": {"type": "string"}}, "required": ["pin"]},
+          "then": {"properties": {"pin_literal": {"type": "string", "minLength": 1}, "pin_source": {"$ref": "#/$defs/repo_path"}}}
+        },
+        {
+          "if": {"properties": {"pin": {"type": "null"}}, "required": ["pin"]},
+          "then": {"properties": {"pin_literal": {"type": "null"}, "pin_source": {"type": "null"}, "note": {"minLength": 1}}}
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "claim"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^ev-[a-z0-9-]+$"},
+        "kind": {"enum": ["ci-job", "local-run", "repo-path"]},
+        "claim": {"type": "string", "minLength": 1},
+        "workflow": {"enum": ["tests.yml", "appium-android.yml"]},
+        "job_key": {"$ref": "#/$defs/slug"},
+        "job_name": {"type": "string", "minLength": 1},
+        "run_id": {"type": "integer", "minimum": 1},
+        "job_id": {"type": "integer", "minimum": 1},
+        "head_sha": {"$ref": "#/$defs/sha"},
+        "run_url": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+$"},
+        "conclusion": {"enum": ["success"]},
+        "completed_on": {"$ref": "#/$defs/date"},
+        "tests": {"type": "string", "minLength": 1},
+        "url": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+/job/[0-9]+$"},
+        "path": {"$ref": "#/$defs/repo_path"},
+        "observed_on": {"$ref": "#/$defs/date"},
+        "environment": {"type": "string", "minLength": 1},
+        "recorded_in_sha": {"$ref": "#/$defs/sha"},
+        "runs": {"type": "integer", "minimum": 1},
+        "result": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "ci-job"}}, "required": ["kind"]},
+          "then": {"required": ["workflow", "job_key", "job_name", "run_id", "job_id", "head_sha", "conclusion", "completed_on", "tests", "run_url", "url"]}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "local-run"}}, "required": ["kind"]},
+          "then": {"required": ["path", "observed_on", "environment", "recorded_in_sha", "runs", "result"]}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "repo-path"}}, "required": ["kind"]},
+          "then": {"required": ["path"]}
+        }
+      ]
+    },
+    "verified_on": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os_arch", "environment", "test_level", "scope", "evidence"],
+      "properties": {
+        "os_arch": {"$ref": "#/$defs/os_arch"},
+        "environment": {"type": "string", "minLength": 1},
+        "test_level": {"$ref": "#/$defs/level"},
+        "scope": {"type": "string", "minLength": 1},
+        "evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^ev-[a-z0-9-]+$"}}
+      }
+    },
+    "licence_component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix_component", "spdx", "redistribution"],
+      "properties": {
+        "matrix_component": {"$ref": "#/$defs/slug"},
+        "spdx": {"type": "string", "minLength": 1},
+        "redistribution": {"enum": ["redistributable", "optional_extra", "excluded_by_default", "unverified"]}
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "display_name", "adapter_ids", "adapter_version", "runtime_version", "os_arch", "install_method", "dependencies",
+                   "execution_modes", "test_level", "test_level_scope", "summary", "last_verified_sha", "last_verified_sha_basis",
+                   "last_verified_date", "evidence", "limitations", "license", "docs_url", "example_id"],
+      "properties": {
+        "engine": {"$ref": "#/$defs/slug"},
+        "display_name": {"type": "string", "minLength": 1},
+        "adapter_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/slug"}},
+        "adapter_version": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)*(\\.dev[0-9]+)?$"},
+        "runtime_version": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)*$"},
+        "os_arch": {"type": "array", "items": {"$ref": "#/$defs/verified_on"}},
+        "install_method": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "packages", "extras", "published_to_registry", "note"],
+          "properties": {
+            "method": {"enum": ["source-checkout-pip"]},
+            "packages": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/repo_path"}},
+            "extras": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"}},
+            "published_to_registry": {"const": false},
+            "note": {"type": "string", "minLength": 1}
+          }
+        },
+        "dependencies": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/dependency"}},
+        "execution_modes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["interactive", "suite"]}},
+        "test_level": {"$ref": "#/$defs/level"},
+        "test_level_scope": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "last_verified_sha": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/sha"}]},
+        "last_verified_sha_basis": {"enum": ["ci-head", "documented-in", "none"]},
+        "last_verified_date": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/date"}]},
+        "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}},
+        "limitations": {"$ref": "#/$defs/text_list"},
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["adapter_spdx", "adapter_wording", "components"],
+          "properties": {
+            "adapter_spdx": {"const": "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause"},
+            "adapter_wording": {"const": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source"},
+            "components": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/licence_component"}}
+          }
+        },
+        "docs_url": {"$ref": "#/$defs/repo_path"},
+        "example_id": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/slug"}]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"test_level": {"const": "none"}}, "required": ["test_level"]},
+          "then": {"properties": {"os_arch": {"maxItems": 0}, "last_verified_sha": {"type": "null"}, "last_verified_date": {"type": "null"},
+                                  "last_verified_sha_basis": {"const": "none"}}},
+          "else": {"properties": {"os_arch": {"minItems": 1}, "last_verified_sha": {"type": "string"}, "last_verified_date": {"type": "string"},
+                                  "last_verified_sha_basis": {"enum": ["ci-head", "documented-in"]}}}
+        }
+      ]
+    }
+  }
+}

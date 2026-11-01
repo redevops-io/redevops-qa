@@ -38,7 +38,7 @@ policy:
   blocked_prefixes: ["LicenseRef-Proprietary", "LicenseRef-Commons-Clause"]
   allowed_exceptions: [LLVM-exception]
   # Distribution names that CI and the adapter packages may install without being adapter frameworks (not shipped).
-  ci_tooling: [pytest, pyyaml]
+  ci_tooling: [pytest, pyyaml, jsonschema]
 components:
   # ------------------------------------------------------------------------------------------------ Selenium
   - id: selenium-python
@@ -327,6 +327,16 @@ components:
     trademark: {status: unverified, note: "not checked"}
     redistribution: {status: excluded_by_default, default_enabled: false, reason: "test tooling installed in CI only"}
     verification: {status: registry-metadata, method: "licence field of the package's registry entry for its latest version on the check date", checked_on: "2026-10-31"}
+  - id: ci-jsonschema
+    name: jsonschema
+    kind: ci_tool
+    adapter: all
+    members:
+      - {name: jsonschema, version_constraint: "==4.26.0", spdx: MIT, note: "test tooling for the capability manifest cross-check, never shipped"}
+    notices: []
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: excluded_by_default, default_enabled: false, reason: "test tooling installed in CI only"}
+    verification: {status: registry-metadata, method: "licence expression of the package's registry entry for the pinned version (MIT), read on the check date; its own dependencies were not scanned", checked_on: "2026-10-31"}
   # ------------------------------------------------------------------------------------------------ Excluded by default
   - id: android-sdk-and-emulator
     name: Android SDK, emulator and system images (Google)

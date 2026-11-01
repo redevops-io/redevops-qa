@@ -278,6 +278,31 @@ jobs:
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-browser.xml"
 
+  capabilities:
+    name: "capability manifest (qa-capabilities.json - schema, pins, evidence, adapter agreement, freshness against main, generated document; offline; never skipped)"
+    # Runs on every push and pull request, with no path filter, no condition and no dependency on another job, so it cannot be skipped. Offline, read-only,
+    # no secret. It needs the full history (the freshness rule: every verified commit must be an ancestor of main). The full jsonschema package is
+    # installed only to cross-check the strict validator the offline tests use; a missing package fails the step.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools and the cross-check validator
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "jsonschema==4.26.0"
+      - name: Check the manifest (schema, pins, evidence, adapter agreement, document, freshness against main) and cross-check the validator
+        run: env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 python tools/check_capabilities.py --cross-check
+      - name: Run the manifest and validator tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q tests/test_capabilities.py tests/test_qa_jsonschema.py --junitxml="$RUNNER_TEMP/junit-capabilities.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-capabilities.xml"
+
   selenium-offline:
     name: "selenium adapter (offline - fake browser, recorded pytest JUnit reports, real pytest under the supervisor; no Selenium installed)"
     runs-on: ubuntu-24.04
