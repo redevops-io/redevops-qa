@@ -48,9 +48,10 @@ def fake_robot(mode):
 
 
 def process_table():
-    """``{pid: (ppid, pgid, command)}`` of every process, from ``ps`` (what a process check can see; nothing here kills anything)."""
+    """``{pid: (ppid, pgid, command)}`` of every process, from ``ps`` (what a process check can see; nothing here kills anything). ``-ww``: without it a ``ps`` that writes to a pipe may cut
+    the command at the terminal width, and a long interpreter path then hides the module name the checks look for (this is what made the first CI run of these tests fail)."""
     import subprocess
-    out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,command="], capture_output=True, text=True, timeout=30).stdout
+    out = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,pgid=,command="], capture_output=True, text=True, timeout=30).stdout
     table = {}
     for line in out.splitlines():
         parts = line.split(None, 3)
