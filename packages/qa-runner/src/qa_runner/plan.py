@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -28,8 +29,12 @@ from .deps import Upstreams, pin_summary
 from .errors import PlanError
 
 PLAN_KEYS = {"schema", "schema_version", "plan_id", "target", "lanes"}
-LANE_KEYS = {K.ENGINE_PLAYWRIGHT: {"lane_id", "engine", "spec", "egress", "deadline_s"},
-             K.ENGINE_ROBOT: {"lane_id", "engine", "spec", "egress", "deadline_s", "suite"}}
+COMMON_LANE_KEYS = {"lane_id", "engine", "spec", "egress", "deadline_s", "requests", "probes"}
+LANE_KEYS = {K.ENGINE_PLAYWRIGHT: set(COMMON_LANE_KEYS), K.ENGINE_ROBOT: COMMON_LANE_KEYS | {"suite", "suite_sha256"}}
+OPTIONAL_LANE_KEYS = {"deadline_s", "probes"}
+SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+REQUEST_RE = re.compile(r"^(GET|POST) (/[A-Za-z0-9._~/-]{0,100})$")
+PROBE_FACTS = ("discount-rule", "settings-persistence")
 #: what traffic of an engine is controlled by: only the browser's traffic passes the egress gateway; a Robot library opens its own sockets, so a Robot lane says so
 EGRESS_PROFILES = {K.ENGINE_PLAYWRIGHT: ("origin-only",), K.ENGINE_ROBOT: ("not-enforced",)}
 TARGET_KINDS = ("fixture-app",)
@@ -43,11 +48,11 @@ def read_json(data: bytes, what: str) -> Any:
         raise PlanError("NOT_STRICT_JSON", f"{what}: {exc.code}: {exc}") from None
 
 
-def _only(doc: Mapping[str, Any], allowed, where: str) -> None:
+def _only(doc: Mapping[str, Any], allowed, where: str, optional=("deadline_s",)) -> None:
     unknown = sorted(set(doc) - set(allowed))
     if unknown:
         raise PlanError("UNKNOWN_FIELD", f"{where} has unknown field(s) {[str(u)[:40] for u in unknown]}: an unknown field is refused, never ignored")
-    missing = sorted(set(allowed) - set(doc) - {"deadline_s"})
+    missing = sorted(set(allowed) - set(doc) - set(optional))
     if missing:
         raise PlanError("MISSING_FIELD", f"{where} lacks {missing}")
 
@@ -58,6 +63,8 @@ class FrozenLane:
     engine: str
     deadline_s: int
     egress: str
+    requests: Dict[str, Any]                 # what the target's request log must show for this lane: {"required": [...], "allowed": [...]} of "METHOD /path"
+    probes: Dict[str, str]                   # assertion id -> the fact of the independent reference check that must not contradict a VERIFIED verdict
     spec_template: Dict[str, Any]
     spec_digest: str                         # sha256 of the canonical JSON of the template exactly as given
     spec_contract_hash: str                  # the contracts spec hash (rcv1)
@@ -91,8 +98,9 @@ class FrozenPlan:
     def lock_document(self) -> Dict[str, Any]:
         return {"schema": K.LOCK_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": self.plan_id, "plan": self.plan, "plan_digest": self.plan_digest,
                 "plan_sha256": digest_of(self.plan), "pins": dict(self.pins), "runner_version": self.runner_version,
-                "lanes": [{"lane_id": l.lane_id, "engine": l.engine, "spec_digest": l.spec_digest, "spec_contract_hash": l.spec_contract_hash,
-                           "suite": l.suite, "suite_files": dict(sorted(l.suite_files.items())), "harness_pin": l.harness_pin, "assertions": [dict(a) for a in l.assertions],
+                "lanes": [{"lane_id": l.lane_id, "engine": l.engine, "egress": l.egress, "requests": l.requests, "probes": l.probes, "spec_digest": l.spec_digest,
+                           "spec_contract_hash": l.spec_contract_hash, "suite": l.suite, "suite_files": dict(sorted(l.suite_files.items())), "harness_pin": l.harness_pin,
+                           "assertions": [dict(a) for a in l.assertions],
                            "assertion_digests": dict(sorted(l.assertion_digests.items()))} for l in self.lanes]}
 
     def lock_bytes(self) -> bytes:
@@ -130,7 +138,9 @@ def _parse_structure(doc: Any) -> List[Mapping[str, Any]]:
     for lane in lanes:
         if not isinstance(lane, dict) or lane.get("engine") not in K.ENGINES:
             raise PlanError("UNSUPPORTED_ENGINE", f"lane engine must be one of {list(K.ENGINES)} (R0 scope: Playwright Chromium and Robot Framework)")
-        _only(lane, LANE_KEYS[lane["engine"]], f"lane {str(lane.get('lane_id'))[:20]!r}")
+        _only(lane, LANE_KEYS[lane["engine"]], f"lane {str(lane.get('lane_id'))[:20]!r}", OPTIONAL_LANE_KEYS)
+        _check_requests(lane["requests"], str(lane.get("lane_id")))
+        _check_probes(lane.get("probes", {}), str(lane.get("lane_id")))
         lid = lane["lane_id"]
         if not isinstance(lid, str) or not K.LANE_ID_RE.fullmatch(lid):
             raise PlanError("BAD_LANE_ID", "a lane id is 1 to 20 characters: a lower-case letter, then lower-case letters, digits and '-'")
@@ -146,6 +156,22 @@ def _parse_structure(doc: Any) -> List[Mapping[str, Any]]:
     return lanes
 
 
+def _check_requests(req: Any, lid: str) -> None:
+    if not isinstance(req, dict) or set(req) != {"required", "allowed"}:
+        raise PlanError("BAD_REQUESTS", f"lane {lid[:20]}: requests is {{\"required\": [...], \"allowed\": [...]}} of 'METHOD /path' entries")
+    for key in ("required", "allowed"):
+        items = req[key]
+        if not isinstance(items, list) or len(items) > 64 or len(set(items)) != len(items) or not all(isinstance(i, str) and REQUEST_RE.fullmatch(i) for i in items):
+            raise PlanError("BAD_REQUESTS", f"lane {lid[:20]}: requests.{key} is a list of distinct 'GET /path' or 'POST /path' entries (no query), at most 64")
+    if not req["required"]:
+        raise PlanError("BAD_REQUESTS", f"lane {lid[:20]}: a lane must name at least one request the target has to see")
+
+
+def _check_probes(probes: Any, lid: str) -> None:
+    if not isinstance(probes, dict) or not all(isinstance(k, str) and v in PROBE_FACTS for k, v in probes.items()):
+        raise PlanError("BAD_PROBES", f"lane {lid[:20]}: probes maps an assertion id to one of {list(PROBE_FACTS)}")
+
+
 def _contracts_spec(up: Upstreams, doc: Mapping[str, Any], lane_id: str):
     c = up.contracts
     try:
@@ -155,7 +181,7 @@ def _contracts_spec(up: Upstreams, doc: Mapping[str, Any], lane_id: str):
                         f"{str(getattr(exc, 'detail', exc))[:300]}") from None
 
 
-def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict[str, Any]], suite_hashes: Optional[Mapping[str, Mapping[str, str]]] = None) -> Tuple[str, Dict[str, str]]:
+def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict[str, Any]], for_verification: bool = False) -> Tuple[str, Dict[str, str]]:
     """What each kind of lane may contain. A browser lane holds PLAYWRIGHT assertions only. A Robot lane names a shipped suite, holds no steps, and its assertions are
     SCRIPT assertions that read exactly the lane's observation record with the registered, hash-pinned ``evidence.robot-observations`` program."""
     lid = lane["lane_id"]
@@ -163,14 +189,26 @@ def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict
         if any(a["executor"] != "PLAYWRIGHT" for a in assertions):
             raise PlanError("EXECUTOR_MISMATCH", f"lane {lid}: a browser lane holds PLAYWRIGHT assertions only")
         return "", {}
+    from . import suites
     from .suites import OBSERVATIONS_PATH_FORMAT, evidence_program_ref, suite_digests
     suite = lane["suite"]
     if not isinstance(suite, str):
         raise PlanError("UNKNOWN_SUITE", f"lane {lid}: suite must be the name of a shipped suite")
-    if suite_hashes is None:
+    given_hashes = lane["suite_sha256"]
+    if for_verification:
+        # Verifying the lock of a finished run: the suite files are the ones THE PLAN pins (``suite_sha256``, part of the plan digest and bound into every assertion digest of the lane),
+        # never numbers the lock merely repeats, and never what this runner ships now (an older run used older files). Which files make a suite is the code's; their digests are the plan's.
+        names = set(suites.SUITES[suite]["files"]) if suite in suites.SUITES else None
+        if names is None:
+            raise PlanError("UNKNOWN_SUITE", f"lane {lid}: no suite named {str(suite)[:40]!r} is known to this runner")
+        if not isinstance(given_hashes, dict) or set(given_hashes) != names or not all(isinstance(v, str) and SHA256_RE.fullmatch(v) for v in given_hashes.values()):
+            raise PlanError("SUITE_PINS_MALFORMED", f"lane {lid}: the plan must pin exactly the files {sorted(names)} of suite {suite!r} by sha256")
+        hashes = dict(given_hashes)
+    else:
         hashes = suite_digests(suite)                               # refuses an unknown suite
-    else:                                                           # verifying an old bundle: the suite files are the ones the lock records (and the bundle carries)
-        hashes = dict(suite_hashes.get(lid, {}))
+        if not isinstance(given_hashes, dict) or given_hashes != hashes:
+            raise PlanError("SUITE_MISMATCH", f"lane {lid}: the plan pins the files of suite {suite!r} as {json.dumps(given_hashes, sort_keys=True)[:300]}, "
+                            f"the files this runner ships hash as {json.dumps(hashes, sort_keys=True)}: a suite or library that is not the reviewed one is refused before anything runs")
     if spec.steps:
         raise PlanError("ROBOT_LANE_HAS_STEPS", f"lane {lid}: a Robot lane's spec carries assertions only; the suite is the engine's work")
     ref = evidence_program_ref()
@@ -189,13 +227,13 @@ def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict
     return suite, hashes
 
 
-def freeze_plan(up: Upstreams, plan_doc: Any, *, suite_hashes: Optional[Mapping[str, Mapping[str, str]]] = None) -> FrozenPlan:
+def freeze_plan(up: Upstreams, plan_doc: Any, *, for_verification: bool = False) -> FrozenPlan:
     lanes_in = _parse_structure(plan_doc)
     if len(json.dumps(plan_doc)) > MAX_PLAN_BYTES:
         raise PlanError("PLAN_TOO_LARGE", f"a plan is at most {MAX_PLAN_BYTES} bytes")
     h = up.harness
     frozen: List[FrozenLane] = []
-    seen_ids: Dict[str, str] = {}
+    seen_ids: Dict[str, Tuple[str, str]] = {}
     for lane in lanes_in:
         lid = lane["lane_id"]
         spec = _contracts_spec(up, lane["spec"], lid)                       # strict parser first: it refuses unknown fields
@@ -210,35 +248,43 @@ def freeze_plan(up: Upstreams, plan_doc: Any, *, suite_hashes: Optional[Mapping[
         for a in assertions:
             if not K.ASSERTION_ID_RE.fullmatch(a["assertion_id"]):
                 raise PlanError("BAD_ASSERTION_ID", f"assertion id {a['assertion_id'][:40]!r} does not fit the evidence id pattern")
-            if a["assertion_id"] in seen_ids:
-                raise PlanError("DUPLICATE_ASSERTION", f"assertion id {a['assertion_id']!r} appears in lanes {seen_ids[a['assertion_id']]!r} and {lid!r}: "
+            key = a["assertion_id"].lower()                                  # the evidence format refuses ids that differ only in case: refuse them here, before anything runs
+            if key in seen_ids:
+                raise PlanError("DUPLICATE_ASSERTION", f"assertion id {a['assertion_id']!r} appears in lanes {seen_ids[key][1]!r} and {lid!r} (ids are compared without case): "
                                 "every frozen assertion is accounted exactly once")
-            seen_ids[a["assertion_id"]] = lid
-        suite_name, lane_suite_hashes = _lane_engine_rules(lane, spec, assertions, suite_hashes)
-        digests = {a["assertion_id"]: digest_of(a) for a in assertions}
+            seen_ids[key] = (a["assertion_id"], lid)
+        suite_name, suite_hashes = _lane_engine_rules(lane, spec, assertions, for_verification)
+        materialise_spec(lane["spec"], "http://127.0.0.1:1")                 # the rule for {origin} that the run applies: a plan the run would refuse is refused here, before anything starts
+        unknown_probe = sorted(set(lane.get("probes", {})) - {a["assertion_id"] for a in assertions})
+        if unknown_probe:
+            raise PlanError("BAD_PROBES", f"lane {lid}: probes name assertions that are not in this lane: {[u[:40] for u in unknown_probe]}")
+        # Everything the plan fixes about a lane besides the assertion itself is bound into the digest of every assertion of that lane, so the plan digest covers it:
+        # what the target's request log must show, which independent facts may not contradict a verdict, the egress profile, the whole spec (steps included), the deadline,
+        # the reviewed suite and the digests of its files (a Robot lane), and the plan's id and target.
+        binding = {"engine": lane["engine"], "egress": lane["egress"], "requests": lane["requests"], "probes": lane.get("probes", {}),
+                   "deadline_s": lane.get("deadline_s", int(K.DEFAULT_LANE_DEADLINE_S)), "spec_sha256": digest_of(lane["spec"]),
+                   "plan": {"plan_id": plan_doc["plan_id"], "target": plan_doc["target"]}}
+        if suite_name:
+            binding.update(suite=suite_name, suite_files=suite_hashes)
+        digests = {a["assertion_id"]: digest_of({"assertion": a, "binding": binding}) for a in assertions}
         frozen.append(FrozenLane(lane_id=lid, engine=lane["engine"], deadline_s=lane.get("deadline_s", int(K.DEFAULT_LANE_DEADLINE_S)), egress=lane["egress"],
-                                 spec_template=copy.deepcopy(lane["spec"]), spec_digest=digest_of(lane["spec"]), spec_contract_hash=spec.spec_hash,
-                                 suite=suite_name, suite_files=lane_suite_hashes, assertions=tuple(assertions), assertion_digests=digests, harness_pin=pin))
+                                 requests=copy.deepcopy(lane["requests"]), probes=dict(lane.get("probes", {})), spec_template=copy.deepcopy(lane["spec"]),
+                                 spec_digest=digest_of(lane["spec"]), spec_contract_hash=spec.spec_hash, suite=suite_name, suite_files=suite_hashes,
+                                 assertions=tuple(assertions), assertion_digests=digests, harness_pin=pin))
     return FrozenPlan(plan=copy.deepcopy(plan_doc), plan_id=plan_doc["plan_id"], lanes=tuple(frozen), pins=pin_summary(up), runner_version=K.RUNNER_VERSION)
 
 
 def thaw_lock(up: Upstreams, lock_doc: Any, *, for_verification: bool = False) -> FrozenPlan:
     """Read a lock document: re-freeze the plan it carries and require every recorded digest and pin to be what that gives (no trust in the lock's own numbers).
 
-    ``for_verification`` is for reading the lock of a finished run on another machine or at another time: the suite file hashes are the ones the lock records (``verify``
-    compares them with the copies in the bundle) and the tool versions the lock names are not required to be the ones loaded now (``verify`` reports a difference as a note);
+    ``for_verification`` is for reading the lock of a finished run on another machine or at another time: the suite file hashes are the ones the PLAN pins (``verify``
+    compares them with the copies in the bundle; they are part of the plan digest) and the tool versions the lock names are not required to be the ones loaded now (``verify`` reports a difference as a note);
     every assertion, expected value, digest, pin and program hash is still recomputed and compared."""
     if not isinstance(lock_doc, dict) or lock_doc.get("schema") != K.LOCK_SCHEMA:
         raise PlanError("NOT_A_LOCK", f"this is not a {K.LOCK_SCHEMA} document")
     if lock_doc.get("schema_version") != K.SCHEMA_VERSION:
         raise PlanError("UNSUPPORTED_LOCK_VERSION", f"this runner reads {K.LOCK_SCHEMA} {K.SCHEMA_VERSION} only")
-    hashes = None
-    if for_verification:
-        try:
-            hashes = {l["lane_id"]: l["suite_files"] for l in lock_doc["lanes"]}
-        except (KeyError, TypeError):
-            raise PlanError("LOCK_MISMATCH", "the lock's lanes are malformed") from None
-    again = freeze_plan(up, lock_doc.get("plan"), suite_hashes=hashes)
+    again = freeze_plan(up, lock_doc.get("plan"), for_verification=for_verification)
     expected, got = again.lock_document(), dict(lock_doc)
     if for_verification:
         for tooling in ("pins", "runner_version"):

@@ -6,7 +6,7 @@ import dataclasses
 import pytest
 
 from qa_evidence.canon import dumps_canonical, sha256_bytes
-from qa_runner.judge import EvidenceUnusable, judge_lane, observation_document, observation_path, parse_observations
+from qa_runner.judge import EvidenceUnusable, judge_observed as judge_lane, observation_document, observation_path, parse_observations
 from qr_data import ORIGIN, RUN, files_with, good_rows, observation_bytes, row
 
 

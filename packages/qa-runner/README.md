@@ -37,19 +37,23 @@ digest it prints is what `verify --plan-digest` will compare a bundle with; reco
 noticed). `run` accepts a plan (frozen on the spot, with a note on standard error) or a lock; a lock is re-frozen from the plan it carries and refused if any digest, pin, tool version,
 suite hash or expected value differs.
 
+The summary `run` prints says in its second line that integrity against deliberate re-forging is NOT established (no external anchor).
+
 **`demo`** is `freeze` and `run` on the built-in plan (browser lane, then Robot lane, one target, one run id) followed by the full report. It prints no plan digest comparison: a digest
 computed by the process that ran the plan would only match itself.
 
-**`report`** and **`inspect`** read a bundle (directory or archive) through `qa-evidence`: they verify it first, never recompute a verdict, escape every string that came from the
-bundle, and exit 0 only if the bundle verified as internally consistent (1 if not, 2 if it cannot be opened). `report` renders text, JSON or one HTML file with no script and a
-content-security policy; `inspect` lists the files with roles and digests, the tool versions, the lanes and the heads of the chains inside each harness run record.
+**`report`** and **`inspect`** read a bundle (directory or archive) through `qa-evidence` and run `verify` over it as well: what they print starts with the result of the recomputation of the
+verdicts (the first line of `report`, the third of `inspect`, a banner of the HTML, `recomputation` and `verdicts_recomputed` in the JSON). For a bundle that `verify` rejects they exit 5
+(never 0 and never "Verification: OK") and say that what is shown must not be relied on; 2 if it cannot be opened. They escape every string that came from the bundle. `report` renders
+text, JSON or one HTML file with no script and a content-security policy; `inspect` lists the files with roles and digests, the tool versions, the lanes and the heads of the chains inside
+each harness run record.
 
 **`verify`** re-verifies a finished run from its bundle alone, offline, in a process of its own (see "What verification does and does not prove" below). Exit status: for an accepted bundle
-the same table as `run` (0 VERIFIED, 1 FAILED, 3 a lane did not complete, 4 inconclusive); **5 when any finding rejects the evidence**; 2 when the bundle cannot be opened. `run` and
+the same table as `run` (0 VERIFIED, 1 FAILED, 3 a lane did not complete, 4 inconclusive); **5 when any finding rejects the evidence**; 2 when the bundle cannot be opened; 7 when the verifier itself cannot run here. `run` and
 `demo` end by calling `verify` in a separate interpreter (fresh environment, no state shared) and exit 5 if it does not accept what they just wrote.
 
 **`run`** freezes the plan (or reads a lock), starts the fixture app on loopback with the defect you name, runs each lane as a supervised child process, stops
-the app, and writes the bundle to `DIR/<run id>` (a directory that must not exist). It prints the outcome, what each engine reported, what the independent
+the app, and writes the bundle to `DIR/<run id>` (a directory that must not exist; it is reserved before anything runs and the bundle is renamed into place, so a reader sees no bundle or a whole one). It prints the outcome, what each engine reported, what the independent
 verdicts are, the plan digest (the value to give `verify --plan-digest`) and the manifest digest (the value an external anchor should hold).
 
 | Exit | Meaning |
@@ -61,6 +65,7 @@ verdicts are, the plan digest (the value to give `verify --plan-digest`) and the
 | 4 | inconclusive: every lane completed but not every assertion is verified, or an engine and the verifier disagree (`NATIVE_FAIL_VERIFIED_ASSERTIONS`) |
 | 5 | `verify` rejected the evidence (any finding), including the verification a run does of its own bundle |
 | 6 | an internal error of the runner (a crash is never reported as a product failure) |
+| 7 | `verify` only: the verifier itself cannot run here (a pinned dependency or git is missing); nothing was verified, which says nothing about the bundle (the JSON is still printed, with `assurance: not-verified`) |
 
 ## The plan
 
@@ -69,8 +74,11 @@ expected values. Freezing:
 
 * refuses a plan or lane field it does not know, and a spec field the **runtime-contracts parser** does not know. The parser runs before the harness
   mirror because the mirror tolerates unknown spec fields and they change the spec hash (`tests/test_qr_plan.py` shows both);
-* gives every assertion a digest (sha256 of its canonical JSON, expected value included), computes the assertion lock and the plan digest with the
-  conventions of `qa-evidence`, and requires the contracts and the harness to agree on the assertion-set pin;
+* gives every assertion a digest (sha256 of its canonical JSON, expected value included) together with a binding to everything else that defines the lane: the
+  whole spec (steps included), the egress profile, the deadline, the request expectations and probes below, the plan id and the target. The assertion lock and
+  the plan digest follow the conventions of `qa-evidence`, so the plan digest covers all of it, and the contracts and the harness must agree on the assertion-set pin;
+* needs, per lane, the `requests` the target must have seen (`required`) and may see (`allowed`) as `METHOD /path` strings, and may name `probes`: assertions tied
+  to a fact of the independent reference check (`settings-persistence`, `discount-math`);
 * refuses an assertion id that appears in two lanes (every assertion is accounted exactly once).
 
 A step value may start with `{origin}`; the origin of this start of the target is substituted when the lane runs, so one frozen plan serves every start of
@@ -79,7 +87,8 @@ the app (a different port each time).
 ## The Robot lane
 
 A Robot lane names a reviewed suite shipped with this package (`"suite": "order-discount"`: `src/qa_runner/robot_suite/order_discount.robot` and the library `OrderApi.py`).
-Freezing hashes the suite files and the registered check program into the lock; the run copies the files into a fresh workspace, requires the copies to hash as frozen, and
+The plan PINS the sha256 of each suite file (`"suite_sha256"`, the digests of `examples/robot-plan.json`, which a reviewer reads as a diff) and the registered check program; freezing
+refuses a plan whose pins are not the files this runner ships (`SUITE_MISMATCH`, before anything runs) and the pins are part of the plan digest. The run copies the files into a fresh workspace, requires the copies to hash as frozen, and
 gives the Robot adapter the library's hash as the only reviewed library (the adapter refuses any other library file, any library not on its allowlist and any construct that
 loads code at run time). The suite runs under the kit supervisor with `QA_BASE_URL` as the only variable it is given.
 
@@ -96,8 +105,15 @@ loads code at run time). The suite runs under the kit supervisor with `QA_BASE_U
   a browser lane must use `origin-only`).
 * **Same supervision as the browser lane:** the Robot lane runs in a child process too (the same deadline, cancel, process-group kill, and a parent-death watchdog), and the engine runs
   under its own supervisor inside it.
-* **Not detectable from the record:** a suite that records a value it did not observe. What protects against that is the review of the suite and library (their hashes are frozen and
-  checked before the run, and the copies are in the bundle) and the target's request log (`logs/target-requests.jsonl`), not the record.
+* **A suite that records a value it did not observe is caught outside the record.** Three things hold it: the pinned hashes of the suite and library (above); the target's own request
+  log for the lane (`lanes/robot/target-requests.jsonl`), which must show `GET /api/orders/101` to `104` and nothing the plan does not allow, or the lane's assertions are `INCONCLUSIVE`
+  (`EVIDENCE_UNUSABLE`); and the independent reference check of the target, which vetoes a verified verdict when it finds the discount rule deviating (or is missing).
+* **The engine's files must hold together.** `robot-summary.json` and `adapter-result.json` must name the `output.xml` of the bundle by hash, agree on every test's status, belong to this run,
+  and the suite files in the bundle must be the pinned ones; otherwise the lane's assertions are `INCONCLUSIVE`.
+* **The engine itself also runs under a guard** (`robot_guard.py`, started instead of `-m robot`): when the lane child is killed the guard ends the engine and everything it started. The temporary
+  directory of a killed run stays: nothing is left alive to remove it.
+* **`output.xml` names the temporary workspace** (Robot writes the absolute path of the suite into the report's `source` attribute), so the bundle shows the path of the temporary directory of the
+  machine that ran it. Set `TMPDIR` to a neutral location when that matters. The report is kept as the engine wrote it; it is not rewritten.
 
 ## What a run does
 
@@ -115,8 +131,14 @@ loads code at run time). The suite runs under the kit supervisor with `QA_BASE_U
    browser and the adapter's request gate behind it, an action policy that allows only the plan's origin, and attestations answered from facts (the
    target's `/health`; declared preconditions or fixtures that nothing can attest are *unknown*, which blocks a pass).
 5. Everything the lane wrote is collected as native artifacts. The observed values the harness verifier read are recorded in an observation file.
-6. The verdicts are computed by `judge_lane` over the observation file and the frozen assertions, using the harness `DeterministicVerifier`. The in-run
-   verifier's verdicts are a cross-check: a disagreement certifies nothing.
+6. The verdicts are computed by `judge_lane` over the observation file and the frozen assertions, using the harness `DeterministicVerifier`. Before a value
+   counts, what the lane claims is checked against what the run itself recorded (`corroborate.py`): the harness run record passes the harness integrity check, is sealed
+   and not cancelled, belongs to this run, names the frozen assertion set and the frozen spec, and agrees with every observation; the target's own request
+   log for the lane shows the required requests and none the plan does not allow; and an assertion tied to a probe is not verified when the independent reference
+   check (run against the target after the lanes) finds that fact deviating, or when there is no reference check. Anything that does not hold leaves the lane's
+   assertions `INCONCLUSIVE` (`EVIDENCE_UNUSABLE`). The in-run verifier's verdicts are a cross-check: a disagreement certifies nothing.
+   A lane produced by a test double (`RunOptions.lane_command`, used by tests only) carries only `INCONCLUSIVE` with the reason `TEST_DOUBLE` and the report says so
+   (`extensions.test_double`).
 7. The bundle is built by a pure function (`bundle.build_run_bundle`, no clock, no environment, no file system) with `qa-evidence`, which checks its own output.
 
 Every lane and every frozen assertion is accounted for whatever happens. A lane that cannot start, times out, is cancelled or crashes is recorded with a
@@ -139,26 +161,37 @@ lanes/robot/native/output.xml          the Robot engine's own report; also robot
 lanes/robot/observations.json          the observation record derived from output.xml: what the check program reads (observation)
 lanes/robot/suite/*                    the reviewed suite files the engine ran, as hashed in the lock (record)
 lanes/robot/egress-profile.json        says that egress is not enforced for this lane (record)
-logs/                                  orchestration log, tails of the lane output, the target's request log (log)
+lanes/<lane>/target-requests.jsonl     the target's own log of the requests it served while that lane ran (log)
+logs/                                  orchestration log, tails of the lane output, the reference check of the target (log)
 ```
 
 Plus the files `qa-evidence` writes: `report.json`, `bundle-manifest.json`, `assertion-lock.json`, `BUNDLE-FORMAT.txt`.
 
 ## What verification does and does not prove
 
-`redevops-qa verify BUNDLE` (a directory or the canonical archive) reads nothing but the bundle, opens no socket and loads no browser, Robot Framework or HTTP client library of its own
-(a test proves both). It re-computes, and reports a finding for any difference:
+`redevops-qa verify BUNDLE` (a directory or the canonical archive) takes nothing from the run: it reads the bundle, opens no socket and imports no browser or Robot Framework package. It is not
+dependency-free: it needs the pinned runtime-contracts and agent-harness trees (checked with `git`, so `git` and clean checkouts of the pins), PyYAML (the check-program registry imports it), and its
+output depends on `PATH` and the `REDEVOPS_QA_*` / `QA_PIN_*` variables that name the pins; the pinned harness imports the standard library's HTTP client modules when it is imported (a test shows
+that nothing connects). It re-computes, and reports a finding for any difference:
 
 1. every file digest and size, the manifest and the report schema, the accounting (every frozen assertion exactly once), the lane ids and run ids, and the external anchor and plan digest if you
    supply them (`qa-evidence`);
 2. the frozen plan: `plan.lock.json` is re-frozen with the pinned runtime-contracts and harness parsers (unknown fields refused) and must equal itself, the report's frozen set and the
-   assertion lock, with every expected value, digest, assertion-set pin and check-program hash recomputed; the suite files in the bundle must be the ones the lock froze;
+   assertion lock, with every expected value, digest, assertion-set pin and check-program hash recomputed; the suite files in the bundle must be the ones THE PLAN pins (`suite_sha256`, part of the
+   plan digest) and the pins must name exactly the files of the suite (a lock with no pins, or other pins, is `LOCK_REJECTED`); a version of the runner that ships other suite files than the plan
+   pins is a note, not a finding (an older run used older files);
 3. **every verdict**, from the files in the bundle: the recorded browser observations against the frozen assertions, and for the Robot lane the hash-pinned check program over a record that
    must be exactly what the importer derives from the engine's own `output.xml` in the bundle. A report that says something else is `VERDICT_RECOMPUTE_MISMATCH`;
 4. each lane's **native status**, re-derived from the engine's own files (the harness outcome and exit code, the Robot adapter result and the test statuses of `output.xml`); a native FAIL
    written as a PASS is `NATIVE_STATUS_RELABELLED`; an engine status this verifier does not map is never read as a pass;
-5. each browser lane's **harness run record**: the event and receipt chains, the manifest, the run id, the frozen assertion pin, the executed spec (rebuilt from the frozen template and the
-   allowed origin), and that every observation equals what the record says was read.
+5. each browser lane's **harness run record**: the event and receipt chains, the manifest, the blobs it refers to (a missing or altered blob is `RUN_RECORD_MISSING_BLOB` / `RUN_RECORD_BLOB_CONTENT`),
+   the run id, the frozen assertion pin, the executed spec (rebuilt from the frozen template and the allowed origin), that the `AssertionResult` events are the results its manifest lists and
+   that the seal and the manifest carry the classification the record states (`RUN_RECORD_CONTRADICTS_ITSELF`), and that every observation equals what the record says was read;
+6. the **egress profile** of a browser lane is exactly the one the plan's profile gives for the origin it names, the lock's tool versions and runner version are well-formed, and the bundle holds no
+   file that no run of its plan writes (`UNEXPECTED_FILE`: a lane directory that is not in the plan, a hidden log).
+
+A bundle whose report says a test double produced a lane is rejected (`TEST_DOUBLE_BUNDLE`): a double carries no verdict. Whatever else goes wrong inside the verification, on a bundle built to cause it,
+is `VERIFY_INCOMPLETE` and exit 5, never an internal error.
 
 An observation row or record that carries a field an adapter has no business writing (a verdict, a `verified` claim, an expected value) is unusable evidence: the assertion is `INCONCLUSIVE`.
 
@@ -167,16 +200,22 @@ What an accepted bundle means, and what it does not:
 * **Without `--anchor`, accepted means INTERNALLY CONSISTENT, nothing more.** The hashes and the manifest are unkeyed. They detect accidental changes and partial edits. They do not detect a bundle
   that was rewritten consistently from start to finish by someone who can rewrite all of it: the product's own builder would produce the same bytes from forged inputs, and the tamper suite shows
   it (`tests/test_qr_tamper_suite.py`): the failing lane dropped, an assertion weakened, or the engine's own report rewritten to say the rule held, with every digest recomputed, is accepted as
-  internally consistent and says so. Only a manifest digest obtained from a place the forger cannot write (`--anchor`; the CI artifact attestation planned for the release job publishes it) rejects
+  internally consistent and says so (the engine's report now has to be rewritten together with the engine's summary, the adapter result that names both by hash, the observation record and the
+  target's reference check: more work than before, not a different class of forgery). Only a manifest digest obtained from a place the forger cannot write (`--anchor`; the CI artifact attestation planned for the release job publishes it) rejects
   those. `verify` never calls a match with a value you supplied proof that the value is trustworthy.
-* **`--plan-digest` closes one gap and no other.** The plan digest printed by `freeze` (record it outside the bundle) rejects a bundle whose frozen assertion set was changed or reduced; it cannot
-  reject a forgery that left the plan alone.
+* **`--plan-digest` closes the gaps in the PLAN and no other.** The plan digest printed by `freeze` (record it outside the bundle) covers every assertion, its expected value and, bound into each
+  assertion's digest, the whole definition of its lane: the spec with its steps, the egress profile, the deadline, the request expectations and probes, the reviewed Robot suite and the sha256 of its
+  files, and the plan id and target. A bundle whose plan was changed in any of those fails with it. It cannot reject a forgery that left the plan alone.
 * **Two partial backstops that need no anchor:** an engine that said FAIL while every assertion verifies makes the run `INCONCLUSIVE` (`NATIVE_FAIL_VERIFIED_ASSERTIONS`), so weakening an assertion
-  without also rewriting the engine's files does not give a VERIFIED run; and the harness run record's chains are checked against each other, so editing one event is a finding unless the forger rebuilds the chain.
+  without also rewriting the engine's files does not give a VERIFIED run; and the harness run record is checked against itself (chains, seal, manifest, blobs, and the events against the manifest), so
+  a forger must rewrite the manifest, the seal and every event that contradicts them, not only recompute the chain.
 * **It does not establish that the application is correct.** It shows that the frozen assertions hold (or fail) over the recorded observations, and that the bundle is what it says. It does not re-drive the
   browser or the application and it does not show that a suite recorded what it observed (the target's request log and the frozen suite hashes are the only evidence of that).
 * **Not covered:** verification with other pinned versions of runtime-contracts or agent-harness than the ones that wrote the bundle is reported as a note (every digest is re-derived with the tools loaded
-  here, and they must agree); a check program or reviewed suite changed since the run makes older bundles fail to verify, by design.
+  here, and they must agree); a check program changed since the run makes older bundles fail to verify (`PROGRAM_HASH_MISMATCH`), by design; a reviewed suite changed since the run does not (the plan carries its own pins), and `verify` says so
+  in a note.
+* **The offline mutation suite cannot reach the end-to-end tests** (`-m e2e` is an unknown marker under its strict configuration), so no mutant covers process cleanup end to end; the end-to-end job
+  runs those tests unmutated.
 
 ## What this does not show
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -29,9 +30,10 @@ from qa_evidence.sources import SourceError
 from qa_evidence.verify import verify_bundle
 
 from . import constants as K
-from .bundle import cross_checked
+from .bundle import finalize_results
+from .corroborate import BundleBlobs, plain_json, lane_origin, record_contradicts_itself
 from .deps import Upstreams, pin_summary, verified_bootstrap
-from .errors import PlanError
+from .errors import EnvironmentFault, PlanError
 from .judge import judge_lane, observation_path
 from .natives import native_from_adapter_result, native_from_harness
 from .exits import exit_code_for
@@ -60,20 +62,25 @@ class Verification:
     recomputed: int = 0
     agreeing: int = 0
     run_exit_code: int = K.EXIT_INCONCLUSIVE
+    unavailable: bool = False                        # the verifier itself could not run here (a pinned dependency, git): nothing was verified, which is not a verdict about the bundle
 
     def add(self, code: str, where: str, message: str) -> None:
         self.findings.append(Finding(code, where, message))
 
     @property
     def accepted(self) -> bool:
-        return not self.findings and self.qe is not None and self.qe.ok
+        return not self.unavailable and not self.findings and self.qe is not None and self.qe.ok
 
     @property
     def exit_code(self) -> int:
+        if self.unavailable:
+            return K.EXIT_VERIFIER_UNAVAILABLE
         return self.run_exit_code if self.accepted else K.EXIT_REJECTED
 
     @property
     def assurance(self) -> str:
+        if self.unavailable:
+            return "not-verified"
         if not self.accepted:
             return "rejected"
         return "matches-supplied-anchor" if self.qe.anchor.matches else "internal-consistency-only"
@@ -83,8 +90,17 @@ class Verification:
         return {"schema": "redevops-qa/verify-result", "schema_version": K.SCHEMA_VERSION, "accepted": self.accepted, "assurance": self.assurance,
                 "exit_code": self.exit_code, "run_outcome": self.outcome, "engine_verifier_disagreements": self.disagreements,
                 "recomputed_assertions": self.recomputed, "agreeing_assertions": self.agreeing,
-                "anchor": q.anchor.to_json() if q is not None else None, "plan": q.plan.to_json() if q is not None and q.plan is not None else None,
+                "anchor": _anchor_json(q.anchor) if q is not None else None, "plan": q.plan.to_json() if q is not None and q.plan is not None else None,
                 "findings": [f.to_json() for f in self.findings], "notes": list(self.notes)}
+
+
+def _anchor_json(anchor: Any) -> Dict[str, Any]:
+    """The anchor as qa-evidence reports it, with one word changed: a value that equals the manifest digest is ``matches-supplied-value``, not ``verified``. Nothing here authenticates where the
+    supplied value came from (a digest copied from the same bundle matches too)."""
+    doc = anchor.to_json()
+    if doc.get("state") == "verified":
+        doc["state"] = "matches-supplied-value"
+    return doc
 
 
 def _json(files: Mapping[str, bytes], path: str) -> Any:
@@ -107,8 +123,13 @@ def _check_lock(up: Upstreams, files: Mapping[str, bytes], report: Mapping[str, 
         v.add("LOCK_REJECTED", LOCK_PATH, f"the plan lock does not re-freeze to itself with the pinned parsers ({getattr(exc, 'code', type(exc).__name__)})")
         return None
     pins = pin_summary(up)
-    if doc.get("pins") != pins:
+    given_pins, given_version = doc.get("pins"), doc.get("runner_version")
+    if not (isinstance(given_pins, dict) and set(given_pins) == set(pins) and all(isinstance(x, str) and 0 < len(x) <= 200 for x in given_pins.values())):
+        v.add("LOCK_METADATA_MALFORMED", LOCK_PATH, "the tool versions the lock names are missing or are not the kind of value a lock carries")
+    elif given_pins != pins:
         v.notes.append("the tool versions in the lock differ from the ones loaded here (verification re-derived every digest with the tools loaded here; they agree)")
+    if not (isinstance(given_version, str) and 0 < len(given_version) <= 64):
+        v.add("LOCK_METADATA_MALFORMED", LOCK_PATH, "the runner version the lock names is missing or is not a short string")
     if frozen.plan_digest != report["plan_digest"]:
         v.add("LOCK_REPORT_MISMATCH", "plan_digest", "the plan digest of the re-frozen lock is not the report's")
     if files.get("assertion-lock.json") != frozen.assertion_lock_bytes():
@@ -120,6 +141,13 @@ def _check_lock(up: Upstreams, files: Mapping[str, bytes], report: Mapping[str, 
     status = {l["lane_id"]: l["native"]["status"] for l in report["lanes"]}
     for lane in frozen.lanes:
         if lane.suite:
+            try:
+                from .suites import suite_digests
+                if suite_digests(lane.suite) != dict(lane.suite_files):
+                    v.notes.append(f"lane {safe_text(lane.lane_id, 20)}: the suite files this plan pins are not the ones this version of the runner ships (the run used older or other files; "
+                                   "what the plan pins is what the bundle's copies are compared with, and the pins are part of the plan digest)")
+            except PlanError:
+                pass
             present = any(p.startswith(f"lanes/{lane.lane_id}/suite/") for p in files)
             for rel, digest in lane.suite_files.items():
                 from qa_evidence.canon import sha256_bytes
@@ -145,8 +173,12 @@ def _harness_verdicts(files: Mapping[str, bytes], lane_id: str) -> Dict[str, str
 
 def _check_verdicts(up: Upstreams, frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification) -> None:
     recorded = {r["assertion_id"]: r for r in report["accounting"]["results"]}
+    status = {l["lane_id"]: l["native"]["status"] for l in report["lanes"]}          # the reported native status is itself re-derived from the engine's files by _check_native
+    double = bool((report.get("extensions") or {}).get("test_double"))
+    if double:
+        v.add("TEST_DOUBLE_BUNDLE", "extensions", "this bundle says a lane was produced by a test double: it carries no verdict and is not evidence of a run of the engines")
     for lane in frozen.lanes:
-        for r in cross_checked(judge_lane(up, lane, run_id=report["run_id"], files=files), _harness_verdicts(files, lane.lane_id)):
+        for r in finalize_results(judge_lane(up, lane, run_id=report["run_id"], files=files), status.get(lane.lane_id, ""), double, _harness_verdicts(files, lane.lane_id)):
             v.recomputed += 1
             got = recorded.get(r["assertion_id"])
             if got is None:
@@ -180,7 +212,7 @@ def _check_native(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mappin
                                 v.add("NATIVE_FILES_DISAGREE", f"lanes/{lid}/native", "the lane result and the harness run record do not name the same outcome and exit code")
             elif lane["engine"]["name"] == K.ENGINE_ROBOT:
                 if "adapter-result.json" in mine:
-                    doc = json.loads(mine["adapter-result.json"].decode("utf-8"))
+                    doc = plain_json(mine["adapter-result.json"])
                     derived = native_from_adapter_result(doc.get("status"), doc.get("error_code"))
                     if derived is None:
                         v.add("NATIVE_STATUS_UNKNOWN", f"lanes/{lid}/native/adapter-result.json", "the engine result carries a status this verifier does not map (never read as a pass)")
@@ -218,16 +250,22 @@ def _check_run_record(up: Upstreams, frozen: FrozenPlan, files: Mapping[str, byt
         except Exception as exc:
             v.add("RUN_RECORD_UNREADABLE", path, f"the harness run record cannot be read ({type(exc).__name__})")
             continue
-        found = h.integrity.verify_run_evidence(events=rec["events"], receipts=receipts, links=links, manifest=manifest)
+        found = h.integrity.verify_run_evidence(events=rec["events"], receipts=receipts, links=links, manifest=manifest, blobs=BundleBlobs(h, files, lid))
         for f in found.findings:
             v.add(f"RUN_RECORD_{f.code}", path, f"the harness integrity check found {f.code} at {safe_text(f.where, 40)}")
+        contradiction = record_contradicts_itself(rec, manifest)
+        if contradiction is not None:
+            v.add("RUN_RECORD_CONTRADICTS_ITSELF", path, contradiction)
+        if rec.get("sealed") is not True or rec.get("cancelled") is not False:
+            if reported is not None and reported["native"]["status"] in ("NATIVE_PASS", "NATIVE_FAIL"):
+                v.add("RUN_RECORD_NOT_SEALED_OR_CANCELLED", path, "a completed browser lane's run record is not sealed or says the run was cancelled")
         if rec.get("run_id") != f"{report['run_id']}.{lid}" or manifest.run_id != f"{report['run_id']}.{lid}":
             v.add("RUN_RECORD_WRONG_RUN", path, "the run record belongs to another run id than this lane's")
         if manifest.assertion_set_hash != lane.harness_pin:
             v.add("RUN_RECORD_WRONG_ASSERTIONS", path, "the run was verified in-run against another assertion set than the frozen one")
-        origin = _origin(files, lid)
+        origin = lane_origin(lane, files)
         if origin is None:
-            v.add("EGRESS_PROFILE_MISSING", f"lanes/{lid}/egress-profile.json", "the egress profile that names the allowed origin is missing or malformed")
+            v.add("EGRESS_PROFILE_MISSING", f"lanes/{lid}/egress-profile.json", "the egress profile is missing, malformed, or not exactly the one the plan's profile gives for the origin it names")
         else:
             try:
                 executed = h.records.TestSpec.from_json(materialise_spec(lane.spec_template, origin))
@@ -246,12 +284,36 @@ def _check_run_record(up: Upstreams, frozen: FrozenPlan, files: Mapping[str, byt
                 v.add("OBSERVATION_NOT_IN_RUN_RECORD", observation_path(lid), f"the observation of {safe_text(row.get('assertion_id'), 64)} is not what the harness run record says was read")
 
 
-def _origin(files: Mapping[str, bytes], lane_id: str) -> Optional[str]:
-    try:
-        entry = _json(files, f"lanes/{lane_id}/egress-profile.json")["private"][0]
-        return f"http://{entry['host']}:{entry['ports'][0]}"
-    except (KeyError, IndexError, TypeError, CanonError):
-        return None
+ROOT_FILES = frozenset({"report.json", "bundle-manifest.json", "assertion-lock.json", "BUNDLE-FORMAT.txt", LOCK_PATH, "logs/orchestrator.log", "logs/target-requests.jsonl", "logs/reference-check.json"})
+BLOB_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _expected_files(frozen: FrozenPlan) -> Tuple[frozenset, Dict[str, str]]:
+    """The paths a run of this plan writes (exactly: the builder and the lanes write nothing else) and the per-lane directories that may hold blobs."""
+    names = set(ROOT_FILES)
+    blobs: Dict[str, str] = {}
+    for lane in frozen.lanes:
+        base = f"lanes/{lane.lane_id}/"
+        names |= {base + n for n in ("observations.json", "egress-profile.json", "target-requests.jsonl")}
+        names |= {f"logs/{lane.lane_id}.stdout.txt", f"logs/{lane.lane_id}.stderr.txt"}
+        if lane.engine == K.ENGINE_PLAYWRIGHT:
+            names |= {base + n for n in ("gateway-log.jsonl", "browser-guard-log.jsonl", "native/lane-result.json", "native/run-record.json")}
+            blobs[base + "native/blobs/"] = lane.lane_id
+        else:
+            names |= {base + n for n in ("native/output.xml", "native/robot-summary.json", "native/adapter-result.json")}
+            names |= {base + "suite/" + n for n in lane.suite_files}
+    return frozenset(names), blobs
+
+
+def _check_file_set(frozen: FrozenPlan, files: Mapping[str, bytes], v: Verification) -> None:
+    """A file the bundle lists that no run of this plan writes (a covert payload in a place nobody reads) is a finding, not an extra to ignore."""
+    names, blob_dirs = _expected_files(frozen)
+    for path in sorted(files):
+        if path in names:
+            continue
+        if any(path.startswith(d) and BLOB_RE.fullmatch(path[len(d):]) for d in blob_dirs):
+            continue
+        v.add("UNEXPECTED_FILE", safe_text(path, 120), "the bundle lists a file that no run of its plan writes")
 
 
 def verify_location(location: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, require_anchor: bool = False,
@@ -278,15 +340,22 @@ def verify_location(location: str, *, anchor: Optional[str] = None, plan_digest:
                 _check_verdicts(up, frozen, files, report, v)
                 _check_native(frozen, files, report, v)
                 _check_run_record(up, frozen, files, report, v)
+                _check_file_set(frozen, files, v)
             v.run_exit_code = exit_code_for(report)
+        except EnvironmentFault as exc:
+            v.unavailable = True
+            v.add("VERIFIER_UNAVAILABLE", "", f"the verifier cannot run here ({safe_text(exc.code, 60)}); nothing was verified, and that says nothing about the bundle")
         except (BuildError, SourceError, CanonError, KeyError, TypeError) as exc:
             v.add("VERIFY_INCOMPLETE", "", f"the bundle could not be read in full ({type(exc).__name__}); nothing is accepted")
+        except Exception as exc:            # a bundle crafted to crash the verifier is rejected, never an 'internal error' that a caller could read as a fault of its own
+            v.add("VERIFY_INCOMPLETE", "", f"the verification could not be completed ({type(exc).__name__}); nothing is accepted")
     return v
 
 
 def render_text(location: str, v: Verification) -> str:
     t = lambda x, n=300: safe_text(x, n)         # noqa: E731
-    lines = [f"verify {t(location)}: " + ("ACCEPTED (internally consistent)" if v.accepted else f"REJECTED, {len(v.findings)} finding(s)")]
+    head = "ACCEPTED (internally consistent)" if v.accepted else ("NOT VERIFIED: the verifier cannot run here" if v.unavailable else f"REJECTED, {len(v.findings)} finding(s)")
+    lines = [f"verify {t(location)}: " + head]
     if v.qe is not None:
         lines.append(f"  recomputation: {v.recomputed} assertion(s) recomputed from the bundle alone, {v.agreeing} agree with the report")
         lines.append(f"  external anchor: {v.qe.anchor.notice}")

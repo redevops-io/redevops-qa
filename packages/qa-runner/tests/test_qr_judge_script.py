@@ -9,7 +9,7 @@ import pytest
 
 from qa_evidence.canon import dumps_canonical, sha256_bytes
 from qa_runner.golden import robot_plan
-from qa_runner.judge import derived_record, EvidenceUnusable, judge_lane
+from qa_runner.judge import derived_record, EvidenceUnusable, judge_observed as judge_lane
 from qa_runner.plan import freeze_plan
 from qr_data import DEFECT_TOTALS, GOOD_TOTALS, RUN, robot_files, robot_record, robot_xml
 
@@ -20,6 +20,7 @@ def robot(up):
 
 
 def judged(up, lane, files, run=RUN):
+    """The comparison of the record with the frozen value (the corroboration of the lane's own files is ``test_qr_corroborate_robot.py``)."""
     (r,) = judge_lane(up, lane, run_id=run, files=files)
     return r
 

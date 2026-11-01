@@ -16,7 +16,7 @@ from qa_runner.orchestrate import RunOptions, run_plan
 from qa_runner.plan import freeze_plan, load_plan_or_lock
 from qr_support import fake, fake_robot
 
-DEMO_PLAN_DIGEST = "sha256:b267f8dda8d9cfa87704e4ce33f969f6b9f3743c2438523732e21f89d2c909fd"
+DEMO_PLAN_DIGEST = "sha256:6f960c30bb013f8a57bb83bc914918b809fa35d2d46e2848ad9d14ea4f55e0e3"
 DEMO_EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "demo-plan.json"
 
 
@@ -121,11 +121,13 @@ def rep(s):
     return json.loads(s.bundle.files["report.json"])
 
 
-def test_both_lanes_pass_and_all_four_assertions_are_verified(up, demo_frozen):
+def test_both_lanes_are_native_passes_and_carry_no_verdict_because_both_engines_are_doubles(up, demo_frozen):
+    """Doubles never carry a verdict (VERIFIED for the two real engines is in ``tests/e2e``)."""
     s = two(up, demo_frozen)
-    assert (s.outcome, s.exit_code, s.lanes) == ("VERIFIED", 0, (("browser", "NATIVE_PASS"), ("robot", "NATIVE_PASS")))
+    assert (s.outcome, s.exit_code, s.lanes) == ("INCONCLUSIVE", K.EXIT_INCONCLUSIVE, (("browser", "NATIVE_PASS"), ("robot", "NATIVE_PASS")))
     r = rep(s)
-    assert r["accounting"]["frozen"] == r["accounting"]["verified"] == 4 and r["accounting"]["unaccounted"] == 0
+    assert r["accounting"]["frozen"] == r["accounting"]["inconclusive"] == 4 and r["accounting"]["unaccounted"] == 0
+    assert {x["verdict"]["reason_code"] for x in r["accounting"]["results"]} == {"TEST_DOUBLE"}
 
 
 def test_the_lanes_share_one_run_id_and_their_run_ids_are_run_dot_lane(up, demo_frozen):
@@ -143,19 +145,14 @@ def test_the_lanes_run_serially_in_plan_order_against_one_target(up, demo_frozen
     assert "/api/orders/101" in requests                          # the Robot lane's requests reached the same target
 
 
-def test_the_discount_defect_fails_exactly_the_robot_lane_and_the_browser_lane_is_still_recorded(up, demo_frozen):
+def test_the_discount_defect_is_a_native_fail_of_the_robot_lane_only_and_the_browser_lane_is_still_recorded(up, demo_frozen):
     s = two(up, demo_frozen, defect="discount")
-    r = rep(s)
-    states = {x["assertion_id"]: x["verdict"]["state"] for x in r["accounting"]["results"]}
-    assert (s.outcome, s.exit_code) == ("FAILED", 1) and states == {"A-NOTIF-ON": "VERIFIED", "A-SAVED": "VERIFIED", "A-URL": "VERIFIED", "A-ORDER-RULE": "FAILED"}
-    assert s.lanes == (("browser", "NATIVE_PASS"), ("robot", "NATIVE_FAIL"))
+    assert s.lanes == (("browser", "NATIVE_PASS"), ("robot", "NATIVE_FAIL")) and s.outcome == "INCONCLUSIVE"
 
 
-def test_a_failing_browser_lane_fails_exactly_its_assertion_and_the_robot_lane_is_still_recorded(up, demo_frozen):
+def test_a_failing_browser_lane_is_a_native_fail_of_that_lane_only_and_the_robot_lane_is_still_recorded(up, demo_frozen):
     s = two(up, demo_frozen, browser="settings-bug")
-    states = {x["assertion_id"]: x["verdict"]["state"] for x in rep(s)["accounting"]["results"]}
-    assert (s.outcome, s.exit_code) == ("FAILED", 1) and states["A-NOTIF-ON"] == "FAILED" and states["A-ORDER-RULE"] == "VERIFIED"
-    assert s.lanes == (("browser", "NATIVE_FAIL"), ("robot", "NATIVE_PASS"))
+    assert s.lanes == (("browser", "NATIVE_FAIL"), ("robot", "NATIVE_PASS")) and s.outcome == "INCONCLUSIVE"
 
 
 def test_partial_success_a_lane_that_times_out_leaves_the_other_lanes_result_and_the_run_inconclusive(up):
@@ -165,7 +162,7 @@ def test_partial_success_a_lane_that_times_out_leaves_the_other_lanes_result_and
     r = rep(s)
     states = {x["assertion_id"]: x["verdict"]["state"] for x in r["accounting"]["results"]}
     assert s.lanes == (("browser", "NATIVE_TIMEOUT"), ("robot", "NATIVE_PASS")) and (s.outcome, s.exit_code) == ("INCONCLUSIVE", K.EXIT_ENVIRONMENT)
-    assert states == {"A-NOTIF-ON": "INCONCLUSIVE", "A-SAVED": "INCONCLUSIVE", "A-URL": "INCONCLUSIVE", "A-ORDER-RULE": "VERIFIED"}
+    assert set(states.values()) == {"INCONCLUSIVE"}              # the Robot lane is a double too: no verdict; the real partial success is in tests/e2e
     assert r["accounting"]["frozen"] == 4 and r["verdict"]["reason_code"] != "ALL_ASSERTIONS_VERIFIED"
 
 
@@ -174,14 +171,6 @@ def test_a_timeout_never_gives_verified_whatever_the_other_lane_says(up):
     plan["lanes"][1]["deadline_s"] = 2
     s = run_plan(up, freeze_plan(up, plan), RunOptions(lane_command=fake("pass"), robot_launcher=fake_robot("hang"), run_id="r0-test"))
     assert s.outcome == "INCONCLUSIVE" and s.lanes == (("browser", "NATIVE_PASS"), ("robot", "NATIVE_TIMEOUT"))
-
-
-def test_a_failed_assertion_in_one_lane_outranks_a_timeout_in_the_other(up):
-    plan = demo_plan()
-    plan["lanes"][1]["deadline_s"] = 2
-    s = run_plan(up, freeze_plan(up, plan), RunOptions(lane_command=fake("settings-bug"), robot_launcher=fake_robot("hang"), run_id="r0-test"))
-    assert s.outcome == "FAILED" and s.exit_code == K.EXIT_FAILED          # a demonstrated failure is reported as one; the timeout is still visible per lane
-    assert dict(s.lanes) == {"browser": "NATIVE_FAIL", "robot": "NATIVE_TIMEOUT"}
 
 
 def test_cancelling_during_the_first_lane_skips_the_second_and_still_accounts_for_all_four(up, demo_frozen):
@@ -197,10 +186,12 @@ def test_cancelling_during_the_first_lane_skips_the_second_and_still_accounts_fo
 
 # ---- report and inspect ------------------------------------------------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def bundle_dir(up, demo_frozen, tmp_path_factory):
-    s = two(up, demo_frozen, defect="discount")
+def bundle_dir(tmp_path_factory):
+    """The bundle `demo` wrote for the discount defect with the real engines (golden/regen_bundles.py): report and inspect are exercised over a real one."""
+    from qa_evidence.build import write_directory
+    from qr_tamper import golden
     target = tmp_path_factory.mktemp("bundle") / "b"
-    s.bundle.write_directory(str(target))
+    write_directory(golden("discount"), str(target))
     return target
 
 
@@ -227,7 +218,7 @@ def test_report_with_a_plan_digest_says_whether_it_matches(bundle_dir):
     good = cli("report", str(bundle_dir), "--plan-digest", DEMO_PLAN_DIGEST)
     bad = cli("report", str(bundle_dir), "--plan-digest", "sha256:" + "0" * 64)
     assert good[0] == 0 and "matches the supplied value" in good[1]
-    assert bad[0] == 1 and "does NOT match" in bad[1] and "must not be relied on" in bad[2]
+    assert bad[0] == K.EXIT_REJECTED and "does NOT match" in bad[1] and "must not be relied on" in bad[2]
 
 
 def test_report_of_a_tampered_bundle_exits_one_and_warns(bundle_dir, tmp_path):
@@ -236,7 +227,7 @@ def test_report_of_a_tampered_bundle_exits_one_and_warns(bundle_dir, tmp_path):
     shutil.copytree(bundle_dir, copy)
     (copy / "lanes" / "robot" / "observations.json").write_bytes(b"{}\n")
     code, out, err = cli("report", str(copy))
-    assert code == 1 and "FAILED" in out and "WARNING: this bundle FAILED verification" in out and "must not be relied on" in err
+    assert code == K.EXIT_REJECTED and "FAILED" in out and "WARNING: this bundle FAILED verification" in out and "must not be relied on" in err
 
 
 def test_report_and_inspect_of_something_that_is_not_a_bundle_are_usage_errors(tmp_path):
@@ -256,7 +247,7 @@ def test_inspect_exits_one_for_a_bundle_that_does_not_verify(bundle_dir, tmp_pat
     shutil.copytree(bundle_dir, copy)
     (copy / "plan.lock.json").write_bytes(b"{}\n")
     code, out, err = cli("inspect", str(copy))
-    assert code == 1 and "verification: FAILED" in out
+    assert code == K.EXIT_REJECTED and "verification: FAILED" in out
 
 
 def test_chain_heads_are_read_from_the_run_record_as_stored():
@@ -276,3 +267,73 @@ def test_hostile_text_in_a_bundle_is_escaped_in_inspect(bundle_dir, tmp_path):
     (copy / "x\x1b[2Jy.txt").write_bytes(b"x")
     code, out, err = cli("inspect", str(copy))
     assert "\x1b" not in out and "\x1b" not in err
+
+
+# ---- review of #32: what report and inspect do not show, the run summary, the plan read, the origin rule --------------------------------------------
+def forged_bundle(up, tmp_path):
+    """The bundle of the discount run with the failing verdict reported as VERIFIED by this package's own report builder, so every digest, count and the manifest agree (a forgery that the
+    bundle's own checks cannot see)."""
+    from qa_evidence.build import write_directory
+    from qr_tamper import golden
+    from qr_tamper_cases import CASES
+    case = next(c for c in CASES if c.name.startswith("forged PASS: the report recomputed by the library"))
+    target = tmp_path / "forged"
+    write_directory(case.mutate(up, golden(case.base)), str(target))
+    return target
+
+
+def test_report_and_inspect_recompute_the_verdicts_and_do_not_print_ok_for_evidence_verify_rejects(up, bundle_dir, tmp_path):
+    """Review finding H1: for a forged bundle `verify` exited 5 while `report` printed 'Verification : OK - internally consistent ... VERIFIED' and exited 0."""
+    forged = forged_bundle(up, tmp_path)
+    code, out, err = cli("report", str(forged))
+    assert code == K.EXIT_REJECTED and "REJECTED: the bundle does not verify" in out.splitlines()[0] and "VERDICT_RECOMPUTE_MISMATCH" in out.splitlines()[0] and "must not be relied on" in err
+    code, out, err = cli("inspect", str(forged))
+    assert code == K.EXIT_REJECTED and "recomputation: REJECTED" in out.splitlines()[2]
+    doc = json.loads(cli("report", str(forged), "--format", "json")[1])
+    assert doc["recomputation"]["accepted"] is False and "VERDICT_RECOMPUTE_MISMATCH" in {f["code"] for f in doc["recomputation"]["findings"]}
+    html_file = tmp_path / "r.html"
+    assert cli("report", str(forged), "--format", "html", "-o", str(html_file))[0] == K.EXIT_REJECTED
+    assert 'banner bad">REJECTED' in html_file.read_text()
+
+
+def test_report_and_inspect_say_what_was_recomputed_for_a_bundle_that_verifies(bundle_dir):
+    code, out, err = cli("report", str(bundle_dir))
+    assert code == 0 and out.splitlines()[0] == "Recomputation : verdicts recomputed from the bundle alone: 4 of 4 agree with the report (ACCEPTED as internally consistent)"
+    assert json.loads(cli("report", str(bundle_dir), "--format", "json")[1])["verdicts_recomputed"] is True
+    assert cli("inspect", str(bundle_dir))[1].splitlines()[2].startswith("recomputation: verdicts recomputed from the bundle alone: 4 of 4 agree")
+
+
+def test_the_run_summary_says_that_integrity_against_re_forging_is_not_established(up, demo_frozen):
+    """Review finding H3: the summary of `run` ended with an exit 0 VERIFIED and did not carry the sentence."""
+    from qa_runner.cli import _print_summary
+    s = two(up, demo_frozen)
+    buf = io.StringIO()
+    _print_summary(s, Path("/x"), buf)
+    lines = buf.getvalue().splitlines()
+    assert "integrity against deliberate re-forging NOT established" in lines[1] and lines[0].startswith("run r0-test:")
+
+
+def test_a_plan_that_is_not_a_regular_file_is_refused_without_being_read(tmp_path):
+    """Review finding M5: ``stat().st_size`` is 0 for /dev/zero and a FIFO; the read had no cap (134 GB resident in 8 seconds)."""
+    import os
+    fifo = tmp_path / "plan.fifo"
+    os.mkfifo(fifo)
+    for path in ("/dev/zero", str(fifo)):
+        code, out, err = cli("freeze", path, "--out", str(tmp_path / "l.json"))
+        assert code == K.EXIT_USAGE and "not a regular file" in err, path
+
+
+def test_a_plan_over_the_cap_is_refused_by_what_is_read(tmp_path):
+    (tmp_path / "big.json").write_bytes(b" " * (1024 * 1024 + 1))
+    code, out, err = cli("freeze", str(tmp_path / "big.json"), "--out", str(tmp_path / "l.json"))
+    assert code == K.EXIT_USAGE and "at most" in err
+
+
+def test_freeze_refuses_a_plan_the_run_would_refuse_for_its_origin_placeholder(up):
+    """Review finding L3: `{origin}` twice in a step value was accepted by freeze and refused by the run, after the target had started."""
+    from qa_runner.errors import PlanError
+    plan = golden_plan()
+    plan["lanes"][0]["spec"]["steps"][0]["action"]["value"] = "{origin}/login?next={origin}"
+    with pytest.raises(PlanError) as exc:
+        freeze_plan(up, plan)
+    assert exc.value.code == "BAD_ORIGIN_PLACEHOLDER"

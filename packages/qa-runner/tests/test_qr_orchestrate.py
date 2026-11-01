@@ -24,27 +24,22 @@ def report(summary):
     return json.loads(summary.bundle.files["report.json"])
 
 
-def test_a_finished_lane_with_matching_observations_is_verified_and_exits_zero(up, golden_frozen):
-    s = run(up, golden_frozen, "pass")
-    assert (s.outcome, s.exit_code, s.lanes) == ("VERIFIED", K.EXIT_VERIFIED, (("browser", "NATIVE_PASS"),))
-    assert verify_files(s.bundle.files, plan_digest=s.plan_digest).ok
+def states_of(summary):
+    return {x["assertion_id"]: (x["verdict"]["state"], x["verdict"]["reason_code"]) for x in report(summary)["accounting"]["results"]}
 
 
-def test_a_failed_assertion_fails_the_run_and_exits_one(up, golden_frozen):
-    s = run(up, golden_frozen, "settings-bug")
+@pytest.mark.parametrize("mode", ["pass", "settings-bug", "native-fail-verified", "disagree", "unknown-field"])
+def test_a_lane_run_by_a_test_double_can_never_be_verified_or_failed_whatever_it_writes(up, golden_frozen, mode):
+    """Review finding H1. The double of these tests wrote a pass with an empty target log and the run was VERIFIED, exit 0. Now it is labelled, INCONCLUSIVE (TEST_DOUBLE), exit 4."""
+    s = run(up, golden_frozen, mode)
     r = report(s)
-    assert (s.outcome, s.exit_code) == ("FAILED", K.EXIT_FAILED) and s.lanes == (("browser", "NATIVE_FAIL"),)
-    assert {x["assertion_id"]: x["verdict"]["state"] for x in r["accounting"]["results"]} == {"A-NOTIF-ON": "FAILED", "A-SAVED": "VERIFIED", "A-URL": "VERIFIED"}
+    assert (s.outcome, s.exit_code) == ("INCONCLUSIVE", K.EXIT_INCONCLUSIVE), mode
+    assert set(states_of(s).values()) == {("INCONCLUSIVE", "TEST_DOUBLE")} and r["extensions"]["test_double"] == "lane-command"
 
 
 def test_an_executor_environment_failure_is_an_engine_error_even_when_the_observations_look_right(up, golden_frozen):
     s = run(up, golden_frozen, "env-fail")
     assert (s.outcome, s.exit_code, s.lanes) == ("INCONCLUSIVE", K.EXIT_ENVIRONMENT, (("browser", "NATIVE_ERROR"),))
-
-
-def test_an_engine_failure_with_every_assertion_verified_is_inconclusive_and_exits_four(up, golden_frozen):
-    s = run(up, golden_frozen, "native-fail-verified")
-    assert (s.outcome, s.reason_code, s.exit_code) == ("INCONCLUSIVE", "NATIVE_FAIL_VERIFIED_ASSERTIONS", K.EXIT_INCONCLUSIVE)
 
 
 def test_a_lane_that_outlives_its_deadline_is_a_timeout_never_verified(up, golden_frozen):
@@ -69,16 +64,17 @@ def test_an_unreadable_or_forged_lane_result_is_never_verified(up, golden_frozen
     assert s.outcome == "INCONCLUSIVE" and s.exit_code != 0
 
 
-def test_a_forged_verdict_field_in_the_observations_leaves_the_assertions_inconclusive(up, golden_frozen):
-    s = run(up, golden_frozen, "unknown-field")
-    r = report(s)
-    assert {x["verdict"]["reason_code"] for x in r["accounting"]["results"]} == {"EVIDENCE_UNUSABLE"} and r["verdict"]["outcome"] == "INCONCLUSIVE"
+def test_rows_that_are_not_rows_are_not_recorded_and_leave_everything_inconclusive(up, golden_frozen):
+    s = run(up, golden_frozen, "junk-rows")
+    assert s.outcome == "INCONCLUSIVE" and "lanes/browser/observations.json" not in s.bundle.files
+    assert {v[0] for v in states_of(s).values()} == {"INCONCLUSIVE"} and verify_files(s.bundle.files).ok
 
 
-def test_the_inrun_verifier_disagreeing_with_the_recomputation_certifies_nothing(up, golden_frozen):
-    s = run(up, golden_frozen, "disagree")
-    r = report(s)
-    assert s.outcome == "INCONCLUSIVE" and {x["assertion_id"]: x["verdict"]["reason_code"] for x in r["accounting"]["results"]}["A-NOTIF-ON"] == "VERIFIER_ERROR"
+@pytest.mark.parametrize("outcome,reason,status", [("PASS", None, "NATIVE_PASS"), ("PRODUCT_FAIL", None, "NATIVE_FAIL"), ("ENVIRONMENT_FAIL", "LANE_DEADLINE", "NATIVE_TIMEOUT"),
+                                                  ("ENVIRONMENT_FAIL", None, "NATIVE_ERROR"), ("WHATEVER", None, "NATIVE_ERROR")])
+def test_the_engine_status_comes_from_the_executors_own_outcome(outcome, reason, status):
+    from qa_runner.natives import native_from_harness
+    assert native_from_harness(outcome, reason)[0] == status
 
 
 def test_a_gateway_that_cannot_start_fails_the_lane_closed_and_no_browser_is_started(up, golden_frozen):
@@ -207,3 +203,52 @@ def test_the_exit_code_table(outcome, status, code):
     assert exit_code_for(rep) == code
     assert exit_code_for({"verdict": {"outcome": "INCONCLUSIVE"}, "lanes": [{"native": {"status": "NATIVE_PASS"}}]}, cancelled=True) == 3
     assert exit_code_for({"verdict": {"outcome": "VERIFIED"}, "lanes": [{"native": {"status": "NATIVE_PASS"}}]}) == 0
+
+
+def test_the_temporary_directory_is_removed_when_the_run_fails(up, golden_frozen, monkeypatch, tmp_path):
+    """Review findings M5/M6: a run that failed after the target started used to leave /tmp/redevops-qa-* behind."""
+    import tempfile
+    import qa_runner.orchestrate as orch
+    made = []
+    original = orch.make_workdir
+
+    def spy():
+        d = original()
+        made.append(d)
+        return d
+    monkeypatch.setattr(orch, "make_workdir", spy)
+    monkeypatch.setattr(orch, "run_browser_lane", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError):
+        run(up, golden_frozen, "pass")
+    assert made and not __import__("os").path.exists(made[0])
+
+
+@pytest.mark.parametrize("deadline", [0, -5, 3601])
+def test_a_lane_deadline_outside_1_to_3600_is_refused_before_anything_starts(up, golden_frozen, deadline, monkeypatch):
+    started = []
+    monkeypatch.setattr(FixtureApp, "start", lambda self, timeout_s=20.0: started.append(1))
+    with pytest.raises(PlanError) as exc:
+        run_plan(up, golden_frozen, RunOptions(lane_command=fake("pass"), lane_deadline_s=deadline))
+    assert exc.value.code == "BAD_DEADLINE" and started == []
+
+
+def test_the_fixture_must_report_the_defect_the_run_asked_for(monkeypatch, tmp_path):
+    """Review finding L4: the app prints its defect in the ready line; the run used to record its own argument without looking."""
+    import qa_runner.procs as procs
+    real = procs.subprocess.Popen
+
+    def popen_for_another_defect(argv, *a, **k):
+        return real([("none" if x == "discount" else x) for x in argv], *a, **k)        # the process runs 'none' although the run asked for 'discount'
+    monkeypatch.setattr(procs.subprocess, "Popen", popen_for_another_defect)
+    app = FixtureApp("discount", str(tmp_path / "r.jsonl"), home=str(tmp_path))
+    with pytest.raises(EnvironmentFault) as exc:
+        app.start()
+    assert exc.value.code == "FIXTURE_APP_WRONG_DEFECT" and app.running is False
+
+
+def test_a_generated_run_id_has_64_random_bits_and_fits_the_lane_ids_and_is_not_read_as_a_cut_off_digest(up):
+    from qa_runner.orchestrate import new_run_id
+    ids = {new_run_id() for _ in range(200)}
+    from agent_harness.qa.blobs import find_truncated_digests
+    assert not find_truncated_digests({"run_id": next(iter(ids)) + ".browser"})
+    assert len(ids) == 200 and all(K.RUN_ID_RE.fullmatch(i) and len(i.rsplit("-", 1)[1]) == 13 for i in ids)

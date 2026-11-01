@@ -89,11 +89,18 @@ def robot_spec() -> Dict[str, Any]:
 
 
 def robot_lane() -> Dict[str, Any]:
-    return {"lane_id": "robot", "engine": K.ENGINE_ROBOT, "egress": "not-enforced", "deadline_s": 120, "suite": "order-discount", "spec": robot_spec()}
+    """The reviewed suite and library are PINNED here by the sha256 of their files (``suite_sha256``): ``freeze`` refuses a suite or library that hashes otherwise, and the
+    digests are part of the plan digest. ``examples/robot-plan.json`` is the committed copy a reviewer reads; a changed file shows as a diff of it."""
+    from .suites import suite_digests
+    orders = [f"GET /api/orders/{i}" for i in (101, 102, 103, 104)]
+    return {"lane_id": "robot", "engine": K.ENGINE_ROBOT, "egress": "not-enforced", "deadline_s": 120, "suite": "order-discount", "suite_sha256": suite_digests("order-discount"),
+            "spec": robot_spec(), "requests": {"required": orders, "allowed": []}, "probes": {"A-ORDER-RULE": "discount-rule"}}
 
 
 def browser_lane() -> Dict[str, Any]:
-    return {"lane_id": "browser", "engine": K.ENGINE_PLAYWRIGHT, "egress": "origin-only", "deadline_s": 120, "spec": browser_spec()}
+    return {"lane_id": "browser", "engine": K.ENGINE_PLAYWRIGHT, "egress": "origin-only", "deadline_s": 120, "spec": browser_spec(),
+            "requests": {"required": ["POST /login", "POST /settings", "GET /settings"], "allowed": ["GET /login", "GET /account", "GET /settings", "POST /login", "POST /settings"]},
+            "probes": {"A-NOTIF-ON": "settings-persistence"}}
 
 
 def robot_plan() -> Dict[str, Any]:

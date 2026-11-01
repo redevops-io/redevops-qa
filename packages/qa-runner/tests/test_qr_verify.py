@@ -13,7 +13,7 @@ from qa_runner.cli import main
 from qa_runner.procs import child_env
 from qr_tamper import GOLDEN, codes, golden, manifest_digest, verify_files_in
 
-PLAN_DIGEST = "sha256:b267f8dda8d9cfa87704e4ce33f969f6b9f3743c2438523732e21f89d2c909fd"
+PLAN_DIGEST = "sha256:6f960c30bb013f8a57bb83bc914918b809fa35d2d46e2848ad9d14ea4f55e0e3"
 
 
 def cli(*argv):
@@ -91,8 +91,9 @@ def test_an_intact_bundle_whose_lane_did_not_complete_exits_with_the_environment
     assert code in (K.EXIT_REJECTED, K.EXIT_ENVIRONMENT)
 
 
-def test_verify_never_loads_a_browser_a_robot_framework_or_an_http_client_library_and_opens_no_socket(tmp_path):
-    # the pinned harness package imports the standard library's urllib when it is imported; what matters is that nothing connects, which the patched socket proves
+def test_verify_imports_no_browser_or_robot_package_and_opens_no_socket(tmp_path):
+    # what this proves: no browser, Robot or third-party HTTP package is imported, and the patched socket methods (connect, connect_ex, create_connection, bind) are never called.
+    # It does not prove more: the pinned harness imports the standard library's urllib, http.client and ssl when it is imported, and a socket could be opened by other means
     script = tmp_path / "probe.py"
     script.write_text(
         "import socket, sys\n"
@@ -120,21 +121,24 @@ def test_a_run_that_the_separate_process_does_not_accept_exits_5(monkeypatch, tm
     import qa_runner.cli as cli_module
     from qa_runner.cli import _verify_in_a_new_process
     out = io.StringIO()
-    assert _verify_in_a_new_process(tmp_path / "does-not-exist", PLAN_DIGEST, 0, out) == K.EXIT_REJECTED and "COULD NOT RUN" in out.getvalue()
+    assert _verify_in_a_new_process(tmp_path / "does-not-exist", PLAN_DIGEST, 0, 0, out) == K.EXIT_REJECTED and "COULD NOT RUN" in out.getvalue()
     out = io.StringIO()
     bundle = tmp_path / "b"
     from qa_evidence.build import read_files, write_directory
     write_directory(golden("none"), str(bundle))
-    assert _verify_in_a_new_process(bundle, PLAN_DIGEST, 0, out) == 0 and "ACCEPTED as internally consistent; 4 of 4" in out.getvalue()
+    assert _verify_in_a_new_process(bundle, PLAN_DIGEST, 0, 0, out) == 0 and "ACCEPTED as internally consistent; 4 of 4" in out.getvalue()
     out = io.StringIO()
-    assert _verify_in_a_new_process(bundle, "sha256:" + "0" * 64, 0, out) == K.EXIT_REJECTED and "REJECTED (PLAN_DIGEST_MISMATCH)" in out.getvalue()
+    assert _verify_in_a_new_process(bundle, "sha256:" + "0" * 64, 0, 0, out) == K.EXIT_REJECTED and "REJECTED (PLAN_DIGEST_MISMATCH)" in out.getvalue()
     out = io.StringIO()
-    assert _verify_in_a_new_process(bundle, PLAN_DIGEST, 4, out) == K.EXIT_REJECTED and "is not the run's (4)" in out.getvalue()
+    assert _verify_in_a_new_process(bundle, PLAN_DIGEST, 4, 4, out) == K.EXIT_REJECTED and "is not the report's (4)" in out.getvalue()
+    out = io.StringIO()
+    # review finding L7: a run cancelled after its last lane returns 3 where the report alone gives 0; verify cannot know about the cancel, so it is compared with the report's status and the run keeps its own
+    assert _verify_in_a_new_process(bundle, PLAN_DIGEST, 0, K.EXIT_ENVIRONMENT, out) == K.EXIT_ENVIRONMENT and "ACCEPTED as internally consistent" in out.getvalue()
 
 
 def test_run_exits_5_when_the_separate_verification_rejects_what_it_just_wrote(monkeypatch, tmp_path, up):
-    """The lane here is a test double whose run record is not a real harness record: the bundle is consistent in itself, `verify` in a new interpreter cannot recompute it and rejects it, so
-    `run` does not exit with its own status (0 would be VERIFIED)."""
+    """The lane here is a test double whose run record is not a real harness record, and the bundle says so: `verify` in a new interpreter rejects it (it cannot recompute it, and a double carries
+    no verdict), so `run` does not exit with its own status."""
     import qa_runner.orchestrate as orch
     from qa_runner.golden import golden_plan
     from qr_support import fake
@@ -146,7 +150,7 @@ def test_run_exits_5_when_the_separate_verification_rejects_what_it_just_wrote(m
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps(golden_plan()))
     code, out, err = cli("run", str(plan), "--out", str(tmp_path / "o"), "--run-id", "r0-double")
-    assert ": VERIFIED (ALL_ASSERTIONS_VERIFIED)" in out and "independent verification (a separate process): REJECTED" in out and code == K.EXIT_REJECTED
+    assert ": INCONCLUSIVE (" in out and "independent verification (a separate process): REJECTED" in out and "TEST_DOUBLE_BUNDLE" in out and code == K.EXIT_REJECTED
 
 
 def test_a_robot_lane_that_never_started_has_no_suite_copy_to_compare_and_a_completed_one_must_have_it(up, tmp_path):
@@ -168,3 +172,76 @@ def test_a_robot_lane_that_never_started_has_no_suite_copy_to_compare_and_a_comp
     manifest["files"] = [e for e in manifest["files"] if not e["path"].startswith("lanes/robot/suite/")]
     gone["bundle-manifest.json"] = dumps_canonical(manifest)
     assert "SUITE_FILE_MISMATCH" in codes(verify_files_in(tmp_path, gone))
+
+
+# ---- review of #33 ----------------------------------------------------------------------------------------------------------------------------
+def test_a_lock_crafted_to_crash_the_parser_is_a_rejection_with_exit_5_and_json_never_an_internal_error(tmp_path):
+    """Review finding M3: ``suite_files`` that is not a mapping made ``verify`` die with ``internal error: ValueError`` (exit 6, no JSON)."""
+    from qr_tamper import edit_json, rechain
+    files = rechain(edit_json(golden("none"), "plan.lock.json", lambda l: l["lanes"][1].update(suite_files="x")))
+    target = tmp_path / "b.tar"
+    write_archive(files, str(target))
+    code, out, err = cli("verify", str(target), "--json")
+    doc = json.loads(out)
+    assert code == K.EXIT_REJECTED and doc["accepted"] is False and {f["code"] for f in doc["findings"]} >= {"LOCK_REJECTED"} and "internal error" not in err
+
+
+def test_whatever_goes_wrong_inside_the_verification_is_a_rejection_with_exit_5_not_an_internal_error(monkeypatch):
+    """Review finding M3 (the general form): an exception the verifier did not foresee, on a bundle crafted to cause it, is exit 5 with a finding."""
+    import qa_runner.verify as verify_module
+
+    def boom(*a, **k):
+        raise ValueError("crafted")
+    monkeypatch.setattr(verify_module, "_check_lock", boom)
+    code, out, err = cli("verify", str(GOLDEN / "bundle-none.tar"), "--json")
+    doc = json.loads(out)
+    assert code == K.EXIT_REJECTED and doc["findings"][-1]["code"] == "VERIFY_INCOMPLETE" and "ValueError" in doc["findings"][-1]["message"] and "internal error" not in err
+
+
+def test_a_verifier_that_cannot_run_here_says_so_with_its_own_exit_status_and_still_prints_json(tmp_path, monkeypatch):
+    """Review finding M3: with no git on PATH the verifier exited 3 (which means 'a lane did not run to completion') and printed no JSON."""
+    import qa_runner.verify as verify_module
+    from qa_runner.errors import EnvironmentFault
+
+    def no_git():
+        raise EnvironmentFault("PIN_MISMATCH", "git is not available")
+    monkeypatch.setattr(verify_module, "verified_bootstrap", no_git)
+    code, out, err = cli("verify", str(GOLDEN / "bundle-none.tar"), "--json")
+    doc = json.loads(out)
+    assert code == K.EXIT_VERIFIER_UNAVAILABLE == 7 and doc["accepted"] is False and doc["assurance"] == "not-verified" and doc["findings"][0]["code"] == "VERIFIER_UNAVAILABLE"
+    code, out, err = cli("verify", str(GOLDEN / "bundle-none.tar"))
+    assert code == 7 and "NOT VERIFIED: the verifier cannot run here" in out
+
+
+def test_the_anchor_state_does_not_say_verified_for_a_value_nothing_authenticated():
+    """Review finding L6: a digest copied from the same bundle matched, and the JSON said ``verified``."""
+    path = str(GOLDEN / "bundle-none.tar")
+    doc = json.loads(cli("verify", path, "--anchor", manifest_digest(golden("none")), "--json")[1])
+    assert doc["anchor"]["state"] == "matches-supplied-value" and doc["assurance"] == "matches-supplied-anchor" and doc["anchor"]["matches_supplied_value"] is True
+    import argparse
+    from qa_runner.cli import _parser
+    verify_parser = next(a for a in _parser()._actions if isinstance(a, argparse._SubParsersAction)).choices["verify"]
+    assert "nothing here authenticates where the supplied value came from" in " ".join(verify_parser.format_help().split())
+
+
+def test_a_bundle_that_says_a_test_double_produced_it_is_rejected_by_verify(tmp_path):
+    from qr_tamper import edit_json, rechain
+    files = rechain(edit_json(golden("none"), "report.json", lambda r: r.update(extensions={**(r.get("extensions") or {}), "test_double": "lane-command"})))
+    v = verify_files_in(tmp_path, files)
+    assert not v.accepted and "TEST_DOUBLE_BUNDLE" in codes(v) and v.exit_code == K.EXIT_REJECTED
+
+
+def test_demo_does_not_print_the_report_of_a_bundle_its_own_verification_rejected(monkeypatch, tmp_path):
+    """Review finding L1: the report ('Verification : OK ... VERIFIED') was printed after the REJECTED line."""
+    import qa_runner.cli as cli_module
+    from qa_runner.golden import demo_plan
+    from qa_runner.orchestrate import RunOptions
+    import qa_runner.orchestrate as orch
+    from qr_support import fake, fake_robot
+    real = orch.run_plan
+
+    def with_doubles(up_, frozen, opts):
+        return real(up_, frozen, RunOptions(defect=opts.defect, run_id=opts.run_id, lane_command=fake("pass"), robot_launcher=fake_robot("live"), lane_deadline_s=60))
+    monkeypatch.setattr(orch, "run_plan", with_doubles)
+    code, out, err = cli("demo", "--out", str(tmp_path / "o"), "--run-id", "r0-double")
+    assert code == K.EXIT_REJECTED and "REJECTED" in out and "the report is not printed" in out and "INDEPENDENT VERDICT" not in out

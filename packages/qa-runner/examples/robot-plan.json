@@ -5,6 +5,18 @@
       "egress": "not-enforced",
       "engine": "robot-framework",
       "lane_id": "robot",
+      "probes": {
+        "A-ORDER-RULE": "discount-rule"
+      },
+      "requests": {
+        "allowed": [],
+        "required": [
+          "GET /api/orders/101",
+          "GET /api/orders/102",
+          "GET /api/orders/103",
+          "GET /api/orders/104"
+        ]
+      },
       "spec": {
         "allowed_side_effects": [],
         "assertions": [
@@ -71,7 +83,11 @@
         },
         "version": 1
       },
-      "suite": "order-discount"
+      "suite": "order-discount",
+      "suite_sha256": {
+        "OrderApi.py": "sha256:0953d8a773b45d8728c5513fa828e308326b745f3dd529cebc29d8515c07f739",
+        "order_discount.robot": "sha256:f84822c091f035462972747e63faa15908a097208cc9641506bcb8eb2468c503"
+      }
     }
   ],
   "plan_id": "golden-fixture-robot",

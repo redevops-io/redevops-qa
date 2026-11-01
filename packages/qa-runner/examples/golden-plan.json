@@ -5,6 +5,23 @@
       "egress": "origin-only",
       "engine": "playwright-chromium",
       "lane_id": "browser",
+      "probes": {
+        "A-NOTIF-ON": "settings-persistence"
+      },
+      "requests": {
+        "allowed": [
+          "GET /login",
+          "GET /account",
+          "GET /settings",
+          "POST /login",
+          "POST /settings"
+        ],
+        "required": [
+          "POST /login",
+          "POST /settings",
+          "GET /settings"
+        ]
+      },
       "spec": {
         "allowed_side_effects": [
           "WRITES_INTERNAL"

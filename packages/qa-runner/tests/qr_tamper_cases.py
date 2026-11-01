@@ -26,6 +26,52 @@ class Case:
     kind: str = "naive"
 
 
+def _suite_replaced_and_the_plan_pins_edited(up, files):
+    """Everything recomputed: the reviewed library replaced (here by a copy with one more line), the PLAN's own pins of the suite edited to match, the bundle's copy replaced, a new lock. The plan
+    is different from the one that was frozen, so only a plan digest (or an anchor) from outside shows it."""
+    import hashlib
+    from qa_runner.golden import demo_plan
+    from qa_runner.plan import freeze_plan
+    lib = files["lanes/robot/suite/OrderApi.py"] + b"# replaced\n"
+    plan = demo_plan()
+    plan["lanes"][1]["suite_sha256"]["OrderApi.py"] = "sha256:" + hashlib.sha256(lib).hexdigest()
+    frozen = freeze_plan(up, plan, for_verification=True)
+
+    def lane(lid, o):
+        if lid != "robot":
+            return o
+        f = dict(o.files)
+        f["lanes/robot/suite/OrderApi.py"] = (lib, f["lanes/robot/suite/OrderApi.py"][1])
+        return replace(o, files=f)
+    return forge_consistently(up, files, edit_lane=lane, frozen=frozen)
+
+
+def _list_a_file(path, data, role="log"):
+    """A file that the manifest lists and the bundle carries, which no run of the plan writes (a covert payload)."""
+    def mutate(up, files):
+        out = dict(files)
+        out[path] = data
+        man = load(out, MANIFEST_NAME)
+        man["files"].append({"path": path, "role": role, "digest": sha256_bytes(data), "size": len(data)})
+        man["files"].sort(key=lambda e: e["path"])
+        put(out, MANIFEST_NAME, man)
+        return out
+    return mutate
+
+
+def _drop_blobs(garbage):
+    def mutate(up, files):
+        out = {k: v for k, v in files.items() if not (k.startswith("lanes/browser/native/blobs/") and not garbage)}
+        if garbage:
+            out.update({k: b"GARBAGE" for k in files if k.startswith("lanes/browser/native/blobs/")})
+        man = load(out, MANIFEST_NAME)
+        if not garbage:
+            man["files"] = [e for e in man["files"] if e["path"] in out]
+        put(out, MANIFEST_NAME, man)
+        return rechain(out)
+    return mutate
+
+
 def _flip_robot_to_verified(files):
     def fn(r):
         for x in r["accounting"]["results"]:
@@ -86,7 +132,9 @@ def _weaken_the_assertion(up, files):
 
 
 def _robot_reports_a_clean_run(up, files):
-    """Everything recomputed AND the engine's own files rewritten: output.xml, the adapter result and the summary say the discount rule held. Nothing in the bundle contradicts itself."""
+    """Everything recomputed AND every file that says otherwise rewritten: ``output.xml``, the engine's summary, the adapter result (status, tests and the hashes of the two files it names), the
+    observation record, and the reference check of the target (so that no independent fact contradicts the verdict). Nothing in the bundle contradicts itself any more: the unkeyed limit."""
+    import hashlib
     def lane(lid, o):
         if lid != "robot":
             return o
@@ -96,17 +144,26 @@ def _robot_reports_a_clean_run(up, files):
         xml = xml.replace('<status status="FAIL"', '<status status="PASS"').replace('pass="0" fail="1"', 'pass="1" fail="0"')
         native = dict(o.native_files)
         native["output.xml"] = xml.encode()
+        summary = json.loads(native["robot-summary.json"])
+        summary["raw_output_sha256"] = hashlib.sha256(native["output.xml"]).hexdigest()
+        for t in summary["tests"]:
+            t["status"] = "PASS"
+        native["robot-summary.json"] = json.dumps(summary, sort_keys=True, indent=1).encode()
         ar = json.loads(native["adapter-result.json"])
         ar.update(status="PASS", exit_code=0, error_code=None)
         for a in ar.get("native_assertions", []):
             a["status"] = "PASS"
+        for a in ar["artifacts"]:
+            a["sha256"] = hashlib.sha256(native[a["path"]]).hexdigest()
         native["adapter-result.json"] = (json.dumps(ar, sort_keys=True, indent=2) + "\n").encode()
         files_ = dict(o.files)
         from qa_robot import observation_document, parse_observations
         rid = f"{load(files, 'report.json')['run_id']}.robot"
         files_["lanes/robot/observations.json"] = (dumps_canonical(observation_document(parse_observations(native["output.xml"]), run_id=rid, lane_id="robot")), "observation")
         return replace(o, native_status="NATIVE_PASS", raw_status="PASS", exit_code=0, native_files=native, files=files_, counts={"passed": 1, "failed": 0, "errored": 0, "skipped": 0})
-    return forge_consistently(up, files, edit_lane=lane)
+    forged = dict(files)
+    forged["logs/reference-check.json"] = dumps_canonical({**load(files, "logs/reference-check.json"), "deviations": []})
+    return forge_consistently(up, forged, edit_lane=lane)
 
 
 def _relabel_native_pass(up, files):
@@ -239,6 +296,29 @@ CASES = [
          _edit_lane_file("browser", "lanes/browser/observations.json", _record_edit(lambda d: d["observations"][1].update(value="Settings saved!"))), ("OBSERVATION_NOT_IN_RUN_RECORD",), "forged"),
     Case("the allowed origin changed so the executed spec is not the frozen one", "none",
          _edit_lane_file("browser", "lanes/browser/egress-profile.json", _record_edit(lambda d: d["private"][0].update(ports=[1]))), ("EXECUTED_SPEC_DIFFERS",), "forged"),
+    # ---- review of #32 and #33 ----------------------------------------------------------------------------------------------------------
+    Case("the suite pins deleted from the lock", "none", lambda up, f: _edit_lock(f, lambda l: l["lanes"][1].update(suite_files={})), ("LOCK_REJECTED",), "rechained"),
+    Case("the suite pins deleted from the plan inside the lock", "none", lambda up, f: _edit_lock(f, lambda l: l["plan"]["lanes"][1].update(suite_sha256={})), ("LOCK_REJECTED",), "rechained"),
+    Case("a suite file replaced and the lock's own copy of the hash updated, the plan's pins untouched", "none",
+         lambda up, f: _edit_lock(rechain({**f, "lanes/robot/suite/OrderApi.py": f["lanes/robot/suite/OrderApi.py"] + b"# replaced\n"}),
+                                  lambda l: l["lanes"][1]["suite_files"].update({"OrderApi.py": "sha256:" + hashlib.sha256(f["lanes/robot/suite/OrderApi.py"] + b"# replaced\n").hexdigest()})),
+         ("LOCK_REJECTED",), "rechained"),
+    Case("the suite replaced and the plan's own pins edited to match, everything recomputed (internally consistent; only a plan digest or an anchor from outside shows it)", "discount",
+         _suite_replaced_and_the_plan_pins_edited, (), "forged"),
+    Case("the blobs the run record refers to deleted", "none", _drop_blobs(False), ("RUN_RECORD_MISSING_BLOB",), "rechained"),
+    Case("the blobs the run record refers to replaced by garbage", "none", _drop_blobs(True), ("RUN_RECORD_BLOB_CONTENT",), "rechained"),
+    Case("a file no run of the plan writes, listed in the manifest (a lane directory that is not in the plan)", "none", _list_a_file("lanes/ghost/x.bin", b"payload"), ("UNEXPECTED_FILE",), "rechained"),
+    Case("a hidden log of 5 MiB", "none", _list_a_file("logs/hidden.bin", b"\0" * (5 * 1024 * 1024)), ("UNEXPECTED_FILE",), "rechained"),
+    Case("a note among the records of the Robot lane", "none", _list_a_file("lanes/robot/notes.txt", b"hello", "record"), ("UNEXPECTED_FILE",), "rechained"),
+    Case("an adapter result with a duplicate key (the last one wins in plain JSON)", "none",
+         _edit_native("robot", "adapter-result.json", lambda b: b.replace(b'"status": "PASS"', b'"status": "FAIL", "status": "PASS"', 1)), ("NATIVE_FILE_UNREADABLE",), "forged"),
+    Case("an adapter result with NaN in it", "none", _edit_native("robot", "adapter-result.json", lambda b: b.replace(b'"attempts": 1', b'"attempts": NaN', 1)), ("NATIVE_FILE_UNREADABLE",), "forged"),
+    Case("the tool versions removed from the lock", "none", lambda up, f: _edit_lock(f, lambda l: l.pop("pins")), ("LOCK_METADATA_MALFORMED",), "rechained"),
+    Case("the runner version of the lock replaced by a list", "none", lambda up, f: _edit_lock(f, lambda l: l.update(runner_version=["x"])), ("LOCK_METADATA_MALFORMED",), "rechained"),
+    Case("the label of the egress profile removed", "none", _edit_lane_file("browser", "lanes/browser/egress-profile.json", _record_edit(lambda d: d["private"][0].pop("label"))), ("EGRESS_PROFILE_MISSING",), "forged"),
+    Case("a second network allowed by the egress profile", "none", _edit_lane_file("browser", "lanes/browser/egress-profile.json", _record_edit(lambda d: d["private"][0]["networks"].append("10.0.0.0/8"))), ("EGRESS_PROFILE_MISSING",), "forged"),
+    Case("a bundle that says a test double produced it", "none", lambda up, f: rechain(edit_json(f, "report.json", lambda r: r.update(extensions={**(r.get("extensions") or {}), "test_double": "lane-command"}))),
+         ("TEST_DOUBLE_BUNDLE",), "rechained"),
 ]
 
 
@@ -248,7 +328,7 @@ def _edited(doc, fn):
 
 
 # ---- the checks, shared by the offline suite (golden bundles) and the end-to-end suite (bundles written by the run under test) ------------------------------------------
-PLAN_DIGEST = "sha256:b267f8dda8d9cfa87704e4ce33f969f6b9f3743c2438523732e21f89d2c909fd"
+PLAN_DIGEST = "sha256:6f960c30bb013f8a57bb83bc914918b809fa35d2d46e2848ad9d14ea4f55e0e3"
 CONSISTENT = [c for c in CASES if c.kind == "forged" and not c.expect]
 CLAIMS = [c for c in CASES if c.kind == "claim"]
 REJECTED = [c for c in CASES if c.expect]
@@ -271,7 +351,7 @@ def check_consistent_forgery(up, tmp_path, case, base):
     assert alone.assurance == "internal-consistency-only" and alone.qe.anchor.state == "absent" and alone.qe.plan.state == "absent"
     anchored = verify_files_in(tmp_path, files, anchor=manifest_digest(genuine))
     assert not anchored.accepted and "ANCHOR_MISMATCH" in codes(anchored) and anchored.exit_code == 5
-    if "assertion weakened" in case.name or "lane dropped" in case.name:
+    if "assertion weakened" in case.name or "lane dropped" in case.name or "suite replaced" in case.name:
         planned = verify_files_in(tmp_path, files, plan_digest=PLAN_DIGEST)
         assert not planned.accepted and "PLAN_DIGEST_MISMATCH" in codes(planned)
 
@@ -293,9 +373,9 @@ def check_dropped_and_weakened(up, tmp_path, base):
     dropped = verify_files_in(tmp_path, by_name["the failing lane dropped"].mutate(up, base("discount")))
     assert dropped.outcome["outcome"] == "VERIFIED" and dropped.exit_code == 0           # the forgery works against a verifier that is given nothing from outside
     weakened = verify_files_in(tmp_path, by_name["the assertion weakened after planning"].mutate(up, base("discount")))
-    # the Robot engine's own FAIL is still in the bundle: the run is INCONCLUSIVE (NATIVE_FAIL_VERIFIED_ASSERTIONS), never a plain VERIFIED, even for a forger who rewrote the plan
-    assert weakened.accepted and weakened.outcome == {"outcome": "INCONCLUSIVE", "reason_code": "NATIVE_FAIL_VERIFIED_ASSERTIONS"} and weakened.exit_code == 4
-    assert [d["code"] for d in weakened.disagreements] == ["ENGINE_VERIFIER_DISAGREE"]
+    # the evidence that is still in the bundle contradicts the weakened plan twice: the Robot engine's own FAIL and the target's independent reference check, which finds the discount rule deviating.
+    # The reference check vetoes the verdict (the assertion is INCONCLUSIVE, EVIDENCE_UNUSABLE), so the run is INCONCLUSIVE and never a plain VERIFIED, even for a forger who rewrote the plan
+    assert weakened.accepted and weakened.outcome == {"outcome": "INCONCLUSIVE", "reason_code": "NOT_ALL_ASSERTIONS_VERIFIED"} and weakened.exit_code == 4
 
 
 def check_the_strongest_forger(up, tmp_path, base):
