@@ -34,6 +34,10 @@ page("/popup", """<!doctype html><title>Popup</title><a href="/home" target="_bl
 page("/download", """<!doctype html><title>Download</title><a href="/file.bin" download>Get</a>""")
 page("/file.bin", "binary-ish", "application/octet-stream")
 page("/home", """<!doctype html><title>Home</title><h1>Welcome</h1>""")
+page("/start", """<!doctype html><title>Start</title><h1>Start</h1><a href="/login">Next</a><button>Save</button>""")
+page("/frames", """<!doctype html><title>Frames</title><button>Outer</button>
+<iframe name="inner" src="/inner" title="inner"></iframe>""")
+page("/inner", """<!doctype html><title>Inner</title><button>Inner</button><a href="/home">Leave</a>""")
 page("/subres", """<!doctype html><title>Subresources</title>
 <img src="/pixel.png" alt="local"><script>fetch('/api/ok').catch(function () {});</script>""")
 page("/pixel.png", "x", "image/png")

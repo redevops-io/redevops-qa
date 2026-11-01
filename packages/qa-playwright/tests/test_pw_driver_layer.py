@@ -111,6 +111,8 @@ def test_the_launch_passes_the_args_and_the_proxy_and_never_a_download_or_a_prof
     ("Error", "net::ERR_BLOCKED_BY_CLIENT at http://x/", FaultKind.NAVIGATION_BLOCKED),
     ("Error", "net::ERR_TUNNEL_CONNECTION_FAILED at https://x/", FaultKind.NAVIGATION_BLOCKED),
     ("Error", "Element is not attached to the DOM", FaultKind.DETACHED),
+    ("Error", "ElementHandle.evaluate: Protocol error (DOM.describeNode): Cannot find context with specified id", FaultKind.DETACHED),
+    ("Error", "Execution context was destroyed, most likely because of a navigation", FaultKind.DETACHED),
     ("Error", "<div> intercepts pointer events", FaultKind.OBSCURED),
     ("Error", "Element is not visible", FaultKind.NOT_VISIBLE),
     ("Error", "Element is not enabled", FaultKind.DISABLED),
