@@ -60,7 +60,7 @@ pinned extra and is imported only by the real driver.
 | context closed from outside | `SessionLost` (`SESSION_LOST`) |
 | renderer or browser crash | `BrowserCrash` (`BROWSER_CRASH`); the session is unusable afterwards |
 | driver wait ran out | `ActionTimeout` (`ACTION_TIMEOUT`) |
-| element detached (re-render) or never produced by `locate` | `LocatorNotFound` (`LOCATOR_NOT_FOUND`) |
+| element detached (re-render), its document replaced (a navigation by an action or a click, a reload) or never produced by `locate` | `LocatorNotFound` (`LOCATOR_NOT_FOUND`); a new `locate` resolves against the current document |
 | target no longer unique | `LocatorAmbiguous` (`LOCATOR_AMBIGUOUS`) |
 | hidden, disabled, not editable, covered | `TargetNotActionable` (`TARGET_NOT_ACTIONABLE`) |
 | covered by a dialog / a dialog interrupted | `UnexpectedDialog` (`UNEXPECTED_DIALOG`) |

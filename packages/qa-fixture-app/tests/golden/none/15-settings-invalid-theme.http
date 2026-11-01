@@ -1,0 +1,18 @@
+POST /settings
+form: theme=purple
+--- 400
+Server: qa-fixture-app
+Content-Type: text/html; charset=utf-8
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Content-Length: 183
+Connection: close
+
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Invalid settings</title></head>
+<body>
+<h1>Invalid settings</h1>
+<p role="alert">Unknown theme</p>
+</body>
+</html>

@@ -110,6 +110,8 @@ def classify_error(exc: BaseException) -> DriverFault:
         return DriverFault(FaultKind.NAVIGATION_BLOCKED)
     if "not attached" in text or "detached" in text or "element is not attached" in text:
         return DriverFault(FaultKind.DETACHED)
+    if "cannot find context with specified id" in text or "execution context was destroyed" in text:
+        return DriverFault(FaultKind.DETACHED)      # the document the element belonged to is gone (a navigation)
     if "intercepts pointer events" in text:
         return DriverFault(FaultKind.OBSCURED, obscurer_role="")
     if "not visible" in text:
@@ -408,7 +410,9 @@ class PlaywrightSession:
         self._closed = False
         self._crashed = False
         self._counter = 0
-        self._handles: Dict[str, Any] = {}
+        # ref -> (element handle, the frame whose document it was resolved in). A ref is scoped to that document: it is only
+        # compared with refs of the same frame and is forgotten as soon as the document is gone (see ``_prune``).
+        self._handles: Dict[str, Tuple[Any, Any]] = {}
         self._dialogs = 0
         self._open_context()
 
@@ -615,6 +619,7 @@ class PlaywrightSession:
 
     def query(self, query: ElementQuery) -> Sequence[ElementInfo]:
         loc, matched_role_name = self._locator(query)
+        self._prune()                       # forget every ref whose document is gone before a new ref is compared with them
         count = self._call(loc.count)
         out: List[ElementInfo] = []
         for i in range(min(count, MAX_ELEMENTS_PER_QUERY)):
@@ -630,14 +635,48 @@ class PlaywrightSession:
             out.append(self._info(ref, handle, role, name))
         return tuple(out)
 
+    def _alive(self, handle: Any) -> bool:
+        """Whether the element behind ``handle`` is still attached to the document it was resolved in. A handle belongs to one
+        execution context: once the document is replaced (a navigation by an action or a click, a reload, a frame that
+        navigates) the browser refuses every use of it, which is the answer ``False`` here and never an error. A closed, crashed
+        or timed-out session is not an answer about the element: that fault is raised."""
+        self._live()
+        try:
+            return bool(handle.evaluate("(el) => el.isConnected"))
+        except Exception as exc:
+            fault = classify_error(exc)
+            if fault.kind in (FaultKind.SESSION_CLOSED, FaultKind.CRASHED, FaultKind.TIMEOUT):
+                raise fault from None
+            self._live()
+            return False
+
+    def _drop(self, ref: str) -> None:
+        entry = self._handles.pop(ref, None)
+        if entry is not None:
+            try:
+                entry[0].dispose()
+            except Exception:
+                pass                                     # the document (and the handle with it) may already be gone
+
+    def _prune(self) -> None:
+        """Forget every issued ref whose element is detached or whose document is gone. A forgotten ref is never issued again
+        (``_counter`` only grows), so a candidate that holds one can only be refused, never matched to another element."""
+        for ref, (handle, _frame) in list(self._handles.items()):
+            if not self._alive(handle):
+                self._drop(ref)
+
     def _ref_for(self, fresh: Any) -> Tuple[str, Any]:
         """The ref for an element, stable for as long as the element stays attached (the contract of ``ElementInfo.ref``).
 
         The adapter re-queries before it acts and requires the element it resolved earlier to be among the new results *by ref*.
         Playwright returns a new ``ElementHandle`` for every query, so a ref minted per query would never match and every act
         would fail with LOCATOR_NOT_FOUND. The new handle is therefore compared, in one page round trip and by object identity
-        (``===``), with the handles already issued: a match reuses that ref and drops the new handle; no match mints a new ref."""
-        known = list(self._handles.items())
+        (``===``), with the handles already issued *for the same frame*: a match reuses that ref and drops the new handle; no
+        match mints a new ref. Only handles of the frame (and so of the document) the new element belongs to are compared: a
+        handle is usable only inside the execution context it was created in, so a handle of an earlier document (or of another
+        frame) is never passed to the page, and ``query`` has already forgotten those whose document is gone."""
+        frame = self._call(fresh.owner_frame)
+        known = [(ref, entry[0]) for ref, entry in self._handles.items() if frame is not None and entry[1] is frame]
         if known:
             index = self._call(fresh.evaluate, "(el, others) => others.findIndex((o) => o === el)", [h for _, h in known])
             if isinstance(index, int) and 0 <= index < len(known):
@@ -648,7 +687,7 @@ class PlaywrightSession:
                 return known[index]
         self._counter += 1
         ref = f"e{self._counter}"
-        self._handles[ref] = fresh
+        self._handles[ref] = (fresh, frame)
         return ref, fresh
 
     @staticmethod
@@ -679,16 +718,18 @@ class PlaywrightSession:
                            sensitive=kind == "password", obscured_by=None if covered is None else str(covered))
 
     def _handle(self, ref: str) -> Any:
-        handle = self._handles.get(ref)
-        if handle is None:
+        """The live handle of a ref this session issued. A ref that was never issued, or whose element is detached or whose
+        document is gone, is ``DETACHED`` (the adapter's ``LocatorNotFound``): never a crash, never another element."""
+        entry = self._handles.get(ref)
+        if entry is None:
             raise DriverFault(FaultKind.DETACHED)
-        return handle
+        if not self._alive(entry[0]):
+            self._drop(ref)
+            raise DriverFault(FaultKind.DETACHED)
+        return entry[0]
 
     def inspect(self, ref: str) -> ElementInfo:
-        handle = self._handle(ref)
-        if not self._call(handle.evaluate, "(el) => el.isConnected"):
-            raise DriverFault(FaultKind.DETACHED)
-        return self._info(ref, handle, "", "")
+        return self._info(ref, self._handle(ref), "", "")
 
     def read(self, ref: str) -> ElementReading:
         data = self._call(self._handle(ref).evaluate, _JS_READ)

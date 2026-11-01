@@ -125,13 +125,21 @@ def test_a_page_that_went_away_while_the_hop_was_decided_is_not_an_error(lane):
     l.session._run(lambda: cdp.handlers["Fetch.requestPaused"](paused("http://app.test/go", 302, "/next")))
 
 
+FRAME = object()
+
+
 class Handle:
-    def __init__(self, same_as=None):
+    def __init__(self, same_as=None, frame=FRAME):
         self.disposed = False
         self.token = same_as
+        self.frame = frame
+
+    def owner_frame(self):
+        return self.frame
 
     def evaluate(self, script, others):
         assert "findIndex" in script
+        assert all(o.frame is self.frame for o in others), "a handle of another frame was passed to the page"
         return next((i for i, o in enumerate(others) if o.token == self.token), -1)
 
     def dispose(self):
@@ -160,6 +168,14 @@ def test_an_element_keeps_its_ref_across_queries_and_a_different_element_gets_a_
     other = Handle("b")
     assert s._ref_for(other) == ("e2", other)
     assert sorted(s._handles) == ["e1", "e2"]
+
+
+def test_only_the_handles_of_the_same_frame_are_compared_and_the_same_token_in_another_frame_is_another_element():
+    s = bare_session()
+    outer = Handle("a")
+    assert s._ref_for(outer) == ("e1", outer)
+    inner = Handle("a", frame=object())                                    # the same token, but in another frame's document
+    assert s._ref_for(inner) == ("e2", inner) and not inner.disposed and not outer.disposed
 
 
 def test_a_non_form_element_is_not_editable_and_any_other_failure_is_still_classified():

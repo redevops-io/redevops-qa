@@ -1,0 +1,27 @@
+GET /api/orders/101
+--- 200
+Server: qa-fixture-app
+Content-Type: application/json
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Content-Length: 265
+Connection: close
+
+{
+  "discount_cents": 1050,
+  "lines": [
+    {
+      "qty": 2,
+      "sku": "A-1",
+      "unit_cents": 4000
+    },
+    {
+      "qty": 1,
+      "sku": "B-2",
+      "unit_cents": 2500
+    }
+  ],
+  "order_id": "101",
+  "subtotal_cents": 10500,
+  "total_cents": 9450
+}

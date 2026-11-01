@@ -1,0 +1,2 @@
+# The golden files are compared byte for byte, so no line-ending conversion on any platform.
+packages/qa-fixture-app/tests/golden/** -text
