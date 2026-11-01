@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qa-evidence/bundle-manifest/1",
+  "title": "QA evidence bundle manifest",
+  "description": "Security-sensitive: every object is closed (an unknown property is refused) except the objects marked x-qa-informational (environment, producer, extensions), whose unknown scalar properties are tolerated and listed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "integrity",
+    "anchor",
+    "run_id",
+    "lanes",
+    "plan_digest",
+    "assertion_set_digests",
+    "environment",
+    "tools",
+    "report_path",
+    "files"
+  ],
+  "properties": {
+    "schema": {
+      "const": "qa-evidence/bundle-manifest"
+    },
+    "schema_version": {
+      "$ref": "#/$defs/schema_version"
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mechanism",
+        "keyed",
+        "statement"
+      ],
+      "properties": {
+        "mechanism": {
+          "const": "sha256-file-digests"
+        },
+        "keyed": {
+          "const": false
+        },
+        "statement": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      }
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot",
+        "binds",
+        "digest_algorithm",
+        "accepted_types",
+        "statement"
+      ],
+      "properties": {
+        "slot": {
+          "const": "anchor.json"
+        },
+        "binds": {
+          "const": "manifest-digest"
+        },
+        "digest_algorithm": {
+          "const": "sha256 of the exact bytes of bundle-manifest.json"
+        },
+        "accepted_types": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "ci-artifact-attestation"
+            ]
+          }
+        },
+        "statement": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      }
+    },
+    "run_id": {
+      "$ref": "#/$defs/id"
+    },
+    "lanes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lane_id",
+          "run_id",
+          "engine"
+        ],
+        "properties": {
+          "lane_id": {
+            "$ref": "#/$defs/id"
+          },
+          "run_id": {
+            "$ref": "#/$defs/id"
+          },
+          "engine": {
+            "$ref": "#/$defs/engine"
+          }
+        }
+      }
+    },
+    "assertion_set_digests": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/digest"
+      }
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/version_token"
+      },
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      },
+      "description": "tool name to version (orchestrator, verifier, ...); a map by nature, entries are descriptive"
+    },
+    "producer": {
+      "type": "object",
+      "x-qa-informational": true,
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/version_token"
+        }
+      }
+    },
+    "report_path": {
+      "const": "report.json"
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "digest",
+          "size",
+          "role"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "#/$defs/path"
+          },
+          "digest": {
+            "$ref": "#/$defs/digest"
+          },
+          "size": {
+            "$ref": "#/$defs/size"
+          },
+          "role": {
+            "enum": [
+              "report",
+              "native-artifact",
+              "assertion-lock",
+              "observation",
+              "record",
+              "log",
+              "verifier",
+              "documentation",
+              "other"
+            ]
+          }
+        }
+      }
+    },
+    "extensions": {
+      "$ref": "#/$defs/extensions"
+    },
+    "plan_digest": {
+      "$ref": "#/$defs/digest",
+      "description": "digest of the frozen plan; equal to the digest of assertion-lock.json"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 of the exact bytes, lower-case hex, prefixed"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "version_token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$",
+      "description": "MAJOR.MINOR; an unsupported MAJOR is refused before anything else is read"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[A-Za-z0-9._@+=,/-]+$",
+      "description": "relative, ASCII, POSIX separators; the full path rules (no empty, dot or dot-dot component, no leading or trailing dot) are enforced by the verifier"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 67108864
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._+-]*$"
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/version_token"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "x-qa-informational": true,
+      "additionalProperties": true,
+      "required": [
+        "os",
+        "arch",
+        "python"
+      ],
+      "description": "os, arch and python are required and compared between the manifest and the report; other keys are informational",
+      "properties": {
+        "os": {
+          "$ref": "#/$defs/token"
+        },
+        "arch": {
+          "$ref": "#/$defs/token"
+        },
+        "python": {
+          "$ref": "#/$defs/version_token"
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "x-qa-informational": true,
+      "additionalProperties": true,
+      "properties": {},
+      "description": "informational additions only; tolerated and listed, never used for a decision"
+    }
+  }
+}

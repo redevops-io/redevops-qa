@@ -199,3 +199,12 @@ def test_the_android_workflow_has_no_publish_write_or_secret(word):
     if word in ("secrets.", "qa_pins_read_token", "pat:", "password", "contents: write", "id-token", "continue-on-error"):
         assert word not in ANDROID_TEXT.lower()                                  # not even in a comment or a key
     assert "token" not in ANDROID_TEXT.lower().replace("no secret and no token input", "")
+
+
+def test_the_evidence_job_is_offline_pin_free_scrubbed_and_fails_on_skips():
+    job = WF["jobs"]["evidence"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert "packages/qa-evidence/tests" in steps and "env -i HOME=" in steps and "tools/check_junit.py" in steps and "--junitxml" in steps
+    assert not any("repository" in s.get("with", {}) for s in job["steps"]) and "needs" not in job and "continue-on-error" not in job
+    assert "playwright" not in steps.lower() and "upload-artifact" not in str(job)
+    assert any('test -z "$(git status --porcelain)"' in str(s.get("run", "")) for s in job["steps"])

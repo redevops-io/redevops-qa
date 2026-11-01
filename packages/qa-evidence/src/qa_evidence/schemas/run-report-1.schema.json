@@ -1,0 +1,575 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qa-evidence/run-report/1",
+  "title": "QA run report",
+  "description": "Security-sensitive: every object is closed except those marked x-qa-informational (environment, extensions). The native engine result (lanes[].native, NATIVE_* values) and the independent verdict (accounting, verdict; VERIFIED/FAILED/INCONCLUSIVE/UNACCOUNTED values) are separate fields with disjoint vocabularies.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "run_id",
+    "started_at",
+    "finished_at",
+    "plan_digest",
+    "environment",
+    "lanes",
+    "assertion_set",
+    "accounting",
+    "verdict",
+    "redaction",
+    "limitations"
+  ],
+  "properties": {
+    "schema": {
+      "const": "qa-evidence/run-report"
+    },
+    "schema_version": {
+      "$ref": "#/$defs/schema_version"
+    },
+    "run_id": {
+      "$ref": "#/$defs/id"
+    },
+    "started_at": {
+      "$ref": "#/$defs/time"
+    },
+    "finished_at": {
+      "$ref": "#/$defs/time"
+    },
+    "plan_digest": {
+      "$ref": "#/$defs/digest",
+      "description": "digest of the frozen plan; for this format version equal to the assertion-set digest, which is the digest of assertion-lock.json"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "lanes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lane_id",
+          "run_id",
+          "engine",
+          "native"
+        ],
+        "properties": {
+          "lane_id": {
+            "$ref": "#/$defs/id"
+          },
+          "run_id": {
+            "$ref": "#/$defs/id"
+          },
+          "engine": {
+            "$ref": "#/$defs/engine"
+          },
+          "native": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "raw_status",
+              "exit_code",
+              "artifacts"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "NATIVE_PASS",
+                  "NATIVE_FAIL",
+                  "NATIVE_ERROR",
+                  "NATIVE_SKIPPED",
+                  "NATIVE_TIMEOUT",
+                  "NATIVE_UNAVAILABLE"
+                ]
+              },
+              "raw_status": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "exit_code": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": -256,
+                "maximum": 65535
+              },
+              "counts": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "passed",
+                  "failed",
+                  "errored",
+                  "skipped"
+                ],
+                "properties": {
+                  "passed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "failed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "errored": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  },
+                  "skipped": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                  }
+                }
+              },
+              "artifacts": {
+                "type": "array",
+                "maxItems": 512,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "digest",
+                    "size"
+                  ],
+                  "properties": {
+                    "path": {
+                      "$ref": "#/$defs/path"
+                    },
+                    "digest": {
+                      "$ref": "#/$defs/digest"
+                    },
+                    "size": {
+                      "$ref": "#/$defs/size"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "what the engine itself reported; never a verdict"
+          }
+        }
+      }
+    },
+    "assertion_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digest",
+        "assertions"
+      ],
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "assertions": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "assertion_id",
+              "lane_id",
+              "digest"
+            ],
+            "properties": {
+              "assertion_id": {
+                "$ref": "#/$defs/id"
+              },
+              "lane_id": {
+                "$ref": "#/$defs/id"
+              },
+              "digest": {
+                "$ref": "#/$defs/digest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "accounting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frozen",
+        "verified",
+        "failed",
+        "inconclusive",
+        "unaccounted",
+        "results"
+      ],
+      "properties": {
+        "frozen": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "verified": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "inconclusive": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "unaccounted": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "results": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "assertion_id",
+              "lane_id",
+              "native_status",
+              "verdict"
+            ],
+            "properties": {
+              "assertion_id": {
+                "$ref": "#/$defs/id"
+              },
+              "lane_id": {
+                "$ref": "#/$defs/id"
+              },
+              "native_status": {
+                "enum": [
+                  "NATIVE_PASS",
+                  "NATIVE_FAIL",
+                  "NATIVE_ERROR",
+                  "NATIVE_SKIPPED",
+                  "NATIVE_TIMEOUT",
+                  "NATIVE_UNAVAILABLE",
+                  null
+                ],
+                "description": "the engine's own view of this assertion, if it has one; not a verdict"
+              },
+              "verdict": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "state",
+                  "reason_code",
+                  "provenance"
+                ],
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "VERIFIED",
+                      "FAILED",
+                      "INCONCLUSIVE",
+                      "UNACCOUNTED"
+                    ]
+                  },
+                  "reason_code": {
+                    "$ref": "#/$defs/reason_code"
+                  },
+                  "provenance": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": false,
+                    "required": [
+                      "verifier",
+                      "assertion_digest",
+                      "evidence"
+                    ],
+                    "description": "null only for UNACCOUNTED: nobody judged the assertion",
+                    "properties": {
+                      "verifier": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "id",
+                          "version"
+                        ],
+                        "properties": {
+                          "id": {
+                            "$ref": "#/$defs/id"
+                          },
+                          "version": {
+                            "$ref": "#/$defs/version_token"
+                          }
+                        }
+                      },
+                      "assertion_digest": {
+                        "$ref": "#/$defs/digest"
+                      },
+                      "evidence": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "digest"
+                        ],
+                        "properties": {
+                          "path": {
+                            "$ref": "#/$defs/path"
+                          },
+                          "digest": {
+                            "$ref": "#/$defs/digest"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "reason_code",
+        "provenance"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "VERIFIED",
+            "FAILED",
+            "INCONCLUSIVE"
+          ]
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "verifier",
+            "plan_digest",
+            "assertion_set_digest",
+            "evidence_set_digest"
+          ],
+          "properties": {
+            "verifier": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "version"
+              ],
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/id"
+                },
+                "version": {
+                  "$ref": "#/$defs/version_token"
+                }
+              }
+            },
+            "assertion_set_digest": {
+              "$ref": "#/$defs/digest"
+            },
+            "evidence_set_digest": {
+              "$ref": "#/$defs/digest"
+            },
+            "plan_digest": {
+              "$ref": "#/$defs/digest"
+            }
+          }
+        }
+      },
+      "description": "the run-level outcome, computed from the accounting; produced only by the independent verifier"
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applied",
+        "rules",
+        "notes"
+      ],
+      "properties": {
+        "applied": {
+          "type": "boolean"
+        },
+        "rules": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "description",
+              "count"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100000000
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        }
+      }
+    },
+    "extensions": {
+      "$ref": "#/$defs/extensions"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 of the exact bytes, lower-case hex, prefixed"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "version_token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$",
+      "description": "MAJOR.MINOR; an unsupported MAJOR is refused before anything else is read"
+    },
+    "time": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "UTC, supplied by the producer; the format never reads a clock"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[A-Za-z0-9._@+=,/-]+$",
+      "description": "relative, ASCII, POSIX separators; the full path rules (no empty, dot or dot-dot component, no leading or trailing dot) are enforced by the verifier"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 67108864
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._+-]*$"
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/version_token"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "x-qa-informational": true,
+      "additionalProperties": true,
+      "required": [
+        "os",
+        "arch",
+        "python"
+      ],
+      "description": "os, arch and python are required and compared between the manifest and the report; other keys are informational",
+      "properties": {
+        "os": {
+          "$ref": "#/$defs/token"
+        },
+        "arch": {
+          "$ref": "#/$defs/token"
+        },
+        "python": {
+          "$ref": "#/$defs/version_token"
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "x-qa-informational": true,
+      "additionalProperties": true,
+      "properties": {},
+      "description": "informational additions only; tolerated and listed, never used for a decision"
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    }
+  }
+}

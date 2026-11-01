@@ -1,0 +1,25 @@
+[project]
+name = "redevops-qa-evidence"
+version = "0.1.0.dev0"
+description = "Portable, offline-verifiable evidence bundle for ReDevOps QA runs: layout, report schema, reader and verifier"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
+# Standard library only: no framework, no pinned harness tree and no contracts package is imported by this package.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+redevops-qa-evidence = "qa_evidence.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+qa_evidence = ["schemas/*.json"]
