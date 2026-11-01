@@ -1,0 +1,15 @@
+GET /api/discount?subtotal_cents=10500
+--- 200
+Server: qa-fixture-app
+Content-Type: application/json
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Content-Length: 186
+Connection: close
+
+{
+  "discount_cents": 0,
+  "rule": "10 percent of the subtotal, rounded down to the cent, when the subtotal is at least 10000 cents",
+  "subtotal_cents": 10500,
+  "total_cents": 10500
+}

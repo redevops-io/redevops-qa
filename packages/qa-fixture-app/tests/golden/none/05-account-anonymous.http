@@ -1,0 +1,9 @@
+GET /account
+--- 303
+Server: qa-fixture-app
+Location: /login
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Content-Length: 0
+Connection: close
+

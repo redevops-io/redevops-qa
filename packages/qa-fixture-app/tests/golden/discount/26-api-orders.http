@@ -1,0 +1,37 @@
+GET /api/orders
+--- 200
+Server: qa-fixture-app
+Content-Type: application/json
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Content-Length: 511
+Connection: close
+
+{
+  "orders": [
+    {
+      "discount_cents": 0,
+      "order_id": "101",
+      "subtotal_cents": 10500,
+      "total_cents": 10500
+    },
+    {
+      "discount_cents": 0,
+      "order_id": "102",
+      "subtotal_cents": 9999,
+      "total_cents": 9999
+    },
+    {
+      "discount_cents": 0,
+      "order_id": "103",
+      "subtotal_cents": 10000,
+      "total_cents": 10000
+    },
+    {
+      "discount_cents": 0,
+      "order_id": "104",
+      "subtotal_cents": 10005,
+      "total_cents": 10005
+    }
+  ]
+}

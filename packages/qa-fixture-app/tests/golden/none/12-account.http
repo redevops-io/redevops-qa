@@ -1,0 +1,17 @@
+GET /account
+--- 200
+Server: qa-fixture-app
+Content-Type: text/html; charset=utf-8
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Content-Length: 171
+Connection: close
+
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Account</title></head>
+<body>
+<h1>Welcome, alice</h1>
+<a href="/settings">Settings</a>
+</body>
+</html>

@@ -19,7 +19,7 @@ verdict. Details per package are in the READMEs below; vulnerability reporting i
 
 ## Layout
 Product packages (`qa-api`, `qa-ui`, `qa-runner`, `qa-playwright`, `qa-evidence`, `qa-bridge`, `qa-egress`, `qa-adapter-kit`, `qa-selenium`,
-`qa-robot`, `qa-appium`, `qa-checks`), deployment (`deploy/`), examples and benchmarks.
+`qa-robot`, `qa-appium`, `qa-checks`, `qa-fixture-app`), deployment (`deploy/`), examples and benchmarks.
 
 Configuration of the pinned upstream versions: [pins.toml](pins.toml). The contracts bridge is in
 [packages/qa-bridge](packages/qa-bridge/README.md).
@@ -30,6 +30,7 @@ The shared adapter protocol, models and supervisor are in [packages/qa-adapter-k
 The Selenium adapters are in [packages/qa-selenium](packages/qa-selenium/README.md).
 The Robot Framework adapter is in [packages/qa-robot](packages/qa-robot/README.md).
 The Appium adapters are in [packages/qa-appium](packages/qa-appium/README.md).
+The deterministic fixture web app with seeded defects, the target of the end-to-end tests, is in [packages/qa-fixture-app](packages/qa-fixture-app/README.md).
 The engine capability manifest (what each engine has been shown to do, with its evidence) is [qa-capabilities.json](qa-capabilities.json)
 with its schema in [schemas](schemas/qa-capabilities.schema.json); the generated matrix is [docs/QA_CAPABILITIES.md](docs/QA_CAPABILITIES.md).
 `python tools/check_capabilities.py` checks it (schema, pins, evidence, agreement with the adapters, freshness against `main`).

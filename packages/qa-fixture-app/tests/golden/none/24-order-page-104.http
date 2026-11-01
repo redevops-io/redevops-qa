@@ -1,0 +1,28 @@
+GET /orders/104
+--- 200
+Server: qa-fixture-app
+Content-Type: text/html; charset=utf-8
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Content-Length: 528
+Connection: close
+
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Order 104</title></head>
+<body>
+<h1>Order 104</h1>
+<table>
+<thead><tr><th>SKU</th><th>Qty</th><th>Unit</th><th>Line</th></tr></thead>
+<tbody>
+<tr><td>E-5</td><td>1</td><td>100.05</td><td>100.05</td></tr>
+</tbody>
+</table>
+<dl>
+<dt>Subtotal</dt><dd data-testid="order-subtotal">100.05</dd>
+<dt>Discount</dt><dd data-testid="order-discount">10.00</dd>
+<dt>Total</dt><dd data-testid="order-total">90.05</dd>
+</dl>
+<a href="/orders">All orders</a>
+</body>
+</html>
