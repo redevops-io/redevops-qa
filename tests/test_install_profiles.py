@@ -158,6 +158,8 @@ SCHEMA_CASES = [
     ("a verifier that is supported", mutate(("verifier", "supported"), True), "supported"),
     ("an install method that is a registry", mutate(("source", "install_method"), "registry"), "install_method"),
     ("a bad pinned commit", mutate(("source", "pinned_commit"), "main"), "pinned_commit"),
+    ("a recorded run without the commit it installed from", mutate(R + ("hosts", 0, "verified_by", "source_commit"), None), "source_commit"),
+    ("a recorded run whose whole run is not green", mutate(R + ("hosts", 0, "verified_by", "run_conclusion"), "failure"), "run_conclusion"),
     ("a parameter of the wrong kind", mutate(R + ("params", "venv_dir", "kind"), "shell"), "kind"),
     ("a verified profile without a smoke step", mutate(R + ("steps", "smoke"), []), "smoke"),
     ("a host outside the vocabulary", mutate(R + ("hosts", 0, "os_arch"), "plan9-x86_64"), "os_arch"),
@@ -433,7 +435,7 @@ def test_a_profile_cannot_be_verified_unless_every_engine_has_a_real_engine_in_t
     p["hosts"][0]["status"] = "verified"
     p["hosts"][0]["verified_by"] = next((h["verified_by"] for h in profile(PROFILES, "local-python-robot")["hosts"] if h["verified_by"]), None) or {
         "workflow": "tests.yml", "job_key": "profile-local-python-robot", "job_name": "install profile local-python-robot", "run_id": 1, "job_id": 2, "head_sha": "a" * 40,
-        "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/1", "url": "https://github.com/redevops-io/redevops-qa/actions/runs/1/job/2",
+        "source_commit": PROFILES["source"]["pinned_commit"], "run_conclusion": "success", "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/1", "url": "https://github.com/redevops-io/redevops-qa/actions/runs/1/job/2",
         "completed_on": "2026-11-01", "summary": "x"}
     assert "has test level offline-fake" in joined(chk.semantic_problems(m, caps, ROOT))
 
@@ -446,7 +448,8 @@ def verified_copy():
     h = p["hosts"][0]
     h["status"] = "verified"
     h["verified_by"] = {"workflow": "tests.yml", "job_key": "profile-local-python-robot", "job_name": "install profile local-python-robot", "run_id": 1, "job_id": 2,
-                        "head_sha": "a" * 40, "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/1",
+                        "head_sha": "a" * 40, "source_commit": PROFILES["source"]["pinned_commit"], "run_conclusion": "success",
+                        "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/1",
                         "url": "https://github.com/redevops-io/redevops-qa/actions/runs/1/job/2", "completed_on": "2026-11-01", "summary": "x"}
     return m, p, h
 
@@ -468,12 +471,24 @@ def job_problems(workflow_mutation=None, profile_mutation=None):
     return chk.semantic_problems(m, CAPS, ROOT)
 
 
+def test_the_recorded_run_head_and_the_pinned_install_commit_are_stated_separately():
+    src = PROFILES["source"]["pinned_commit"]
+    for p in PROFILES["profiles"]:
+        for h in p["hosts"]:
+            vb = h["verified_by"]
+            if vb:
+                assert vb["source_commit"] == src and vb["run_conclusion"] == "success"
+                assert vb["head_sha"] != src, "the run head supplies the workflow and tools; the pin is what was installed"
+                assert "installed from the pinned commit" in vb["summary"]
+
+
 def test_a_well_formed_verified_entry_passes_the_job_rules():
     found = job_problems()
     assert not [f for f in found if "host linux-x86_64" in f], found
 
 
 JOB_CASES = [
+    ("a run that installed from another commit", lambda m, p, h: h["verified_by"].__setitem__("source_commit", "c" * 40), "source_commit must be the pinned commit"),
     ("a job that does not exist", lambda m, p, h: h["verified_by"].__setitem__("job_key", "profile-nothing"), "has no job"),
     ("a job named differently", lambda m, p, h: h["verified_by"].__setitem__("job_name", "something else"), "is not named"),
     ("a run url that does not match", lambda m, p, h: h["verified_by"].__setitem__("run_url", "https://github.com/redevops-io/redevops-qa/actions/runs/9"), "run_url and url must be built"),
@@ -645,6 +660,13 @@ def test_the_pinned_commit_and_every_recorded_run_must_be_ancestors_of_main(repo
     assert "is not a commit" in joined(chk.freshness_problems(with_commits("d" * 40), root))
 
 
+def test_a_run_of_a_commit_that_is_only_on_the_checked_branch_is_not_fresh(repo):
+    root, on_main, off = repo
+    git(root, "checkout", "-q", "side")                      # HEAD is on a branch that is not main, and off is an ancestor of HEAD
+    assert "not an ancestor of main" in joined(chk.freshness_problems(with_commits(on_main, off), root, main_ref="main"))
+    assert chk.freshness_problems(with_commits(on_main, on_main), root, main_ref="main") == []
+
+
 def test_no_main_is_a_finding_not_a_skip(tmp_path):
     git(tmp_path, "init", "-q", "-b", "other")
     (tmp_path / "f").write_text("1")
@@ -667,7 +689,7 @@ class Api:
         if "/jobs" in url:
             return {"jobs": [{"id": self.bad.get("job_id", vb["job_id"]), "name": vb["job_name"] + " (x)", "conclusion": self.bad.get("conclusion", "success"),
                               "completed_at": self.bad.get("completed", vb["completed_on"]) + "T00:00:00Z"} for vb in mine]}
-        return {"head_sha": self.bad.get("head", mine[0]["head_sha"])}
+        return {"head_sha": self.bad.get("head", mine[0]["head_sha"]), "conclusion": self.bad.get("run_conclusion", mine[0]["run_conclusion"])}
 
 
 def test_re_checking_the_recorded_runs():
@@ -678,6 +700,7 @@ def test_re_checking_the_recorded_runs():
     assert chk.verify_ci_problems(m, repo_name, Api(m)) == []
     assert "head is" in joined(chk.verify_ci_problems(m, repo_name, Api(m, head="e" * 40)))
     assert "concluded failure" in joined(chk.verify_ci_problems(m, repo_name, Api(m, conclusion="failure")))
+    assert "as a whole concluded failure" in joined(chk.verify_ci_problems(m, repo_name, Api(m, run_conclusion="failure")))
     assert "has no job" in joined(chk.verify_ci_problems(m, repo_name, Api(m, job_id=1)))
     assert "completed on" in joined(chk.verify_ci_problems(m, repo_name, Api(m, completed="2025-01-01")))
     assert "cannot read run" in joined(chk.verify_ci_problems(m, repo_name, Api(m, error=True)))

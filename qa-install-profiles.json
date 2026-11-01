@@ -105,13 +105,15 @@
             "workflow": "tests.yml",
             "job_key": "profile-local-python-robot",
             "job_name": "install profile local-python-robot",
-            "run_id": 41264392648,
-            "job_id": 124724056968,
-            "head_sha": "66b792d05fcf4ff2e5ccc44742a256d686c2cc9b",
-            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648",
-            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056968",
+            "run_id": 41306373018,
+            "job_id": 124847489639,
+            "head_sha": "6ee02a75fc5a0dad686cdd104cfff13d3e5fdc9c",
+            "run_conclusion": "success",
+            "source_commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8",
+            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41306373018",
+            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489639",
             "completed_on": "2026-11-01",
-            "summary": "install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, from the pinned commit in a clean virtual environment"
+            "summary": "install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, installed from the pinned commit in a clean virtual environment; the whole run is green"
           },
           "disabled_reason": null,
           "note": ""
@@ -416,13 +418,15 @@
             "workflow": "tests.yml",
             "job_key": "profile-local-python-selenium",
             "job_name": "install profile local-python-selenium",
-            "run_id": 41264392648,
-            "job_id": 124724056825,
-            "head_sha": "66b792d05fcf4ff2e5ccc44742a256d686c2cc9b",
-            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648",
-            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056825",
+            "run_id": 41306373018,
+            "job_id": 124847489672,
+            "head_sha": "6ee02a75fc5a0dad686cdd104cfff13d3e5fdc9c",
+            "run_conclusion": "success",
+            "source_commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8",
+            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41306373018",
+            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489672",
             "completed_on": "2026-11-01",
-            "summary": "install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, from the pinned commit in a clean virtual environment"
+            "summary": "install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, installed from the pinned commit in a clean virtual environment; the whole run is green"
           },
           "disabled_reason": null,
           "note": ""

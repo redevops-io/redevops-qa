@@ -43,7 +43,7 @@ Hosts:
 
 | Host | Status | Prerequisites | Verified by |
 |---|---|---|---|
-| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. | [run 41264392648](https://github.com/redevops-io/redevops-qa/actions/runs/41264392648), [job 124724056968](https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056968), commit `66b792d05fcf`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, from the pinned commit in a clean virtual environment |
+| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. | [run 41306373018](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018) (whole run green, head `6ee02a75fc5a`), [job 124847489639](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489639), installed from the pinned commit `5e9c8da6248f`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, installed from the pinned commit in a clean virtual environment; the whole run is green |
 | linux-arm64 | experimental | Linux arm64 with a POSIX shell. | The same steps are written for this host but no CI job runs them here. |
 | macos-arm64 | experimental | macOS on Apple silicon with Python 3.12 as `python3.12`. | The same steps are written for this host but no CI job runs them here. |
 
@@ -133,7 +133,7 @@ Hosts:
 
 | Host | Status | Prerequisites | Verified by |
 |---|---|---|---|
-| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. Chrome and ChromeDriver 156 were present on that runner image. | [run 41264392648](https://github.com/redevops-io/redevops-qa/actions/runs/41264392648), [job 124724056825](https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056825), commit `66b792d05fcf`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, from the pinned commit in a clean virtual environment |
+| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. Chrome and ChromeDriver 156 were present on that runner image. | [run 41306373018](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018) (whole run green, head `6ee02a75fc5a`), [job 124847489672](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489672), installed from the pinned commit `5e9c8da6248f`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, installed from the pinned commit in a clean virtual environment; the whole run is green |
 | macos-arm64 | experimental | macOS on Apple silicon with Python 3.12 as `python3.12`, Chrome and its ChromeDriver. | The same steps are written for this host but no CI job runs them here. |
 
 Parameters:

@@ -139,6 +139,8 @@ SCHEMA_CASES = [
     ("a published package", mutate(("distribution", "published_packages"), True), "published_packages"),
     ("the wrong licence wording", mutate(("engines", 0, "license", "adapter_wording"), "open source"), "adapter_wording"),
     ("a ci evidence item without a run url", remove(("engines", 0, "evidence", 0, "run_url")), "run_url"),
+    ("a ci evidence item whose whole run is not green", mutate(("engines", 0, "evidence", 0, "run_conclusion"), "failure"), "run_conclusion"),
+    ("a ci evidence item that does not say the run is green", remove(("engines", 0, "evidence", 0, "run_conclusion")), "run_conclusion"),
     ("an absolute docs path", mutate(("engines", 0, "docs_url"), "/etc/passwd"), "docs_url"),
     ("a docs path that climbs out", mutate(("engines", 0, "docs_url"), "../x.md"), "docs_url"),
     ("a url docs path", mutate(("engines", 0, "docs_url"), "https://example.com/x"), "docs_url"),
@@ -558,7 +560,7 @@ class FakeApi:
         for e in manifest["engines"]:
             for x in e["evidence"]:
                 if x["kind"] == "ci-job":
-                    self.runs[x["run_id"]] = {"head_sha": x["head_sha"]}
+                    self.runs[x["run_id"]] = {"head_sha": x["head_sha"], "conclusion": x["run_conclusion"]}
                     self.jobs.setdefault(x["run_id"], []).append({"id": x["job_id"], "name": x["job_name"] + " (full name)", "conclusion": "success",
                                                                   "completed_at": x["completed_on"] + "T01:00:00Z"})
         self.override = override
@@ -580,7 +582,11 @@ def test_re_checking_the_ci_evidence_passes_for_the_recorded_runs():
 def test_re_checking_finds_a_different_head_a_failed_job_a_missing_job_and_an_api_error():
     api = FakeApi(REAL)
     run_id = REAL["engines"][0]["evidence"][0]["run_id"]
-    assert "head is" in joined(chk.verify_ci_problems(REAL, FakeApi(REAL, run={"head_sha": "e" * 40})))
+    assert "head is" in joined(chk.verify_ci_problems(REAL, FakeApi(REAL, run={"head_sha": "e" * 40, "conclusion": "success"})))
+    red = FakeApi(REAL)
+    for run in red.runs.values():
+        run["conclusion"] = "failure"
+    assert "as a whole concluded failure" in joined(chk.verify_ci_problems(REAL, red))
     api.jobs[run_id][0]["conclusion"] = "failure"
     assert "concluded failure" in joined(chk.verify_ci_problems(REAL, api))
     api = FakeApi(REAL)

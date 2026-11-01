@@ -116,6 +116,7 @@
         "job_id": {"type": "integer", "minimum": 1},
         "head_sha": {"$ref": "#/$defs/sha"},
         "run_url": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+$"},
+        "run_conclusion": {"enum": ["success"]},
         "conclusion": {"enum": ["success"]},
         "completed_on": {"$ref": "#/$defs/date"},
         "tests": {"type": "string", "minLength": 1},
@@ -130,7 +131,7 @@
       "allOf": [
         {
           "if": {"properties": {"kind": {"const": "ci-job"}}, "required": ["kind"]},
-          "then": {"required": ["workflow", "job_key", "job_name", "run_id", "job_id", "head_sha", "conclusion", "completed_on", "tests", "run_url", "url"]}
+          "then": {"required": ["workflow", "job_key", "job_name", "run_id", "job_id", "head_sha", "conclusion", "completed_on", "tests", "run_url", "run_conclusion", "url"]}
         },
         {
           "if": {"properties": {"kind": {"const": "local-run"}}, "required": ["kind"]},

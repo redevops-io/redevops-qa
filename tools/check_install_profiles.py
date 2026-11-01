@@ -12,7 +12,8 @@ Offline (no network, no secret) except the explicit ``--verify-ci`` and ``--cros
 * a profile or host is ``verified`` only if a named CI job in ``tests.yml`` runs that exact profile (``tools/run_install_profile.py --profile <id>``) on
   the matching runner, with the stable channel, no skip, no condition, and a recorded run; ``verified`` needs engines that are backed by a real engine
   in the capability manifest; a planned target must not have its files in the repository;
-* the pinned source commit is an ancestor of main and every recorded run is of a commit that is an ancestor of the commit being checked;
+* the pinned source commit and the head commit of every recorded run are ancestors of main; a recorded run states the pin it installed from (``source_commit``,
+  which must be the profile's pinned commit) separately from its own head commit;
 * ``docs/QA_INSTALL_PROFILES.md`` equals the document generated from the JSON.
 
 Usage: ``python tools/check_install_profiles.py [--root DIR] [--main-ref REF] [--no-freshness] [--write-docs] [--verify-ci] [--cross-check]``.
@@ -266,6 +267,8 @@ def semantic_problems(profiles: Dict[str, Any], capabilities: Dict[str, Any], ro
             reads_pin = [s for s in job["steps"] if s.get("id") == "profile" and "['source']['pinned_commit']" in str(s.get("run", ""))]
             if not pinned_checkout or not reads_pin:
                 out.append(f"{hat}: the job must check out the pinned commit")
+            if vb["source_commit"] != src["pinned_commit"]:
+                out.append(f"{hat}: source_commit must be the pinned commit {src['pinned_commit']}")
             expected = f"https://github.com/{src['repository']}/actions/runs/{vb['run_id']}"
             if vb["run_url"] != expected or vb["url"] != expected + f"/job/{vb['job_id']}":
                 out.append(f"{hat}: run_url and url must be built from the run and job ids")
@@ -278,14 +281,13 @@ def freshness_problems(profiles: Dict[str, Any], root: Path, main_ref: Optional[
     ref = caps.resolve_main_ref(root, main_ref, "main")
     if ref is None:
         return ["freshness: cannot resolve the main branch; fetch it (full history) before checking"]
-    # The pinned source commit must already be on main. A recorded run is a run of a commit of this change, which is on main only once the change is
-    # merged (the repository merges with merge commits, keeping the branch commits), so it must be an ancestor of the commit being checked (HEAD); once
-    # merged, HEAD is main and the two rules coincide.
+    # Both the pinned source commit (what the profile installs from) and the head commit of every recorded run (what supplied the workflow and the tools)
+    # must be ancestors of main. They are different commits and the data says so: a run's head_sha is the run, its source_commit is the pin it installed from.
     shas = {"source pinned_commit": (profiles["source"]["pinned_commit"], ref)}
     for p in profiles["profiles"]:
         for h in p["hosts"]:
             if h["verified_by"]:
-                shas[f"profile {p['id']} host {h['os_arch']} head_sha"] = (h["verified_by"]["head_sha"], "HEAD")
+                shas[f"profile {p['id']} host {h['os_arch']} head_sha"] = (h["verified_by"]["head_sha"], ref)
     out = []
     for what, (sha, against) in shas.items():
         if caps._git(root, "cat-file", "-e", f"{sha}^{{commit}}")[0] != 0:
@@ -331,7 +333,8 @@ def render_docs(profiles: Dict[str, Any]) -> str:
         L += ["", "Hosts:", "", "| Host | Status | Prerequisites | Verified by |", "|---|---|---|---|"]
         for h in p["hosts"]:
             vb = h["verified_by"]
-            by = f"[run {vb['run_id']}]({vb['run_url']}), [job {vb['job_id']}]({vb['url']}), commit `{vb['head_sha'][:12]}`, {vb['completed_on']}: {caps._cell(vb['summary'])}" if vb else (caps._cell(h["note"]) or "not run")
+            by = (f"[run {vb['run_id']}]({vb['run_url']}) (whole run green, head `{vb['head_sha'][:12]}`), [job {vb['job_id']}]({vb['url']}), installed from the pinned commit "
+                  f"`{vb['source_commit'][:12]}`, {vb['completed_on']}: {caps._cell(vb['summary'])}") if vb else (caps._cell(h["note"]) or "not run")
             L.append(f"| {h['os_arch']} | {h['status']} | {caps._cell(' '.join(h['prerequisites']))} | {by} |")
         L += ["", "Parameters:", ""] + [f"* `{n}`: {s['description']}" + (f" (default `{s['default']}`)" if s["default"] else " (required)") for n, s in sorted(p["params"].items())]
         for phase, title in (("source", "Get the source"), ("install", "Install"), ("smoke", "Smoke test"), ("check", "Check the evidence"), ("uninstall", "Uninstall")):
@@ -371,6 +374,8 @@ def verify_ci_problems(profiles: Dict[str, Any], repo: str, fetch=caps._api_get)
                 continue
             if run.get("head_sha") != vb["head_sha"]:
                 out.append(f"{at}: run {vb['run_id']} head is {run.get('head_sha')}, not {vb['head_sha']}")
+            if run.get("conclusion") != vb["run_conclusion"]:
+                out.append(f"{at}: run {vb['run_id']} as a whole concluded {run.get('conclusion')}, not {vb['run_conclusion']} (a visitor following the link must not see a red run)")
             job = next((j for j in jobs.get("jobs", []) if j.get("id") == vb["job_id"]), None)
             if job is None:
                 out.append(f"{at}: run {vb['run_id']} has no job {vb['job_id']}")
