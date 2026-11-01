@@ -33,9 +33,9 @@ Licence: the family licence of this repository (source-available; see `LICENSE.m
 * **Real server, no device.** `tests/real/test_ap_server.py`, marked `appium_server`, run by the `appium-server` CI job: real Appium 3.9.0 server
   (installed with `--ignore-scripts`) and client 6.1.1 on loopback, no Android SDK. It shows that the client talks to the server, that the UiAutomator2
   driver accepts the adapter's capabilities and that a worker without a device is `UNAVAILABLE`. It drives no app.
-* **Real emulator or device.** `tests/real/test_ap_android_device.py`, marked `appium_android`, run by the `appium-android` CI job. It needs an
+* **Real emulator or device.** `tests/real/test_ap_android_device.py`, marked `appium_android`, run by hand through the `appium-android` workflow (Actions, Run workflow), naming the runner. It needs an
   operator-provisioned Android SDK and an attached emulator or device, which this repository does not provision (no licence is accepted, no system image is
-  downloaded). It fails, never skips, when there is none, so on a hosted runner it is expected to be red; it is not a required check. **Observed to pass
+  downloaded). It fails, never skips, when there is none, so it is not part of the push and pull-request workflow (hosted runners have no emulator); it is not a required check. **Observed to pass
   locally on 2026-11-01**, three runs in a row: one test (the Settings app opens on the attached device and the screenshot is a real PNG), 0 skipped, 0 failed,
   against an Android 17 (API 37, arm64-v8a, Google APIs with Play) emulator on an Apple-silicon Mac, with Appium 3.9.0, UiAutomator2 8.7.3 and client 6.1.1. A
   full adapter session on the same emulator also passed `open_app`, `read`, `check` (PASS, FAIL and not-found), `tap`, `type` (the secret value echoes only its

@@ -1,0 +1,59 @@
+name: appium-android
+
+# The real-device Appium lane, run BY HAND on a worker whose operator provisioned the Android SDK and an emulator or device. Hosted runners have no emulator,
+# so this lane used to sit in tests.yml where it was red on every push and pull request; it lives here so that the main workflow has no job that is red by design.
+# Read-only and secret-free like tests.yml: no tag trigger, no publish step, no secret and no token input. Start it from the Actions tab (Run workflow) and name
+# the runner label of a worker that has an attached emulator or device.
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner label of a worker with the Android SDK and an attached emulator or device"
+        required: true
+        default: "ubuntu-24.04"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appium-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  appium-android:
+    name: "appium android lane (real emulator or device; manual; NOT a required check; a missing emulator fails, never skips)"
+    # Needs an Android emulator or device that the worker's operator provisioned under Google's terms. This job does not install the Android SDK,
+    # accept a licence, download a system image or start an emulator. It passed locally against an Android 17 emulator on 2026-11-01 (see the
+    # qa-appium README) and has never run in CI. It fails when no device is attached, so it is run by hand on a worker that has one.
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require an attached Android emulator or device (fail when there is none)
+        run: |
+          adb="${ANDROID_HOME:-/nonexistent}/platform-tools/adb"
+          if [ ! -x "$adb" ]; then echo "FAIL: no adb at $adb; this lane needs a worker with an operator-provisioned Android SDK"; exit 1; fi
+          "$adb" start-server
+          if ! "$adb" devices | tail -n +2 | grep -q "device$"; then echo "FAIL: no Android emulator or device is attached to this worker"; exit 1; fi
+      - name: Install the pinned test tools and Appium Python client
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "Appium-Python-Client==6.1.1"
+      - name: Install the pinned Appium server and the UiAutomator2 driver (no script runs; nothing else is downloaded)
+        run: |
+          npm install --prefix "$RUNNER_TEMP/appium" --ignore-scripts --no-audit --no-fund appium@3.9.0
+          mkdir -p "$RUNNER_TEMP/appium-home"
+          env -i HOME="$RUNNER_TEMP" PATH="$PATH" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" driver install uiautomator2@8.7.3
+      - name: Start the Appium server on loopback
+        run: |
+          nohup env -i HOME="$RUNNER_TEMP" PATH="$PATH" ANDROID_HOME="$ANDROID_HOME" APPIUM_HOME="$RUNNER_TEMP/appium-home" "$RUNNER_TEMP/appium/node_modules/.bin/appium" --address 127.0.0.1 --port 4723 --log-level warn > "$RUNNER_TEMP/appium-server.log" 2>&1 &
+          sleep 10
+      - name: Run the Android lane (scrubbed environment; only tests marked appium_android)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 QA_APPIUM_URL=http://127.0.0.1:4723 \
+            python -m pytest -q -m appium_android packages/qa-appium/tests/real --junitxml="$RUNNER_TEMP/junit-appium-android.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-appium-android.xml"

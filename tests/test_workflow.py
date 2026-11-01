@@ -9,6 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 TEXT = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 WF = yaml.safe_load(TEXT)
 TRIGGERS = WF.get(True) or WF.get("on")
+ANDROID_TEXT = (ROOT / ".github" / "workflows" / "appium-android.yml").read_text(encoding="utf-8")
+ANDROID_WF = yaml.safe_load(ANDROID_TEXT)
+ANDROID_TRIGGERS = ANDROID_WF.get(True) or ANDROID_WF.get("on")
 
 
 def test_permissions_are_read_only_everywhere():
@@ -141,14 +144,48 @@ def test_the_robot_offline_job_installs_no_robot_and_the_real_job_never_skips():
 def test_the_appium_offline_job_installs_no_appium_and_the_real_jobs_never_skip_install_licences_or_emulators():
     offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["appium-offline"]["steps"])
     assert "Appium-Python-Client" not in offline and "npm" not in offline and "packages/qa-appium/tests" in offline and "tools/check_junit.py" in offline
-    for name, marker in (("appium-server", "appium_server"), ("appium-android", "appium_android")):
-        job = WF["jobs"][name]
+    for job, marker in ((WF["jobs"]["appium-server"], "appium_server"), (ANDROID_WF["jobs"]["appium-android"], "appium_android")):
         run = "\n".join(str(s.get("run", "")) for s in job["steps"])
         assert f"-m {marker} packages/qa-appium/tests/real" in run and "tools/check_junit.py" in run and "needs" not in job
         assert "NOT a required check" in job["name"] and "--ignore-scripts" in run and "appium@3.9.0" in run and "uiautomator2@8.7.3" in run
         assert not any(w in run.lower() for w in ("sdkmanager", "avdmanager", "--licenses", "system-images", "emulator -avd", "kvm"))
         assert not any("repository" in s.get("with", {}) for s in job["steps"])
-    android = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["appium-android"]["steps"])
-    assert android.index("exit 1") < android.index("pip install") and "no Android emulator or device" in android and "EXPECTED RED" in WF["jobs"]["appium-android"]["name"]
+    android = "\n".join(str(s.get("run", "")) for s in ANDROID_WF["jobs"]["appium-android"]["steps"])
+    assert android.index("exit 1") < android.index("pip install") and "no Android emulator or device" in android and "manual" in ANDROID_WF["jobs"]["appium-android"]["name"]
     server_run = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["appium-server"]["steps"])
     assert "ANDROID_HOME" not in server_run         # the server lane starts its server without any Android SDK variable
+
+
+# -- the real-device Android lane is its own manual workflow ------------------------------------------------------------------------------------------------------
+
+def test_no_job_in_the_main_workflow_is_red_by_design():
+    assert "appium-android" not in WF["jobs"]
+    assert not any("EXPECTED RED" in str(job.get("name", "")) for job in WF["jobs"].values())
+
+
+def test_the_android_workflow_is_manual_only_and_read_only():
+    assert set(ANDROID_TRIGGERS) == {"workflow_dispatch"}                       # no push, pull request, schedule or tag trigger
+    assert ANDROID_WF["permissions"] == {"contents": "read"}
+    assert list(ANDROID_WF["jobs"]) == ["appium-android"]
+    job = ANDROID_WF["jobs"]["appium-android"]
+    assert "permissions" not in job or all(v == "read" for v in job["permissions"].values())
+    assert "needs" not in job and "NOT a required check" in job["name"]
+
+
+def test_the_android_workflow_takes_one_runner_label_and_nothing_else():
+    inputs = ANDROID_TRIGGERS["workflow_dispatch"]["inputs"]
+    assert set(inputs) == {"runner"} and inputs["runner"]["type"] == "string" and inputs["runner"]["required"] is True
+    assert ANDROID_WF["jobs"]["appium-android"]["runs-on"] == "${{ inputs.runner }}"
+    # the input is used only as the runner label, never inside a shell command or a step
+    steps = "\n".join(str(s) for s in ANDROID_WF["jobs"]["appium-android"]["steps"])
+    assert "inputs." not in steps
+
+
+@pytest.mark.parametrize("word", ["release", "publish", "twine", "gh release", "git push", "docker push", "pypi", "contents: write", "id-token",
+                                  "continue-on-error", "--no-verify", "secrets.", "qa_pins_read_token", "pat:", "password"])
+def test_the_android_workflow_has_no_publish_write_or_secret(word):
+    executable = "\n".join(f"{s.get('run', '')} {s.get('uses', '')} {s.get('with', '')}" for s in ANDROID_WF["jobs"]["appium-android"]["steps"])
+    assert word not in (executable + str(ANDROID_WF["permissions"])).lower()
+    if word in ("secrets.", "qa_pins_read_token", "pat:", "password", "contents: write", "id-token", "continue-on-error"):
+        assert word not in ANDROID_TEXT.lower()                                  # not even in a comment or a key
+    assert "token" not in ANDROID_TEXT.lower().replace("no secret and no token input", "")
