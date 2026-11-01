@@ -84,11 +84,26 @@ native status that says so; its assertions are `INCONCLUSIVE`; the run is never 
 
 ## Bounded reads
 
-Every file this package reads that it did not write itself (a plan or lock, what a lane or the target wrote, the lane input) goes through `safe_read.read_regular`: one descriptor opened without blocking,
-`fstat`-ed, refused unless it is a regular file (a FIFO, a device, a directory and a symbolic link in a lane's output are refused unread), refused above the byte cap before any read, read with a running
-total that stops at the cap (a file that grows while it is read), and read within a deadline. The reference check of the target has the same shape for network reads: no answer above 1 MiB, a total deadline
-of 30 seconds for the whole check (a watcher ends the connection; a server that sends one byte every few seconds does not stretch it) and the run's cancel ends it. The tests that probe this run in a child with
-a hard timeout, FIFOs with no writer or with a capped one, a sparse file and a growing file; none opens an unbounded source.
+Two mechanisms, for two kinds of files.
+
+* **Paths a user supplies** (a plan or lock; from the next parts also a bundle to verify, report or inspect) are read by a child process (`isolated.py`, `read_worker.py`): the parent holds nothing but what
+  came through a pipe, stops taking bytes at the cap (and kills the child), stops waiting at a wall-clock deadline (`REDEVOPS_QA_READ_TIMEOUT`, default 30 s; bundles `REDEVOPS_QA_BUNDLE_READ_TIMEOUT`, default
+  120 s) and kills the child, and on SIGINT, SIGTERM or SIGHUP kills the child and ends with exit 3. The child opens the path without blocking (`O_NONBLOCK`), `fstat`s the same descriptor and refuses anything
+  that is not a regular file (a FIFO, a device, a directory: never read, `/dev/zero` included), refuses a file above the cap before reading, and reads with a running total (a growing file stops at the cap).
+* **Files a lane or the target wrote** (in the run's own temporary directory) are read in this process through `safe_read.read_regular` with the same rules (one descriptor, regular files only, no symbolic
+  link, byte cap, deadline checked between chunks) and under one **evidence budget** for the whole run (`REDEVOPS_QA_MAX_EVIDENCE_BYTES` or `RunOptions.max_evidence_bytes`, default 128 MiB, half the cap of
+  a bundle): a file that does not fit is neither read nor kept, its name is logged, the lane becomes an engine error `evidence-over-cap`, the report says `extensions.evidence_incomplete`, the run is never
+  VERIFIED (exit 3), and everything that fit is in the bundle. If the bundle format still refuses what was collected, the run is rebuilt without the blobs instead of ending as a crash.
+* The reference check of the target: no answer above 1 MiB, a total deadline of 30 s for the whole check (a watcher ends the connection; a server that sends a byte every few seconds does not stretch it),
+  and the run's cancel ends it.
+
+**Tested** (each in a child with a hard timeout and, where the platform enforces one, an address-space cap; none opens an unbounded source): a reading child that never answers is killed at the deadline and is
+gone; a child that writes without end is stopped at the byte cap; SIGINT, SIGTERM, SIGHUP end the wait and the child; refusals of a FIFO with no writer, a FIFO with a capped writer (nothing is consumed), a
+character device, a symlink, a sparse file of 300 MiB, a size that lies at the open and a growing file; the same for `run` and `doctor --plan`; the evidence budget and its fallback; the reference check against a
+capped 64 MiB answer, a one-byte-at-a-time body, dripped headers and a cancel during a stall.
+**Not tested, only inferred:** a child blocked in UNINTERRUPTIBLE kernel I/O on a hard-hung network or FUSE mount. SIGKILL is sent and the parent does not wait for the child past a short grace, but the
+process itself may stay until the kernel returns the I/O (a subprocess timeout does not guarantee that every blocked kernel operation ends). No test has a stalled mount; the "never answers" child is a stand-in.
+`RLIMIT_AS` is enforced on Linux and ignored by macOS; on macOS the hard timeouts and the capped writers are the protection.
 
 ## Bundle contents
 

@@ -188,3 +188,26 @@ def test_a_file_larger_than_the_cap_is_refused_before_a_single_read(tmp_path, mo
     with pytest.raises(UnsafeRead) as exc:
         read_regular(str(big), max_bytes=1000)
     assert exc.value.code == "TOO_LARGE" and reads == []
+
+
+@pytest.mark.parametrize("kind", ["fifo", "devnull", "sparse", "symlink-to-fifo", "directory"])
+def test_run_refuses_an_unusable_plan_at_once_and_creates_nothing(tmp_path, kind):
+    """Retest N3: the same refusals for `run` (the command that would start a target), in a time-capped child; the output directory is not created."""
+    path = tmp_path / "plan"
+    if kind == "fifo":
+        os.mkfifo(path)
+    elif kind == "devnull":
+        path = Path("/dev/null")
+    elif kind == "sparse":
+        with open(path, "wb") as fh:
+            fh.truncate(300 * 1024 * 1024)
+    elif kind == "symlink-to-fifo":
+        os.mkfifo(tmp_path / "f")
+        path.symlink_to(tmp_path / "f")
+    else:
+        path.mkdir()
+    out = tmp_path / "out"
+    t0 = time.monotonic()
+    code, so, err = run_limited([sys.executable, "-s", "-m", "qa_runner", "run", str(path), "--out", str(out)], timeout=60, env=child_env(str(tmp_path)), cwd=str(tmp_path))
+    assert code == K.EXIT_USAGE and ("PLAN_NOT_A_FILE" in err or "PLAN_TOO_LARGE" in err or "PLAN_UNREADABLE" in err), (kind, err)
+    assert not out.exists() and time.monotonic() - t0 < 30

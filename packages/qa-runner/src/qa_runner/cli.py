@@ -24,7 +24,7 @@ from .deps import verified_bootstrap
 from .doctor import render, run_doctor
 from .errors import EnvironmentFault, PlanError, RunnerError
 from .orchestrate import RunOptions, new_run_id, run_plan
-from .safe_read import UnsafeRead, read_regular
+from . import isolated
 from .plan import MAX_PLAN_BYTES, load_plan_or_lock
 
 
@@ -54,15 +54,14 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
-PLAN_READ_SECONDS = 10.0
-
-
 def _read_plan(path: str) -> bytes:
-    """The bytes of a plan or lock: a regular file only, at most ``MAX_PLAN_BYTES``, read within ``PLAN_READ_SECONDS`` (see ``safe_read``: a FIFO, a device or a file that keeps growing cannot hold the
-    process or its memory)."""
+    """The bytes of a plan or lock: a regular file only, at most ``MAX_PLAN_BYTES``, read by a child process that is killed at ``REDEVOPS_QA_READ_TIMEOUT`` seconds (default 30), so a stalled mount, a FIFO
+    or a file that keeps growing cannot hold this process or its memory (see ``isolated``)."""
     try:
-        return read_regular(path, max_bytes=MAX_PLAN_BYTES, deadline_s=PLAN_READ_SECONDS)
-    except UnsafeRead as exc:
+        return isolated.read_file(path, max_bytes=MAX_PLAN_BYTES)
+    except isolated.IsolatedReadError as exc:
+        if exc.code == "CANCELLED":
+            raise EnvironmentFault("CANCELLED", "cancelled while reading the plan") from None
         code = {"NOT_A_REGULAR_FILE": "PLAN_NOT_A_FILE", "TOO_LARGE": "PLAN_TOO_LARGE", "TIMEOUT": "PLAN_READ_TIMEOUT"}.get(exc.code, "PLAN_UNREADABLE")
         detail = f"a plan is at most {MAX_PLAN_BYTES} bytes" if exc.code == "TOO_LARGE" else f"cannot read {safe_text(path)}: {safe_text(str(exc), 80)}"
         raise PlanError(code, detail) from None
@@ -172,6 +171,9 @@ def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Op
     except RunnerError as exc:
         print(f"error: {safe_text(str(exc))}", file=err)
         return K.EXIT_USAGE
+    except KeyboardInterrupt:
+        print("cancelled", file=err)
+        return K.EXIT_ENVIRONMENT
     except Exception as exc:
         print(f"internal error: {type(exc).__name__}", file=err)
         return K.EXIT_INTERNAL

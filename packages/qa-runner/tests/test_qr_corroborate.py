@@ -182,3 +182,17 @@ def test_an_assertion_the_plan_declares_ui_only_does_not_need_the_reference_chec
     assert states["A-SAVED"][0] == states["A-URL"][0] == "VERIFIED" and states["A-NOTIF-ON"] == ("INCONCLUSIVE", "EVIDENCE_MISSING")
     from qa_runner.corroborate import probe_verdicts
     assert probe_verdicts(lane, files) == {"A-NOTIF-ON": "missing"}
+
+
+@pytest.mark.parametrize("name,edit_fn", [
+    ("an extra key", lambda d: d.update(note="x")),
+    ("checked changed", lambda d: d.update(checked=["discount-rule"])),
+    ("deviations not a list", lambda d: d.update(deviations={})),
+    ("a deviation of an unknown check", lambda d: d.update(deviations=[{"check": "x", "where": "/", "expected": 1, "actual": 2}])),
+    ("a deviation with a missing field", lambda d: d.update(deviations=[{"check": "discount-rule", "where": "/"}])),
+    ("a deviation with an extra field", lambda d: d.update(deviations=[{"check": "discount-rule", "where": "/", "expected": 1, "actual": 2, "z": 3}])),
+])
+def test_a_reference_check_document_of_another_shape_is_missing_not_clean(up, lane, name, edit_fn):
+    """Retest N9: the shape of the document was not validated; only the check names were read, so a reshaped or padded document passed as a clean check."""
+    files = edit(browser_files("none"), PROBE, edit_fn)
+    assert judged(up, lane, files)["A-NOTIF-ON"] == ("INCONCLUSIVE", "EVIDENCE_MISSING"), name

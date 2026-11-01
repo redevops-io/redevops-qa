@@ -56,6 +56,15 @@ def summarise(manifest: Optional[Dict[str, Any]], report: Optional[Dict[str, Any
     }
 
 
+def inspect_source(source, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> Inspection:
+    """``inspect_bundle`` over a source that is already open (a ``SnapshotSource`` taken once: the verification and the summary see the same bytes). Does not close the source."""
+    result, docs = verify_source(source, anchor=anchor, plan_digest=plan_digest, limits=limits)
+    files = []
+    if docs.manifest is not None:
+        files = [dict(f) for f in docs.manifest["files"]]
+    return Inspection(result, summarise(docs.manifest, docs.report), result.ok, files)
+
+
 def inspect_bundle(location: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> Inspection:
     """Verify and summarise. ``content_trusted`` is true only when verification found nothing; otherwise the summary is shown for
     diagnosis and must not be relied on. Raises ``SourceError`` when the location cannot be opened."""
