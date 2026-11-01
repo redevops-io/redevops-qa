@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "qa-evidence/anchor/1",
+  "title": "QA evidence anchor (data only)",
+  "description": "Data that names an external anchor for the digest of bundle-manifest.json. This file is not covered by the manifest and does not prove anything by itself; it never contains or implies an attestation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "anchor_type",
+    "anchor_reference",
+    "manifest_digest"
+  ],
+  "properties": {
+    "schema": {
+      "const": "qa-evidence/anchor"
+    },
+    "schema_version": {
+      "$ref": "#/$defs/schema_version"
+    },
+    "anchor_type": {
+      "enum": [
+        "ci-artifact-attestation",
+        "signed-bundle"
+      ]
+    },
+    "anchor_reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "where the anchor value was published (a URL, a run id, a subject name); informative, never fetched"
+    },
+    "manifest_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "extensions": {
+      "$ref": "#/$defs/extensions"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 of the exact bytes, lower-case hex, prefixed"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$",
+      "description": "MAJOR.MINOR; an unsupported MAJOR is refused before anything else is read"
+    },
+    "extensions": {
+      "type": "object",
+      "x-qa-informational": true,
+      "additionalProperties": true,
+      "properties": {},
+      "description": "informational additions only; tolerated and listed, never used for a decision"
+    }
+  }
+}

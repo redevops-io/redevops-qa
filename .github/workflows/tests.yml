@@ -110,6 +110,33 @@ jobs:
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-adapter-kit.xml"
 
+  evidence:
+    name: evidence bundle (standard library only; layout, report schema, reader, offline verifier, tamper matrix, determinism, mutation suite; no skips, at least one test)
+    # Independent of the pinned upstreams and of every engine: the package imports none. Offline, read-only, no secret. The golden digests in the
+    # tests are the same constants on every host; this job is their Linux evidence, and it prints the digests it rebuilt.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the evidence tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q packages/qa-evidence/tests --junitxml="$RUNNER_TEMP/junit-evidence.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-evidence.xml"
+      - name: Rebuild the golden bundle and print its digests (compare with the golden vectors in the tests and with the macOS run)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/qa-evidence/src:packages/qa-evidence/tests \
+            python -c "import hashlib; from qe_helpers import build_base; b = build_base(); print('manifest', b.manifest_digest); print('archive sha256:' + hashlib.sha256(b.archive_bytes()).hexdigest())"
+
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
     runs-on: ubuntu-24.04
