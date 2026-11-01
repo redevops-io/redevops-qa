@@ -121,35 +121,35 @@ distribution_sha256 = "844751b5c90be1001a19ab7ac7444187bcadaf6bf4b280e58ad83a8df
 [[sets.c3.not_applicable]]
 check = "CHK2"
 item = "inventory:qa.inventory.json"
-introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+introduced_in = "d739c1941fd0f03aad9b5c75c6f9b2a0df67cc26"
 probe = "contracts_inventory_lacks_enum:RecoveryReason"
 reason = "The contracts field inventory pinned here predates the additive clarifications: the harness copy lists the enums IntegrityRefusalCode and RecoveryReason and FaultRecovery.reason_code, which the contracts inventory gains at the introducing commit."
 
 [[sets.c3.not_applicable]]
 check = "CHK3"
 item = "fields:FaultRecovery"
-introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+introduced_in = "d739c1941fd0f03aad9b5c75c6f9b2a0df67cc26"
 probe = "contracts_lacks_field:FaultRecovery.reason_code"
 reason = "FaultRecovery.reason_code is introduced by the contracts additive clarifications; the contracts commit pinned here has no such field, so there is no contracts field set to compare the neutral one with."
 
 [[sets.c3.not_applicable]]
 check = "CHK4"
 item = "enum-presence:IntegrityRefusalCode"
-introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+introduced_in = "d739c1941fd0f03aad9b5c75c6f9b2a0df67cc26"
 probe = "contracts_lacks_enum:IntegrityRefusalCode"
 reason = "The enum IntegrityRefusalCode is introduced by the contracts additive clarifications; the contracts commit pinned here does not define it."
 
 [[sets.c3.not_applicable]]
 check = "CHK4"
 item = "enum-presence:RecoveryReason"
-introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+introduced_in = "d739c1941fd0f03aad9b5c75c6f9b2a0df67cc26"
 probe = "contracts_lacks_enum:RecoveryReason"
 reason = "The enum RecoveryReason is introduced by the contracts additive clarifications; the contracts commit pinned here does not define it."
 
 [[sets.c3.not_applicable]]
 check = "CHK6"
 item = "error-vocabulary"
-introduced_in = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+introduced_in = "d739c1941fd0f03aad9b5c75c6f9b2a0df67cc26"
 probe = "contracts_lacks_error_codes:ASSERTION_PIN_MALFORMED,ASSERTION_PIN_NOT_FOUND,ASSERTION_PROGRAM_MISMATCH,ASSERTION_PROGRAM_UNREGISTERED"
 reason = "The distinct integrity refusal codes ASSERTION_PIN_MALFORMED, ASSERTION_PIN_NOT_FOUND, ASSERTION_PROGRAM_MISMATCH and ASSERTION_PROGRAM_UNREGISTERED are introduced by the contracts additive clarifications; the contracts commit pinned here defines none of them."
 
