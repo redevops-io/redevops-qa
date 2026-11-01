@@ -128,7 +128,7 @@ def _pins_with(pins, which, **changes):
     ("contracts", {"tag": "v9.9.9", "temp_pin": False}, "contracts.tag"),
     ("harness_qa", {"commit": "2" * 40}, "harness_qa.commit"),
     ("harness_qa", {"base_pin": "3" * 40}, "harness_qa.base_pin"),
-    ("harness_qa", {"tag": "v0.2.0", "temp_pin": False}, "harness_qa.tag"),
+    ("harness_qa", {"tag": "v9.9.9", "temp_pin": False}, "harness_qa.tag"),
     ("contracts", {"distribution_sha256": "4" * 64}, "contracts"),
     ("harness_qa", {"distribution_sha256": "5" * 64}, "harness_qa"),
 ], ids=["c-commit", "c-version", "c-tag", "h-commit", "h-base", "h-tag", "c-digest", "h-digest"])

@@ -16,7 +16,7 @@ from redevops_qa_bridge.conformance.model import ConformanceFailure
 from redevops_qa_bridge.errors import PinsInvalid
 from receipt_helpers import evidence, make_repo, summary
 
-C4 = "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+C4 = "d739c1941fd0f03aad9b5c75c6f9b2a0df67cc26"
 NA_ITEMS = {("CHK2", "inventory:qa.inventory.json"), ("CHK3", "fields:FaultRecovery"),
             ("CHK4", "enum-presence:IntegrityRefusalCode"), ("CHK4", "enum-presence:RecoveryReason"),
             ("CHK6", "error-vocabulary")}
