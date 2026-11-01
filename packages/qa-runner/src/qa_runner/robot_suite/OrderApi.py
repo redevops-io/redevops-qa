@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """Reviewed Robot Framework library for the order-discount suite: one keyword, one read-only request to the fixture app's JSON API.
 
 It reads the base URL from ``QA_BASE_URL`` (the only variable the Robot adapter passes), accepts a loopback ``http`` URL only, does not use a proxy, does not
