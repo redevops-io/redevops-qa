@@ -91,6 +91,19 @@ def test_partial_success_the_robot_lane_times_out_and_the_browser_lane_result_is
     assert states(s) == {"A-NOTIF-ON": "VERIFIED", "A-SAVED": "VERIFIED", "A-URL": "VERIFIED", "A-ORDER-RULE": "INCONCLUSIVE"}
 
 
+def test_a_failed_assertion_in_one_lane_outranks_a_timeout_in_the_other(up, tmp_path, monkeypatch):
+    copy = tmp_path / "suite"
+    shutil.copytree(suites.SUITE_DIR, copy)
+    rb = copy / "order_discount.robot"
+    rb.write_text(rb.read_text().replace("Order Discount Rule\n", "Order Discount Rule\n    Sleep    600\n", 1))
+    monkeypatch.setattr(suites, "SUITE_DIR", copy)
+    plan = demo_plan()
+    plan["lanes"][1]["deadline_s"] = 3
+    s = run(up, freeze_plan(up, plan), "settings")
+    assert (s.outcome, s.exit_code) == ("FAILED", K.EXIT_FAILED) and dict(s.lanes) == {"browser": "NATIVE_FAIL", "robot": "NATIVE_TIMEOUT"}     # a demonstrated failure is reported as one; the timeout stays visible per lane
+    assert states(s)["A-NOTIF-ON"] == "FAILED" and states(s)["A-ORDER-RULE"] == "INCONCLUSIVE"
+
+
 def test_the_browser_lane_times_out_and_the_robot_lane_result_is_kept(up):
     plan = demo_plan()
     plan["lanes"][0]["deadline_s"] = 1

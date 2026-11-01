@@ -65,7 +65,8 @@ def check_pins() -> Check:
                      "QA_PIN_CONTRACTS_PATH and QA_PIN_HARNESS_QA_PATH); nothing is installed from an index")
     p = up.pins
     return Check("pinned dependencies", "OK", f"runtime-contracts {p.contracts.version} ({p.contracts.commit[:12]}), agent-harness {p.harness_qa.version} "
-                 f"({p.harness_qa.commit[:12]}), pin set {p.pin_set}: tree digests, vector files and commits match pins.toml")
+                 f"({p.harness_qa.commit[:12]}), pin set {p.pin_set}: tree digests and vector files match pins.toml" + ("; the git commits match too" if all(
+                     (d.resolved_path / ".git").exists() for d in (p.contracts, p.harness_qa)) else "; a tree that is not a git checkout is not checked against its commit"))
 
 
 def _version(dist: str) -> Optional[str]:
@@ -141,7 +142,7 @@ def check_egress_gateway() -> Check:
     except Exception as exc:
         return Check("egress gateway", "FAIL", f"the egress gateway could not start ({type(exc).__name__}); a browser lane would have no protected way out and "
                      "the run refuses to continue without it", "check that qa-egress is importable, the pins verify and a loopback port can be bound")
-    return Check("egress gateway", "OK" if ok else "FAIL", "binds on loopback and builds the launch configuration that sends all browser traffic through it (loopback is not bypassed)"
+    return Check("egress gateway", "OK" if ok else "FAIL", "binds on loopback and builds the launch configuration whose flags force browser traffic through it (loopback is not bypassed); no traffic was sent here: enforcement is shown by the browser tests, not by this check"
                  if ok else "the launch configuration does not force loopback traffic through the gateway", "" if ok else "reinstall qa-egress from this checkout")
 
 

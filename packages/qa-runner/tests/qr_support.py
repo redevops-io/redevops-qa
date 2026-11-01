@@ -74,3 +74,12 @@ def descendants(root: int, table=None):
 def group_members(pgids, table=None):
     table = table or process_table()
     return {pid for pid, (_, pgid, _) in table.items() if pgid in pgids}
+
+
+def wait_for(predicate, timeout=60.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if predicate():
+            return True
+        time.sleep(0.1)
+    return predicate()

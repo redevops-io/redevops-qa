@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """Verdicts: recorded observations against frozen assertions. Nothing here runs an engine, reads a page or trusts an engine's own status.
 
-``judge_lane`` is the one place verdicts are computed. The run calls it right after the lanes finish and ``verify`` calls it again, in a fresh
-process, over the files of a bundle; the two must agree. It uses the harness ``DeterministicVerifier`` (the same comparison code the in-run
+``judge_lane`` is the one place verdicts are computed. The run calls it right after the lanes finish; the same function can be called again over the files of a finished bundle (the separate
+verification command that does so is a later part of this work: until then nothing a user can run recomputes a verdict). "Independent" here means independent of the engine's own status, not
+of the page: the observed values are still the adapter's claims, so the function first checks them against the harness run record, the target's own request log and the reference check. It uses the harness ``DeterministicVerifier`` (the same comparison code the in-run
 verifier uses): for a ``PLAYWRIGHT`` assertion the 'adapter' the verifier reads is a reader over the recorded observation of that assertion, so
 the only things that reach ``evaluate_predicate`` are a recorded value and the frozen predicate. The expected value is never in the observation
 file and the observation file has no field for a verdict: an unknown field is refused as unusable evidence.
@@ -17,6 +18,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from qa_evidence.canon import CanonError, dumps_canonical, loads_strict, sha256_bytes
 
 from . import constants as K
+from .corroborate import corroborate_browser, corroborate_requests, corroborate_robot, probe_verdicts
 from .deps import Upstreams
 from .plan import FrozenLane
 
@@ -113,8 +115,9 @@ def _programs(up: Upstreams, lane: FrozenLane):
     return up.harness.specstore.InMemoryProgramRegistry({})
 
 
-def judge_lane(up: Upstreams, lane: FrozenLane, *, run_id: str, files: Mapping[str, bytes]) -> List[Dict[str, Any]]:
-    """One result per frozen assertion of ``lane``, in assertion-id order: ``state`` (VERIFIED, FAILED, INCONCLUSIVE), a reason code from the closed list, and
+def judge_observed(up: Upstreams, lane: FrozenLane, *, run_id: str, files: Mapping[str, bytes], corroborate: bool = False) -> List[Dict[str, Any]]:
+    """The recorded observations of a lane against its frozen assertions: with ``corroborate`` False only that comparison (what the tests of the verdict logic use); ``judge_lane`` is
+    the same with the corroboration on. One result per frozen assertion of ``lane``, in assertion-id order: ``state`` (VERIFIED, FAILED, INCONCLUSIVE), a reason code from the closed list, and
     the evidence file (path and digest) the verdict was computed from. ``files`` maps bundle-relative paths to bytes; a file that is not there is missing evidence."""
     h = up.harness
     docs = [copy.deepcopy(a) for a in lane.assertions]
@@ -129,7 +132,7 @@ def judge_lane(up: Upstreams, lane: FrozenLane, *, run_id: str, files: Mapping[s
     if any(e != wanted for e in executors.values()):
         return _all(lane, "INCONCLUSIVE", "VERIFIER_ERROR")          # a lane holds the assertions of its own kind of engine only
     if lane.engine == K.ENGINE_ROBOT:
-        return _judge_script(up, lane, frozen, programs, run_id, files)
+        return _veto(_judge_script(up, lane, frozen, programs, run_id, files, corroborate), lane, files, corroborate)
     path = observation_path(lane.lane_id)
     data = files.get(path)
     if data is None:
@@ -139,6 +142,8 @@ def judge_lane(up: Upstreams, lane: FrozenLane, *, run_id: str, files: Mapping[s
         rows = parse_observations(data, lane.lane_id, f"{run_id}.{lane.lane_id}")
     except EvidenceUnusable:
         return _all(lane, "INCONCLUSIVE", "EVIDENCE_UNUSABLE", evidence)
+    if corroborate and (corroborate_browser(up, lane, run_id, files, rows) is not None or corroborate_requests(lane, files) is not None):
+        return _all(lane, "INCONCLUSIVE", "EVIDENCE_UNUSABLE", evidence)        # the lane's claims are not backed by the run record and the target's own log
     reader = _RecordedReader()
     verifier = h.verifier.DeterministicVerifier(programs=h.specstore.InMemoryProgramRegistry({}), qa_adapter=reader)
     out: List[Dict[str, Any]] = []
@@ -158,10 +163,19 @@ def judge_lane(up: Upstreams, lane: FrozenLane, *, run_id: str, files: Mapping[s
         verdict = result.check.verdict.value
         state, reason = _state(verdict, result.reason_code, a.predicate.op.value)
         out.append(_result(aid, state, reason, evidence, harness_verdict=verdict))
+    return _veto(out, lane, files, corroborate)
+
+
+def _veto(out: List[Dict[str, Any]], lane: FrozenLane, files: Mapping[str, bytes], corroborate: bool) -> List[Dict[str, Any]]:
+    """The independent reference check may not contradict a verdict the plan ties to one of its facts (any engine)."""
+    contradicted = probe_verdicts(lane, files) if corroborate else {}
+    for r in out:
+        if r["state"] == "VERIFIED" and r["assertion_id"] in contradicted:
+            r["state"], r["reason_code"] = "INCONCLUSIVE", "EVIDENCE_MISSING" if contradicted[r["assertion_id"]] == "missing" else "EVIDENCE_UNUSABLE"
     return out
 
 
-def _judge_script(up: Upstreams, lane: FrozenLane, frozen: Any, programs: Any, run_id: str, files: Mapping[str, bytes]) -> List[Dict[str, Any]]:
+def _judge_script(up: Upstreams, lane: FrozenLane, frozen: Any, programs: Any, run_id: str, files: Mapping[str, bytes], corroborate: bool) -> List[Dict[str, Any]]:
     """The SCRIPT executor: the hash-pinned check program, run by the harness verifier over the lane's observation record, compared with the value frozen in the assertion.
 
     The record must be exactly what the importer derives from the engine's own ``output.xml`` that is in the bundle (so it names this run and this report and cannot be
@@ -178,6 +192,8 @@ def _judge_script(up: Upstreams, lane: FrozenLane, frozen: Any, programs: Any, r
             raise EvidenceUnusable("NOT_DERIVED", "the observation record is not what the importer derives from the engine's report")
     except (EvidenceUnusable, CanonError):
         return _all(lane, "INCONCLUSIVE", "EVIDENCE_UNUSABLE", evidence)
+    if corroborate and corroborate_robot(lane, run_id, files) is not None:
+        return _all(lane, "INCONCLUSIVE", "EVIDENCE_UNUSABLE", evidence)        # the engine's files do not hold together, or the target never saw what the suite must have asked it
     try:
         from redevops_qa_checks.adapter import CheckAdapter
         from redevops_qa_checks.manifests import tree_digest
@@ -203,3 +219,9 @@ def _judge_script(up: Upstreams, lane: FrozenLane, frozen: Any, programs: Any, r
             return out
     except Exception:
         return _all(lane, "INCONCLUSIVE", "VERIFIER_ERROR", evidence)
+
+
+def judge_lane(up: Upstreams, lane: FrozenLane, *, run_id: str, files: Mapping[str, bytes]) -> List[Dict[str, Any]]:
+    """The verdicts of a lane as the run and ``verify`` compute them: the comparison of the recorded observations with the frozen assertions, after the lane's own claims were checked
+    against the harness run record and the target's own request log, and with the independent reference check allowed to veto a verdict."""
+    return judge_observed(up, lane, run_id=run_id, files=files, corroborate=True)

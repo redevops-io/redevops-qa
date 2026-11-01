@@ -3,7 +3,10 @@
 runs the real suite in ``tests/real``. The target (the fixture app) and the supervisor are real."""
 import json
 import shutil
+import subprocess
+import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -14,7 +17,8 @@ from qa_runner.golden import golden_plan, robot_lane, robot_plan
 from qa_runner.orchestrate import RunOptions, run_plan
 from qa_runner.plan import freeze_plan
 from qa_runner.procs import FixtureApp
-from qr_support import fake_robot, wait_gone
+from qa_runner.procs import child_env
+from qr_support import descendants, fake_robot, process_table, wait_for, wait_gone
 
 
 @pytest.fixture(scope="module")
@@ -34,24 +38,20 @@ def verdict(s):
     return rep(s)["accounting"]["results"][0]["verdict"]
 
 
-def test_a_clean_target_is_verified_through_the_script_executor(up, frozen):
+def test_a_clean_target_is_a_native_pass_and_a_test_double_is_never_verified(up, frozen):
+    """The engine here is a double, so the lane carries no verdict whatever it wrote; VERIFIED for the real engine is in ``tests/real``."""
     s = run(up, frozen, "live")
-    assert (s.outcome, s.exit_code, s.lanes) == ("VERIFIED", 0, (("robot", "NATIVE_PASS"),))
-    assert verdict(s)["provenance"]["evidence"]["path"] == "lanes/robot/observations.json"
+    assert (s.outcome, s.exit_code, s.lanes) == ("INCONCLUSIVE", K.EXIT_INCONCLUSIVE, (("robot", "NATIVE_PASS"),))
+    assert (verdict(s)["state"], verdict(s)["reason_code"]) == ("INCONCLUSIVE", "TEST_DOUBLE") and rep(s)["extensions"]["test_double"] == "lane-command"
     assert verify_files(s.bundle.files, plan_digest=frozen.plan_digest).ok
 
 
-def test_the_discount_defect_is_a_native_fail_and_a_failed_assertion(up, frozen):
+def test_the_discount_defect_is_a_native_fail_of_the_engine(up, frozen):
     s = run(up, frozen, "live", defect="discount")
     r = rep(s)
-    assert (s.outcome, s.exit_code, s.lanes) == ("FAILED", 1, (("robot", "NATIVE_FAIL"),))
-    assert verdict(s)["state"] == "FAILED" and verdict(s)["reason_code"] == "EXPECTED_VALUE_DIFFERS"
+    assert s.lanes == (("robot", "NATIVE_FAIL"),) and verdict(s)["reason_code"] == "TEST_DOUBLE"
     assert r["lanes"][0]["native"]["counts"] == {"passed": 0, "failed": 1, "errored": 0, "skipped": 0} and r["lanes"][0]["native"]["exit_code"] == 1
     assert verify_files(s.bundle.files, plan_digest=frozen.plan_digest).ok
-
-
-def test_a_defect_that_does_not_touch_the_rule_leaves_the_robot_lane_verified(up, frozen):
-    assert run(up, frozen, "live", defect="settings").outcome == "VERIFIED"
 
 
 def test_the_bundle_holds_the_engine_report_the_record_and_the_reviewed_files(up, frozen):
@@ -77,14 +77,14 @@ def test_the_egress_profile_of_a_robot_lane_says_it_is_not_enforced(up, frozen):
 def test_the_native_result_and_the_verdict_stay_separate_for_the_robot_lane(up, frozen):
     r = rep(run(up, frozen, "live", defect="discount"))
     assert r["lanes"][0]["native"]["status"] == "NATIVE_FAIL" and r["accounting"]["results"][0]["native_status"] == "NATIVE_FAIL"
-    assert r["accounting"]["results"][0]["verdict"]["state"] == "FAILED"
+    assert r["accounting"]["results"][0]["verdict"]["state"] == "INCONCLUSIVE"
 
 
 def test_an_engine_that_hangs_is_a_timeout_and_never_verified(up, frozen):
     t0 = time.monotonic()
     s = run(up, frozen, "hang", deadline=2)
     assert time.monotonic() - t0 < 30 and (s.outcome, s.exit_code, s.lanes) == ("INCONCLUSIVE", K.EXIT_ENVIRONMENT, (("robot", "NATIVE_TIMEOUT"),))
-    assert verdict(s)["state"] == "INCONCLUSIVE" and verdict(s)["reason_code"] == "EVIDENCE_MISSING"
+    assert verdict(s)["state"] == "INCONCLUSIVE" and "lanes/robot/observations.json" not in s.bundle.files
 
 
 def test_a_stray_process_the_engine_leaves_is_ended_with_the_run(up, frozen, tmp_path):
@@ -102,7 +102,7 @@ def test_an_engine_that_exits_without_a_report_is_an_engine_error(up, frozen):
 
 def test_a_report_with_an_observation_named_like_an_expected_value_leaves_no_record_and_is_never_verified(up, frozen):
     s = run(up, frozen, "tag-expected")
-    assert s.lanes == (("robot", "NATIVE_PASS"),) and s.outcome == "INCONCLUSIVE" and verdict(s)["reason_code"] == "EVIDENCE_MISSING"
+    assert s.lanes == (("robot", "NATIVE_PASS"),) and s.outcome == "INCONCLUSIVE" and verdict(s)["state"] == "INCONCLUSIVE"
     assert "lanes/robot/observations.json" not in s.bundle.files
     assert "could not be imported" in s.bundle.files["logs/orchestrator.log"].decode()
 
@@ -141,6 +141,41 @@ def test_a_two_lane_plan_runs_both_lanes_in_order_when_the_browser_lane_is_a_dou
     plan["lanes"].append(robot_lane())
     fz = freeze_plan(up, plan)
     s = run_plan(up, fz, RunOptions(lane_command=fake("pass"), robot_launcher=fake_robot("live"), lane_deadline_s=60, run_id="r0-test"))
-    assert s.lanes == (("browser", "NATIVE_PASS"), ("robot", "NATIVE_PASS")) and s.outcome == "VERIFIED"
+    assert s.lanes == (("browser", "NATIVE_PASS"), ("robot", "NATIVE_PASS")) and s.outcome == "INCONCLUSIVE"
     r = rep(s)
-    assert r["accounting"]["frozen"] == 4 == r["accounting"]["verified"] and {x["lane_id"] for x in r["accounting"]["results"]} == {"browser", "robot"}
+    assert r["accounting"]["frozen"] == 4 == r["accounting"]["inconclusive"] and {x["lane_id"] for x in r["accounting"]["results"]} == {"browser", "robot"}
+
+
+def test_killing_the_parent_without_warning_ends_the_engine_and_what_it_started(tmp_path):
+    """Review finding M1: after SIGKILL of the runner the Robot engine (and a stray child of it) kept running; nothing watched the parent."""
+    here = Path(__file__).resolve().parent
+    proc = subprocess.Popen([sys.executable, "-s", str(here / "slow_robot_parent.py")], env=child_env(str(tmp_path)), cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    seen = set()
+
+    def engine_running():
+        table = process_table()
+        kids = descendants(proc.pid, table)
+        seen.update(kids)
+        return any("slow_robot.py" in table[k][2] for k in kids if k in table) and any("guard-stray" in table[k][2] for k in kids if k in table)
+    assert wait_for(engine_running, 60), "the engine and its stray child never started"
+    seen.update(descendants(proc.pid))
+    proc.kill()
+    proc.communicate(timeout=30)
+    assert [p for p in seen if not wait_gone(p, 25)] == []
+
+
+def test_the_engine_is_started_under_the_guard_that_watches_the_parent(up, frozen, tmp_path, monkeypatch):
+    import qa_runner.lane_robot as lr
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def adapter(python, **kw):
+        seen.update(kw)
+        raise Stop
+
+    monkeypatch.setattr(lr, "RobotSuiteAdapter", adapter)
+    with pytest.raises(Stop):
+        lr._run_inner(frozen.lane("robot"), run_id="r0-x", origin="http://127.0.0.1:9", workdir=str(tmp_path), cancel=None, deadline_s=5, log=[])
+    assert seen["launcher"] == (lr.GUARD,) and Path(lr.GUARD).name == "robot_guard.py" and Path(lr.GUARD).is_file()

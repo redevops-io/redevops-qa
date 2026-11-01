@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from qa_evidence import __version__ as EVIDENCE_VERSION
 from qa_evidence.build import BuiltBundle, build_bundle
 from qa_evidence.canon import sha256_bytes
+from qa_evidence.constants import COMPLETING_STATUSES
 from qa_evidence.report import assemble_report
 
 from . import constants as K
@@ -44,6 +45,9 @@ class LaneOutcome:
     files: Mapping[str, Tuple[bytes, str]] = field(default_factory=dict)
     counts: Optional[Mapping[str, int]] = None
     harness_verdicts: Mapping[str, str] = field(default_factory=dict)         # in-run verdicts of the harness verifier (a cross-check, never the source)
+    double: bool = False                                                      # produced by a test double (a test seam): such a lane can never carry a verdict
+    egress: Mapping[str, int] = field(default_factory=dict)                   # denials counted by the egress layers (gateway, in-browser gate), when the lane has them
+    chromium: Optional[str] = None                                            # the browser build the lane reports (informational)
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,26 @@ def _lane_entry(run_id: str, lane: LaneOutcome) -> Dict[str, Any]:
     return {"lane_id": lane.lane_id, "run_id": f"{run_id}.{lane.lane_id}", "engine": {"name": lane.engine_name, "version": lane.engine_version}, "native": native}
 
 
+def finalize_results(judged: List[Dict[str, Any]], native_status: str, double: bool, harness_verdicts: Mapping[str, str]) -> List[Dict[str, Any]]:
+    """What the recomputed verdicts of a lane become once the lane's own status is taken into account. ``verify`` applies the same rules to the same inputs read back from a bundle.
+
+    * a lane produced by a test double never carries a verdict: every assertion is INCONCLUSIVE with the reason TEST_DOUBLE;
+    * an engine that did not run to completion (error, timeout, cancelled, unavailable, skipped) never carries a VERIFIED or FAILED assertion: INCONCLUSIVE at most;
+    * the in-run verifier's verdicts are a cross-check, never the source: where the recomputation says VERIFIED or FAILED and the in-run verdict differs, nothing is certified."""
+    out = []
+    for r in judged:
+        if double:
+            r = {**r, "state": "INCONCLUSIVE", "reason_code": "TEST_DOUBLE"}
+        else:
+            seen = harness_verdicts.get(r["assertion_id"])
+            if seen is not None and r["state"] in ("VERIFIED", "FAILED") and seen != _HARNESS_FOR_STATE[r["state"]]:
+                r = {**r, "state": "INCONCLUSIVE", "reason_code": "VERIFIER_ERROR"}
+            if native_status not in COMPLETING_STATUSES and r["state"] in ("VERIFIED", "FAILED"):
+                r = {**r, "state": "INCONCLUSIVE", "reason_code": "EVIDENCE_UNUSABLE"}
+        out.append(r)
+    return out
+
+
 def build_run_bundle(up: Upstreams, inputs: RunInputs) -> BuiltBundle:
     frozen = inputs.frozen
     files: Dict[str, Tuple[bytes, str]] = {"plan.lock.json": (frozen.lock_bytes(), "record")}
@@ -90,11 +114,7 @@ def build_run_bundle(up: Upstreams, inputs: RunInputs) -> BuiltBundle:
     for fl in frozen.lanes:                                    # plan order
         lane = by_lane[fl.lane_id]
         lanes_report.append(_lane_entry(inputs.run_id, lane))
-        for r in judge_lane(up, fl, run_id=inputs.run_id, files=plain):
-            seen = lane.harness_verdicts.get(r["assertion_id"])
-            if seen is not None and r["state"] in ("VERIFIED", "FAILED") and seen != _HARNESS_FOR_STATE[r["state"]]:
-                # the in-run verifier and the recomputation disagree about a verdict: nothing is certified
-                r = {**r, "state": "INCONCLUSIVE", "reason_code": "VERIFIER_ERROR"}
+        for r in finalize_results(judge_lane(up, fl, run_id=inputs.run_id, files=plain), lane.native_status, lane.double, lane.harness_verdicts):
             results.append({"assertion_id": r["assertion_id"], "native_status": lane.native_status, "state": r["state"], "reason_code": r["reason_code"],
                             "evidence": r["evidence"]})
     report = assemble_report(run_id=inputs.run_id, started_at=inputs.started_at, finished_at=inputs.finished_at, plan_digest=frozen.plan_digest,

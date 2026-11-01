@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import signal
+import stat
 import sys
 from pathlib import Path
 from typing import List, Optional, TextIO
 
 from qa_adapter_kit.supervisor import CancelToken
 from qa_evidence.canon import safe_text
+from qa_evidence.constants import ANCHOR_ABSENT_NOTICE
 from qa_evidence.inspector import inspect_bundle
 from qa_evidence.render import render_html, render_text
 from qa_evidence.sources import SourceError
@@ -27,8 +31,18 @@ from .doctor import render, run_doctor
 from .errors import EnvironmentFault, PlanError, RunnerError
 from .golden import demo_plan
 from .inspect_cmd import inspect_text
-from .orchestrate import RunOptions, RunSummary, run_plan
+from .orchestrate import RunOptions, RunSummary, new_run_id, run_plan
 from .plan import MAX_PLAN_BYTES, FrozenPlan, freeze_plan, load_plan_or_lock
+
+
+def _deadline(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{safe_text(text, 20)!r} is not a whole number of seconds") from None
+    if not 1 <= value <= 3600:
+        raise argparse.ArgumentTypeError("a lane deadline is between 1 and 3600 seconds")
+    return value
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -47,7 +61,7 @@ def _parser() -> argparse.ArgumentParser:
     def run_options(sp):
         sp.add_argument("--defect", choices=K.DEFECTS, default="none", help="the seeded defect of the fixture app to start the target with (default: none)")
         sp.add_argument("--run-id", metavar="ID", help="run id (default: generated); lane run ids are <run id>.<lane id>")
-        sp.add_argument("--lane-deadline", type=int, metavar="SECONDS", help="lower every lane's deadline to this many seconds")
+        sp.add_argument("--lane-deadline", type=_deadline, metavar="SECONDS", help="lower every lane's deadline to this many seconds (1 to 3600)")
 
     sp = sub.add_parser("run", help="run a plan (or a lock) and write the evidence bundle")
     sp.add_argument("plan", help="a redevops-qa/plan or redevops-qa/plan-lock file")
@@ -71,11 +85,16 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _read_plan(path: str) -> bytes:
-    p = Path(path)
+    """The bytes of a plan: a regular file, read with a cap (a size from ``stat`` is 0 for ``/dev/zero``, a FIFO or a process substitution, so the cap is on what is read)."""
     try:
-        if p.stat().st_size > MAX_PLAN_BYTES:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+        with os.fdopen(fd, "rb") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                raise PlanError("PLAN_NOT_A_FILE", f"{safe_text(path)} is not a regular file")
+            data = fh.read(MAX_PLAN_BYTES + 1)
+        if len(data) > MAX_PLAN_BYTES:
             raise PlanError("PLAN_TOO_LARGE", f"a plan is at most {MAX_PLAN_BYTES} bytes")
-        return p.read_bytes()
+        return data
     except OSError as exc:
         raise PlanError("PLAN_UNREADABLE", f"cannot read {safe_text(path)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
 
@@ -89,6 +108,31 @@ def _doctor(args, out: TextIO, err: TextIO) -> int:
     checks = run_doctor(engines)
     out.write(json.dumps([c.to_json() for c in checks], indent=2, sort_keys=True) + "\n" if args.json else render(checks))
     return K.EXIT_ENVIRONMENT if any(c.status == "FAIL" for c in checks) else 0
+
+
+def _reserve(target: Path, run_id: str) -> Path:
+    """Reserve ``DIR/<run id>`` before anything runs: a directory that already exists (a bundle, or another run with the same id that is still going) or one that cannot be created fails
+    here, with a clear error, not after a whole run."""
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        reserved = target / run_id
+        reserved.mkdir()
+    except FileExistsError:
+        raise PlanError("OUTPUT_EXISTS", f"{safe_text(str(target / run_id))} already exists: a bundle is never overwritten, and another run may be using this run id") from None
+    except OSError as exc:
+        raise PlanError("OUTPUT_UNWRITABLE", f"cannot create {safe_text(str(target / run_id))}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+    return reserved
+
+
+def _write_atomically(bundle, reserved: Path) -> None:
+    """Write the bundle next to the reserved directory and rename it over (an empty directory can be replaced): a reader sees no bundle or the whole bundle."""
+    partial = reserved.parent / f".{reserved.name}.partial"
+    try:
+        bundle.write_directory(str(partial))
+        os.rename(partial, reserved)
+    except BaseException:
+        shutil.rmtree(partial, ignore_errors=True)
+        raise
 
 
 def _freeze(args, out: TextIO, err: TextIO) -> int:
@@ -115,21 +159,25 @@ def _freeze(args, out: TextIO, err: TextIO) -> int:
 
 def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text: bool = False) -> int:
     target = Path(args.out)
-    if args.run_id is not None and (target / args.run_id).exists():
-        raise PlanError("OUTPUT_EXISTS", f"{safe_text(str(target / args.run_id))} already exists: a bundle is never overwritten")
+    run_id = new_run_id() if args.run_id is None else args.run_id
+    if not K.RUN_ID_RE.fullmatch(run_id):
+        raise PlanError("BAD_RUN_ID", "a run id is 1 to 40 characters: letters, digits, '.', '_' and '-', starting with a letter or digit")
     up = verified_bootstrap()
+    reserved = _reserve(target, run_id)
     cancel = CancelToken()
     previous = {}
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         previous[sig] = signal.signal(sig, lambda *_: cancel.cancel())
     try:
-        summary = run_plan(up, frozen, RunOptions(defect=args.defect, run_id=args.run_id, lane_deadline_s=args.lane_deadline, cancel=cancel))
+        summary = run_plan(up, frozen, RunOptions(defect=args.defect, run_id=run_id, lane_deadline_s=args.lane_deadline, cancel=cancel))
+        _write_atomically(summary.bundle, reserved)
+    except BaseException:
+        shutil.rmtree(reserved, ignore_errors=True)       # the reservation is empty unless the bundle was completed: leave nothing half-made
+        raise
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-    bundle_dir = target / summary.run_id
-    target.mkdir(parents=True, exist_ok=True)
-    summary.bundle.write_directory(str(bundle_dir))
+    bundle_dir = reserved
     _print_summary(summary, bundle_dir, out)
     if report_text:
         print("", file=out)
@@ -140,6 +188,7 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
 def _print_summary(summary: RunSummary, bundle_dir: Path, out: TextIO) -> None:
     report = json.loads(summary.bundle.files["report.json"])
     print(f"run {summary.run_id}: {report['verdict']['outcome']} ({report['verdict']['reason_code']})" + ("  [cancelled]" if summary.cancelled else ""), file=out)
+    print(f"  external anchor: {ANCHOR_ABSENT_NOTICE} (a manifest digest published where this machine cannot rewrite it is an anchor)", file=out)
     acc = report["accounting"]
     for lane in report["lanes"]:
         mine = [r for r in acc["results"] if r["lane_id"] == lane["lane_id"]]
@@ -148,6 +197,11 @@ def _print_summary(summary: RunSummary, bundle_dir: Path, out: TextIO) -> None:
               f"{tally['VERIFIED']} verified, {tally['FAILED']} failed, {tally['INCONCLUSIVE']} inconclusive, {tally['UNACCOUNTED']} unaccounted", file=out)
     for d in _disagreements(report):
         print(f"  ENGINE_VERIFIER_DISAGREE lane {d['lane_id']}: native {d['native_status']}, verdicts {', '.join(d['verdict_states']) or 'none'}", file=out)
+    ext = report.get("extensions") or {}
+    if "egress_gateway_denied" in ext or "egress_gate_denied" in ext:
+        print(f"  egress: the gateway denied {ext.get('egress_gateway_denied', 0)} request(s), the in-browser request gate denied {ext.get('egress_gate_denied', 0)} (details in the lane's logs)", file=out)
+    if ext.get("test_double"):
+        print("  TEST DOUBLE: a lane of this run was produced by a test double; no assertion of it can be verified", file=out)
     print(f"  assertions: frozen {acc['frozen']} = verified {acc['verified']} + failed {acc['failed']} + inconclusive {acc['inconclusive']} + unaccounted {acc['unaccounted']}", file=out)
     print(f"  plan digest: {summary.plan_digest}   (the value to give `verify --plan-digest`)", file=out)
     print(f"  bundle: {bundle_dir}", file=out)
@@ -173,6 +227,10 @@ def _demo(args, out: TextIO, err: TextIO) -> int:
     return _execute(freeze_plan(up, demo_plan()), args, out, err, report_text=True)
 
 
+#: ``report`` and ``inspect`` check a bundle's own consistency (files, digests, accounting) and show what it says; they never recompute a verdict, so what they print is not a verification of the verdicts
+NOT_RECOMPUTED = "verdicts NOT recomputed by this command: only the bundle's files, digests and accounting were checked; what the bundle says is not shown to be true"
+
+
 def _inspection(args):
     try:
         return inspect_bundle(args.bundle, anchor=args.anchor, plan_digest=args.plan_digest)
@@ -184,11 +242,11 @@ def _report(args, out: TextIO, err: TextIO) -> int:
     ins = _inspection(args)
     ok = ins.verification.ok
     if args.format == "json":
-        text = json.dumps(ins.to_json(), sort_keys=True, indent=2) + "\n"
+        text = json.dumps({**ins.to_json(), "verdicts_recomputed": False, "notice": NOT_RECOMPUTED}, sort_keys=True, indent=2) + "\n"
     elif args.format == "html":
-        text = render_html(ins)
+        text = render_html(ins).replace("<body>", '<body><div class="banner warn">' + NOT_RECOMPUTED + "</div>", 1)
     else:
-        text = render_text(ins)
+        text = f"Verdicts      : {NOT_RECOMPUTED}\n" + render_text(ins)
     if args.output:
         try:
             with open(args.output, "x", encoding="utf-8", newline="\n") as fh:

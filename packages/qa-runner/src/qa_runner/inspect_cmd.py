@@ -36,6 +36,7 @@ def inspect_text(location: str, *, anchor: Optional[str] = None, plan_digest: Op
     t = lambda x, n=200: safe_text(x, n)         # noqa: E731
     lines = [f"bundle {t(location)}: {v.form}, {v.file_count} file(s), manifest digest {t(v.manifest_digest)}",
              "verification: " + ("OK, internally consistent" if v.ok else f"FAILED, {len(v.findings)} finding(s): " + ", ".join(sorted({t(f.code) for f in v.findings}))),
+             "verdicts: NOT recomputed by this command (only the bundle's files, digests and accounting were checked)",
              f"anchor: {v.anchor.notice}"]
     if v.plan is not None:
         lines.append(f"plan digest: {v.plan.notice}")

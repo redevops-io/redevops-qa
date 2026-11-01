@@ -16,7 +16,7 @@ import math
 import os
 import signal
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -31,6 +31,8 @@ from .bundle import LaneOutcome
 from .judge import observation_path
 from .plan import FrozenLane
 from .procs import child_env, run_child
+
+GUARD = str(Path(__file__).resolve().with_name("robot_guard.py"))        # what the adapter starts instead of ``-m robot``: Robot's command line plus a watch on the parent
 
 EGRESS_NOT_ENFORCED = {"profile": "not-enforced", "note": "a Robot library opens its own sockets: nothing makes this lane's traffic pass the egress gateway; the "
                                                           "reviewed library connects to the target's loopback origin only"}
@@ -66,7 +68,7 @@ def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, 
     library = str(spec["library"])
     config = RobotConfig(allowed_library_files={f"suite/{library}": hashlib.sha256(copies[library]).hexdigest()}, keep_raw_output=True)
     manifest = suite_manifest(sys.executable, limits=Limits(deadline_s=deadline_s, output_limit_bytes=2_000_000, kill_grace_s=5))
-    adapter = RobotSuiteAdapter(sys.executable, config=config, manifest=manifest, **({"launcher": tuple(launcher)} if launcher else {}))
+    adapter = RobotSuiteAdapter(sys.executable, config=config, manifest=manifest, launcher=tuple(launcher) if launcher else (GUARD,))
     request = SuiteRunRequest(run_id=f"{run_id}.{fl.lane_id}", adapter_id=manifest.adapter_id, workspace=str(ws), suite_path="suite", output_dir=str(out),
                               env={"QA_BASE_URL": origin})
     result = SuiteRunner(adapter).run(request, cancel)
@@ -211,7 +213,7 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
         outcome, lines = _read_outcome(fl, out)
         if outcome is not None and proc.exit_code == 0:
             log.extend(lines)
-            return outcome
+            return replace(outcome, double=launcher is not None)       # the child cannot say whether it was started by a test: the parent knows
         raw = f"child-exit-{proc.exit_code}" if proc.exit_code is not None else f"child-signal-{proc.signal}"
     log.append(f"lane {fl.lane_id}: native {status} ({raw}), exit {proc.exit_code}")
     return _outcome(fl, version, status, raw, exit_code=proc.exit_code if status == "NATIVE_ERROR" and proc.exit_code else None,
