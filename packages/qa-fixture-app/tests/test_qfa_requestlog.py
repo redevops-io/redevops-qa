@@ -128,3 +128,13 @@ def test_the_extension_point_serves_an_extra_route_and_logs_it(tmp_path):
         assert _raw(server.url, "POST", "/extra", body=b"a=1") == 404         # only the (method, path) pair that was registered
     assert seen == ["/extra?x=1"]
     assert [(r["target"], r["status"]) for r in _lines(log)] == [("/extra?x=1", 200), ("/health", 200), ("/extra", 404)]
+
+
+def test_a_request_is_in_the_log_file_by_the_time_its_response_has_arrived(tmp_path):
+    # Regression: the record used to be written after the response, so a reader of the log could miss the latest request.
+    log = tmp_path / "requests.jsonl"
+    with create_server("none", request_log=str(log)) as server:
+        for i in range(1, 101):
+            _raw(server.url, "GET", "/health")
+            assert server.request_count == i
+            assert len(log.read_text(encoding="utf-8").splitlines()) == i

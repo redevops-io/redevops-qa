@@ -62,6 +62,10 @@ class _Handler(BaseHTTPRequestHandler):
         request = Request(method=method, target=self.path, headers=headers, body=body)
         response = self.server.fixture.handle(request)
         data = response.body
+        # Logged BEFORE the response is written: when a client has the response, its record is already in the log (and the file), so a
+        # test that reads the log right after its last request never races the server thread.
+        form_keys = sorted(parse_qs(body.decode("utf-8", "replace"), keep_blank_values=True)) if method == "POST" else []
+        self.server.log.record(method, self.path, headers.get("host", ""), response.status, "cookie" in headers, form_keys, length)
         self.send_response(response.status)
         for name, value in response.headers:
             self.send_header(name, value)
@@ -71,8 +75,6 @@ class _Handler(BaseHTTPRequestHandler):
         if method != "HEAD":
             self.wfile.write(data)
         self.close_connection = True
-        form_keys = sorted(parse_qs(body.decode("utf-8", "replace"), keep_blank_values=True)) if method == "POST" else []
-        self.server.log.record(method, self.path, headers.get("host", ""), response.status, "cookie" in headers, form_keys, length)
 
     # Every method is routed through the app (unknown ones get 405 or 404) so that it is also logged; that includes CONNECT, which a
     # browser sends to a proxy and which therefore shows up in the log as a request for another host and port.
