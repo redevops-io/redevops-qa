@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -21,8 +23,18 @@ from . import constants as K
 from .deps import verified_bootstrap
 from .doctor import render, run_doctor
 from .errors import EnvironmentFault, PlanError, RunnerError
-from .orchestrate import RunOptions, run_plan
+from .orchestrate import RunOptions, new_run_id, run_plan
 from .plan import MAX_PLAN_BYTES, load_plan_or_lock
+
+
+def _deadline(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{safe_text(text, 20)!r} is not a whole number of seconds") from None
+    if not 1 <= value <= 3600:
+        raise argparse.ArgumentTypeError("a lane deadline is between 1 and 3600 seconds")
+    return value
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -37,7 +49,7 @@ def _parser() -> argparse.ArgumentParser:
     sp.add_argument("--out", required=True, metavar="DIR", help="directory to create the bundle in: DIR/<run id> (must not exist)")
     sp.add_argument("--defect", choices=K.DEFECTS, default="none", help="the seeded defect of the fixture app to start the target with (default: none)")
     sp.add_argument("--run-id", metavar="ID", help="run id (default: generated)")
-    sp.add_argument("--lane-deadline", type=int, metavar="SECONDS", help="lower every lane's deadline to this many seconds")
+    sp.add_argument("--lane-deadline", type=_deadline, metavar="SECONDS", help="lower every lane's deadline to this many seconds (1 to 3600)")
     return p
 
 
@@ -62,25 +74,54 @@ def _doctor(args, out: TextIO, err: TextIO) -> int:
     return K.EXIT_ENVIRONMENT if any(c.status == "FAIL" for c in checks) else 0
 
 
+def _reserve(target: Path, run_id: str) -> Path:
+    """Reserve ``DIR/<run id>`` before anything runs: a directory that already exists (a bundle, or another run with the same id that is still going) or one that cannot be created fails
+    here, with a clear error, not after a whole run."""
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        reserved = target / run_id
+        reserved.mkdir()
+    except FileExistsError:
+        raise PlanError("OUTPUT_EXISTS", f"{safe_text(str(target / run_id))} already exists: a bundle is never overwritten, and another run may be using this run id") from None
+    except OSError as exc:
+        raise PlanError("OUTPUT_UNWRITABLE", f"cannot create {safe_text(str(target / run_id))}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+    return reserved
+
+
+def _write_atomically(bundle, reserved: Path) -> None:
+    """Write the bundle next to the reserved directory and rename it over (an empty directory can be replaced): a reader sees no bundle or the whole bundle."""
+    partial = reserved.parent / f".{reserved.name}.partial"
+    try:
+        bundle.write_directory(str(partial))
+        os.rename(partial, reserved)
+    except BaseException:
+        shutil.rmtree(partial, ignore_errors=True)
+        raise
+
+
 def _run(args, out: TextIO, err: TextIO) -> int:
     data = _read_plan(args.plan)
     target = Path(args.out)
-    if args.run_id is not None and (target / args.run_id).exists():
-        raise PlanError("OUTPUT_EXISTS", f"{safe_text(str(target / args.run_id))} already exists: a bundle is never overwritten")
+    run_id = new_run_id() if args.run_id is None else args.run_id
+    if not K.RUN_ID_RE.fullmatch(run_id):
+        raise PlanError("BAD_RUN_ID", "a run id is 1 to 40 characters: letters, digits, '.', '_' and '-', starting with a letter or digit")
     up = verified_bootstrap()
     frozen, kind = load_plan_or_lock(up, data)
+    reserved = _reserve(target, run_id)
     cancel = CancelToken()
     previous = {}
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         previous[sig] = signal.signal(sig, lambda *_: cancel.cancel())
     try:
-        summary = run_plan(up, frozen, RunOptions(defect=args.defect, run_id=args.run_id, lane_deadline_s=args.lane_deadline, cancel=cancel))
+        summary = run_plan(up, frozen, RunOptions(defect=args.defect, run_id=run_id, lane_deadline_s=args.lane_deadline, cancel=cancel))
+        _write_atomically(summary.bundle, reserved)
+    except BaseException:
+        shutil.rmtree(reserved, ignore_errors=True)       # the reservation is empty unless the bundle was completed: leave nothing half-made
+        raise
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-    bundle_dir = target / summary.run_id
-    target.mkdir(parents=True, exist_ok=True)
-    summary.bundle.write_directory(str(bundle_dir))
+    bundle_dir = reserved
     report = json.loads(summary.bundle.files["report.json"])
     print(f"run {summary.run_id}: {report['verdict']['outcome']} ({report['verdict']['reason_code']})" + ("  [cancelled]" if summary.cancelled else ""), file=out)
     acc = report["accounting"]
@@ -89,6 +130,11 @@ def _run(args, out: TextIO, err: TextIO) -> int:
         tally = {s: sum(1 for r in mine if r["verdict"]["state"] == s) for s in ("VERIFIED", "FAILED", "INCONCLUSIVE", "UNACCOUNTED")}
         print(f"  lane {lane['lane_id']}: engine reported {lane['native']['status']} ({safe_text(lane['native']['raw_status'], 40)}); independent verdicts: "
               f"{tally['VERIFIED']} verified, {tally['FAILED']} failed, {tally['INCONCLUSIVE']} inconclusive, {tally['UNACCOUNTED']} unaccounted", file=out)
+    ext = report.get("extensions") or {}
+    if "egress_gateway_denied" in ext or "egress_gate_denied" in ext:
+        print(f"  egress: the gateway denied {ext.get('egress_gateway_denied', 0)} request(s), the in-browser request gate denied {ext.get('egress_gate_denied', 0)} (details in the lane's logs)", file=out)
+    if ext.get("test_double"):
+        print("  TEST DOUBLE: a lane of this run was produced by a test double; no assertion of it can be verified", file=out)
     print(f"  assertions: frozen {acc['frozen']} = verified {acc['verified']} + failed {acc['failed']} + inconclusive {acc['inconclusive']} + unaccounted {acc['unaccounted']}", file=out)
     print(f"  plan digest: {summary.plan_digest}   (the value to give `verify --plan-digest`)", file=out)
     print(f"  bundle: {bundle_dir}", file=out)

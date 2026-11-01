@@ -25,6 +25,8 @@ from .bundle import LaneOutcome
 from .judge import observation_path
 from .plan import FrozenLane
 
+GUARD = str(Path(__file__).resolve().with_name("robot_guard.py"))        # what the adapter starts instead of ``-m robot``: Robot's command line plus a watch on the parent
+
 EGRESS_NOT_ENFORCED = {"profile": "not-enforced", "note": "a Robot library opens its own sockets: nothing makes this lane's traffic pass the egress gateway; the "
                                                           "reviewed library connects to the target's loopback origin only"}
 
@@ -65,7 +67,7 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
     library = str(spec["library"])
     config = RobotConfig(allowed_library_files={f"suite/{library}": hashlib.sha256(copies[library]).hexdigest()}, keep_raw_output=True)
     manifest = suite_manifest(sys.executable, limits=Limits(deadline_s=deadline_s, output_limit_bytes=2_000_000, kill_grace_s=5))
-    adapter = RobotSuiteAdapter(sys.executable, config=config, manifest=manifest, **({"launcher": tuple(launcher)} if launcher else {}))
+    adapter = RobotSuiteAdapter(sys.executable, config=config, manifest=manifest, launcher=tuple(launcher) if launcher else (GUARD,))
     request = SuiteRunRequest(run_id=f"{run_id}.{fl.lane_id}", adapter_id=manifest.adapter_id, workspace=str(ws), suite_path="suite", output_dir=str(out),
                               env={"QA_BASE_URL": origin})
     result = SuiteRunner(adapter).run(request, cancel)
@@ -118,4 +120,4 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
             log.append(f"lane {fl.lane_id}: the observations could not be imported ({type(exc).__name__})")
     log.append(f"lane {fl.lane_id}: native {status} ({raw}), exit {exit_code}")
     return LaneOutcome(lane_id=fl.lane_id, engine_name=fl.engine, engine_version=version, native_status=status, raw_status=raw, exit_code=exit_code,
-                       native_files=native, files=files, counts=counts)
+                       native_files=native, files=files, counts=counts, double=launcher is not None)

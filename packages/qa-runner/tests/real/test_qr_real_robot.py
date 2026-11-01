@@ -7,11 +7,13 @@ import json
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from qa_evidence.verify import verify_files
 from qa_runner import constants as K, suites
+from qa_runner.errors import PlanError
 from qa_runner.golden import robot_plan
 from qa_runner.orchestrate import RunOptions, run_plan
 from qa_runner.plan import freeze_plan
@@ -79,6 +81,46 @@ def test_a_library_changed_after_freezing_is_refused_before_the_engine_starts(up
     monkeypatch.setattr(suites, "SUITE_DIR", copy)
     s = run(up, frozen, "none")
     assert s.lanes == (("robot", "NATIVE_ERROR"),) and s.outcome == "INCONCLUSIVE" and "lanes/robot/native/output.xml" not in s.bundle.files
+
+
+CANNED = '''
+_TOTALS = {"101": 9450, "102": 9999, "103": 9000, "104": 9005}
+
+
+def get_order_total_cents(order_id):
+    return _TOTALS[str(order_id)]
+'''
+
+
+def swapped_suite(tmp_path, monkeypatch):
+    copy = tmp_path / "suite"
+    shutil.copytree(suites.SUITE_DIR, copy)
+    api = (copy / "OrderApi.py").read_text()
+    (copy / "OrderApi.py").write_text(api[:api.index("def get_order_total_cents")] + CANNED)       # the library no longer calls the app
+    monkeypatch.setattr(suites, "SUITE_DIR", copy)
+
+
+def test_a_swapped_library_is_refused_when_the_plan_is_the_committed_one(up, tmp_path, monkeypatch):
+    """Review finding B1: `run examples/robot-plan.json` with a library that is not the reviewed one was VERIFIED against a defective target (the digests were computed from whatever was installed)."""
+    committed = json.loads((Path(__file__).resolve().parents[2] / "examples" / "robot-plan.json").read_text(encoding="utf-8"))
+    assert freeze_plan(up, committed).plan_digest == frozen_digest(up)
+    swapped_suite(tmp_path, monkeypatch)
+    with pytest.raises(PlanError) as exc:
+        freeze_plan(up, committed)
+    assert exc.value.code == "SUITE_MISMATCH" and "OrderApi.py" in str(exc.value)
+
+
+def frozen_digest(up):
+    return freeze_plan(up, robot_plan()).plan_digest
+
+
+@pytest.mark.parametrize("defect", ["none", "discount"])
+def test_a_swapped_library_that_never_asks_the_target_is_not_verified_even_when_the_plan_was_updated_to_match(up, tmp_path, monkeypatch, defect):
+    """Review finding B1, second line of defence: the target's own request log must show the four order requests the reviewed library makes."""
+    swapped_suite(tmp_path, monkeypatch)
+    s = run(up, freeze_plan(up, robot_plan()), defect)
+    r = rep(s)
+    assert s.outcome == "INCONCLUSIVE" and r["accounting"]["verified"] == 0 and r["accounting"]["results"][0]["verdict"]["reason_code"] == "EVIDENCE_UNUSABLE"
 
 
 def test_a_suite_that_imports_a_library_nobody_reviewed_is_refused_by_the_adapter(up, tmp_path, monkeypatch):

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """Child processes of a run: the environment they get, how they are started and supervised, and the fixture app's lifecycle.
 
-Every child leads its own session and is ended as a group (so a browser a lane started goes with the lane). The environment is built from
+Every child leads its own session and is ended as a group (so a browser a lane started goes with the lane). A lane child also watches its parent (``watchdog``) and ends its own
+process group if the parent disappears; the fixture app ends when its standard input closes. The environment is built from
 nothing: ``PATH`` and ``HOME`` are fixed, what to import from and where the pins and the browser are is passed explicitly, and no other
 variable of this process reaches a child."""
 from __future__ import annotations
@@ -90,6 +91,9 @@ class FixtureApp:
         except Exception:
             self.stop()
             raise EnvironmentFault("FIXTURE_APP_NOT_READY", "the fixture app did not report a loopback address within the time allowed") from None
+        if ready.get("defect") != self.defect:                          # the app says which defect it runs: it must be the one the run asked for
+            self.stop()
+            raise EnvironmentFault("FIXTURE_APP_WRONG_DEFECT", "the fixture app reports a different seeded defect than the one the run asked for")
         self.origin = str(ready["url"])
         return self.origin
 

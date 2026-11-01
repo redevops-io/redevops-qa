@@ -52,3 +52,25 @@ def robot_record(native=None, run=RUN, lane="robot"):
 def robot_files(native=None, record=None, lane="robot"):
     native = robot_xml() if native is None else native
     return {f"lanes/{lane}/native/output.xml": native, f"lanes/{lane}/observations.json": robot_record(native, lane=lane) if record is None else record}
+
+
+# ---- real browser-lane files (from a real run; see golden/regen_browser.py) ------------------------------------------------------------------------------------------------
+from pathlib import Path as _Path
+
+from qa_evidence.build import read_files as _read_files
+
+GOLDEN_DIR = _Path(__file__).resolve().parent / "golden"
+BROWSER_RUN = {"none": "r0-golden-browser-none", "settings": "r0-golden-browser-settings"}
+
+
+def browser_files(defect="none"):
+    """The files the judge reads for the browser lane of a REAL run against the target with ``defect`` (bundle path -> bytes), and the run id they belong to."""
+    return dict(_read_files(str(GOLDEN_DIR / f"browser-{defect}.tar")))
+
+
+ROBOT_RUN = {"none": "r0-golden-robot-none", "discount": "r0-golden-robot-discount"}
+
+
+def robot_golden(defect="none"):
+    """The files the judge reads for the Robot lane of a REAL run of the real engine against the target with ``defect`` (see golden/regen_robot.py)."""
+    return dict(_read_files(str(GOLDEN_DIR / f"robot-{defect}.tar")))
