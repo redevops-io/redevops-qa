@@ -229,6 +229,13 @@ def test_a_step_that_is_not_one_of_the_allowed_shapes_is_refused(label, phase, a
     assert chk.step_problems(p, phase, {"id": "x", "title": "t", "argv": argv}), label
 
 
+def test_an_install_with_nothing_to_install_is_refused():
+    p = copy.deepcopy(profile(PROFILES, "local-python-robot"))
+    p["pip_pins"] = []
+    step = {"id": "x", "title": "t", "argv": [V, "-m", "pip", "install", "--disable-pip-version-check"]}
+    assert chk.step_problems(p, "install", step)
+
+
 def test_every_step_of_every_profile_passes_the_closed_shapes():
     for p in PROFILES["profiles"]:
         for phase, steps in p["steps"].items():
@@ -360,6 +367,19 @@ def case_planned_with_steps(m):
     profile(m, "local-python-appium-ios")["steps"]["install"] = copy.deepcopy(profile(m, "local-python-robot")["steps"]["install"])
 
 
+def case_verified_without_a_verified_host(m):
+    p = profile(m, "local-python-robot")
+    p["status"] = "verified"
+    for h in p["hosts"]:
+        h["status"] = "experimental"
+        h["verified_by"] = None
+
+
+def case_experimental_with_a_verified_host(m):
+    p = profile(m, "local-python-robot")
+    p["status"] = "experimental"
+
+
 def case_duplicate_host(m):
     p = profile(m, "local-python-robot")
     p["hosts"].append(copy.deepcopy(p["hosts"][0]))
@@ -390,6 +410,8 @@ SEMANTIC_CASES = [
     (case_private_wording, "wording"),
     (case_planned_with_steps, "a planned profile has no hosts and no steps"),
     (case_duplicate_host, "listed twice"),
+    (case_verified_without_a_verified_host, "verified needs at least one verified host"),
+    (case_experimental_with_a_verified_host, "a verified host makes the profile verified"),
 ]
 
 
@@ -607,9 +629,11 @@ def repo(tmp_path):
 def with_commits(pinned, run_sha=None):
     m = fresh()
     m["source"]["pinned_commit"] = pinned
+    for p in m["profiles"]:
+        for h in p["hosts"]:
+            h["verified_by"] = None
     if run_sha:
-        h = profile(m, "local-python-robot")["hosts"][0]
-        h["verified_by"] = {"head_sha": run_sha}
+        profile(m, "local-python-robot")["hosts"][0]["verified_by"] = {"head_sha": run_sha}
     return m
 
 
@@ -638,13 +662,12 @@ class Api:
     def __call__(self, url):
         if self.bad.get("error"):
             raise OSError("down")
-        for vb in self.items:
-            if f"/runs/{vb['run_id']}" in url:
-                if "/jobs" in url:
-                    return {"jobs": [{"id": self.bad.get("job_id", vb["job_id"]), "name": vb["job_name"] + " (x)", "conclusion": self.bad.get("conclusion", "success"),
-                                      "completed_at": self.bad.get("completed", vb["completed_on"]) + "T00:00:00Z"}]}
-                return {"head_sha": self.bad.get("head", vb["head_sha"])}
-        raise AssertionError(url)
+        mine = [vb for vb in self.items if f"/runs/{vb['run_id']}" in url]
+        assert mine, url
+        if "/jobs" in url:
+            return {"jobs": [{"id": self.bad.get("job_id", vb["job_id"]), "name": vb["job_name"] + " (x)", "conclusion": self.bad.get("conclusion", "success"),
+                              "completed_at": self.bad.get("completed", vb["completed_on"]) + "T00:00:00Z"} for vb in mine]}
+        return {"head_sha": self.bad.get("head", mine[0]["head_sha"])}
 
 
 def test_re_checking_the_recorded_runs():

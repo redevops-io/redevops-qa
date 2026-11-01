@@ -20,15 +20,15 @@ Independent verifier: not offered. No profile installs or runs an independent ve
 
 | Profile | Engines | Status | Hosts |
 |---|---|---|---|
-| [local-python-robot](#local-python-robot) | robotframework | experimental | linux-x86_64 (experimental); linux-arm64 (experimental); macos-arm64 (experimental) |
-| [local-python-selenium](#local-python-selenium) | selenium | experimental | linux-x86_64 (experimental); macos-arm64 (experimental) |
+| [local-python-robot](#local-python-robot) | robotframework | verified | linux-x86_64 (verified); linux-arm64 (experimental); macos-arm64 (experimental) |
+| [local-python-selenium](#local-python-selenium) | selenium | verified | linux-x86_64 (verified); macos-arm64 (experimental) |
 | [local-python-appium-android](#local-python-appium-android) | appium-android | experimental | macos-arm64 (experimental); linux-x86_64 (experimental) |
 | [local-python-playwright](#local-python-playwright) | playwright | planned | none |
 | [local-python-appium-ios](#local-python-appium-ios) | appium-ios | planned | none |
 
 ## local-python-robot
 
-Robot Framework suites in a local Python environment. Status: **experimental**.
+Robot Framework suites in a local Python environment. Status: **verified**.
 
 Python 3.12 (`python3.12`); pinned pip packages: `pytest==9.2.0`, `pyyaml==6.0.3`, `robotframework==7.5`.
 
@@ -43,7 +43,7 @@ Hosts:
 
 | Host | Status | Prerequisites | Verified by |
 |---|---|---|---|
-| linux-x86_64 | experimental | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. | not run |
+| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. | [run 41264392648](https://github.com/redevops-io/redevops-qa/actions/runs/41264392648), [job 124724056968](https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056968), commit `66b792d05fcf`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, from the pinned commit in a clean virtual environment |
 | linux-arm64 | experimental | Linux arm64 with a POSIX shell. | The same steps are written for this host but no CI job runs them here. |
 | macos-arm64 | experimental | macOS on Apple silicon with Python 3.12 as `python3.12`. | The same steps are written for this host but no CI job runs them here. |
 
@@ -117,7 +117,7 @@ Limitations:
 
 ## local-python-selenium
 
-Selenium (interactive and suite) with the host's Chrome. Status: **experimental**.
+Selenium (interactive and suite) with the host's Chrome. Status: **verified**.
 
 Python 3.12 (`python3.12`); pinned pip packages: `pytest==9.2.0`, `pyyaml==6.0.3`, `selenium==4.52.0`.
 
@@ -133,7 +133,7 @@ Hosts:
 
 | Host | Status | Prerequisites | Verified by |
 |---|---|---|---|
-| linux-x86_64 | experimental | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. Chrome and ChromeDriver 156 were present on that runner image. | not run |
+| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. Chrome and ChromeDriver 156 were present on that runner image. | [run 41264392648](https://github.com/redevops-io/redevops-qa/actions/runs/41264392648), [job 124724056825](https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056825), commit `66b792d05fcf`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, from the pinned commit in a clean virtual environment |
 | macos-arm64 | experimental | macOS on Apple silicon with Python 3.12 as `python3.12`, Chrome and its ChromeDriver. | The same steps are written for this host but no CI job runs them here. |
 
 Parameters:

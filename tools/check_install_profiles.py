@@ -12,7 +12,7 @@ Offline (no network, no secret) except the explicit ``--verify-ci`` and ``--cros
 * a profile or host is ``verified`` only if a named CI job in ``tests.yml`` runs that exact profile (``tools/run_install_profile.py --profile <id>``) on
   the matching runner, with the stable channel, no skip, no condition, and a recorded run; ``verified`` needs engines that are backed by a real engine
   in the capability manifest; a planned target must not have its files in the repository;
-* every commit named (pinned source, recorded runs) is an ancestor of main;
+* the pinned source commit is an ancestor of main and every recorded run is of a commit that is an ancestor of the commit being checked;
 * ``docs/QA_INSTALL_PROFILES.md`` equals the document generated from the JSON.
 
 Usage: ``python tools/check_install_profiles.py [--root DIR] [--main-ref REF] [--no-freshness] [--write-docs] [--verify-ci] [--cross-check]``.
@@ -261,8 +261,10 @@ def semantic_problems(profiles: Dict[str, Any], capabilities: Dict[str, Any], ro
                 out.append(f"{hat}: the job must have no condition, no continue-on-error and no matrix")
             if not any(str(s.get("with", {}).get("python-version")) == p["python"]["version"] for s in job["steps"]):
                 out.append(f"{hat}: the job does not set up Python {p['python']['version']}")
-            pinned_checkout = [s for s in job["steps"] if str(s.get("with", {}).get("ref", "")).startswith("${{ steps.") or "pinned_commit" in str(s)]
-            if not pinned_checkout:
+            pinned_checkout = [s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/checkout@") and s.get("with", {}).get("path") == ".profile-src"
+                               and s["with"].get("ref") == "${{ steps.profile.outputs.commit }}" and s["with"].get("persist-credentials") is False]
+            reads_pin = [s for s in job["steps"] if s.get("id") == "profile" and "['source']['pinned_commit']" in str(s.get("run", ""))]
+            if not pinned_checkout or not reads_pin:
                 out.append(f"{hat}: the job must check out the pinned commit")
             expected = f"https://github.com/{src['repository']}/actions/runs/{vb['run_id']}"
             if vb["run_url"] != expected or vb["url"] != expected + f"/job/{vb['job_id']}":
@@ -276,17 +278,20 @@ def freshness_problems(profiles: Dict[str, Any], root: Path, main_ref: Optional[
     ref = caps.resolve_main_ref(root, main_ref, "main")
     if ref is None:
         return ["freshness: cannot resolve the main branch; fetch it (full history) before checking"]
-    shas = {"source pinned_commit": profiles["source"]["pinned_commit"]}
+    # The pinned source commit must already be on main. A recorded run is a run of a commit of this change, which is on main only once the change is
+    # merged (the repository merges with merge commits, keeping the branch commits), so it must be an ancestor of the commit being checked (HEAD); once
+    # merged, HEAD is main and the two rules coincide.
+    shas = {"source pinned_commit": (profiles["source"]["pinned_commit"], ref)}
     for p in profiles["profiles"]:
         for h in p["hosts"]:
             if h["verified_by"]:
-                shas[f"profile {p['id']} host {h['os_arch']} head_sha"] = h["verified_by"]["head_sha"]
+                shas[f"profile {p['id']} host {h['os_arch']} head_sha"] = (h["verified_by"]["head_sha"], "HEAD")
     out = []
-    for what, sha in shas.items():
+    for what, (sha, against) in shas.items():
         if caps._git(root, "cat-file", "-e", f"{sha}^{{commit}}")[0] != 0:
             out.append(f"freshness: {what} {sha[:12]} is not a commit of this repository (is the history complete?)")
-        elif caps._git(root, "merge-base", "--is-ancestor", sha, ref)[0] != 0:
-            out.append(f"freshness: {what} {sha[:12]} is not an ancestor of {ref}")
+        elif caps._git(root, "merge-base", "--is-ancestor", sha, against)[0] != 0:
+            out.append(f"freshness: {what} {sha[:12]} is not an ancestor of {against}")
     return out
 
 

@@ -499,7 +499,7 @@ jobs:
           python-version: "3.12"
       - name: Run the profile - install, smoke, check
         run: |
-          python tools/run_install_profile.py --profile local-python-robot --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
+          python tools/run_install_profile.py --profile local-python-robot --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
             --checkout "$GITHUB_WORKSPACE/.profile-src" --phases install,smoke,check
       - name: Keep the evidence
         uses: actions/upload-artifact@v4
@@ -509,7 +509,7 @@ jobs:
           if-no-files-found: error
       - name: Uninstall (the profile's uninstall phase; the virtual environment must be gone)
         run: |
-          python tools/run_install_profile.py --profile local-python-robot --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
+          python tools/run_install_profile.py --profile local-python-robot --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
             --checkout "$GITHUB_WORKSPACE/.profile-src" --phases uninstall
 
   profile-local-python-selenium:
@@ -548,7 +548,7 @@ jobs:
           echo "QA_CHROMEDRIVER_PATH=$driver" >> "$GITHUB_ENV"
       - name: Run the profile - install, smoke, check
         run: |
-          python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
+          python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
             --checkout "$GITHUB_WORKSPACE/.profile-src" --phases install,smoke,check \
             --param chrome_binary="$QA_CHROME_BINARY" --param chromedriver_path="$QA_CHROMEDRIVER_PATH"
       - name: Keep the evidence
@@ -559,7 +559,7 @@ jobs:
           if-no-files-found: error
       - name: Uninstall (the profile's uninstall phase; the virtual environment must be gone)
         run: |
-          python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
+          python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
             --checkout "$GITHUB_WORKSPACE/.profile-src" --phases uninstall \
             --param chrome_binary="$QA_CHROME_BINARY" --param chromedriver_path="$QA_CHROMEDRIVER_PATH"
 

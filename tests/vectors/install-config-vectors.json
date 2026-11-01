@@ -107,15 +107,299 @@
         "channel": "stable"
       },
       "expected": {
-        "ok": false,
-        "errors": [
-          {
-            "code": "NEEDS_EXPERIMENTAL_CHANNEL",
-            "field": "channel"
-          }
+        "ok": true,
+        "errors": [],
+        "warnings": [
+          "SOURCE_IS_A_CHECKOUT",
+          "NATIVE_RESULT_IS_NOT_A_VERDICT"
         ],
-        "warnings": [],
-        "config": null
+        "config": {
+          "profile": "local-python-robot",
+          "title": "Robot Framework suites in a local Python environment",
+          "status": "verified",
+          "target": "local-python",
+          "host": "linux-x86_64",
+          "channel": "stable",
+          "prerequisites": [
+            "Python 3.12 available as `python3.12` (the packages require 3.11 or newer; 3.12 is the version the steps were run with).",
+            "git, and network access to https://github.com/redevops-io/redevops-qa (a public repository).",
+            "Network access to a Python package index for the pinned packages and for the build backend (setuptools 68 or newer, not pinned here).",
+            "All commands are run from one working directory, the one that contains the checkout, using a POSIX shell.",
+            "Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner."
+          ],
+          "steps": {
+            "source": [
+              {
+                "id": "clone",
+                "title": "Clone the repository",
+                "argv": [
+                  "git",
+                  "clone",
+                  "https://github.com/redevops-io/redevops-qa.git",
+                  "redevops-qa"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "git clone https://github.com/redevops-io/redevops-qa.git redevops-qa"
+              },
+              {
+                "id": "pin",
+                "title": "Check out the pinned commit",
+                "argv": [
+                  "git",
+                  "-C",
+                  "redevops-qa",
+                  "checkout",
+                  "--detach",
+                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              }
+            ],
+            "install": [
+              {
+                "id": "venv",
+                "title": "Create a clean virtual environment",
+                "argv": [
+                  "python3.12",
+                  "-m",
+                  "venv",
+                  ".venv-qa"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "python3.12 -m venv .venv-qa"
+              },
+              {
+                "id": "pip-pins",
+                "title": "Install the pinned Python packages",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pip",
+                  "install",
+                  "--disable-pip-version-check",
+                  "pytest==9.2.0",
+                  "pyyaml==6.0.3",
+                  "robotframework==7.5"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -m pip install --disable-pip-version-check pytest==9.2.0 pyyaml==6.0.3 robotframework==7.5"
+              },
+              {
+                "id": "packages",
+                "title": "Install the adapter packages from the checkout (not editable, no dependency resolution)",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pip",
+                  "install",
+                  "--disable-pip-version-check",
+                  "--no-deps",
+                  "redevops-qa/packages/qa-adapter-kit",
+                  "redevops-qa/packages/qa-robot"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -m pip install --disable-pip-version-check --no-deps redevops-qa/packages/qa-adapter-kit redevops-qa/packages/qa-robot"
+              },
+              {
+                "id": "installed-from-venv",
+                "title": "Check that the packages are imported from the virtual environment, not from the checkout",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-I",
+                  "-c",
+                  "import importlib,os,sys; root=os.path.realpath(sys.argv[1]); bad=[m for m in sys.argv[2:] if not os.path.realpath(importlib.import_module(m).__file__).startswith(root+os.sep)]; sys.exit(('not imported from the virtual environment: '+', '.join(bad)) if bad else 0)",
+                  ".venv-qa",
+                  "qa_adapter_kit",
+                  "qa_robot",
+                  "robot"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -I -c 'import importlib,os,sys; root=os.path.realpath(sys.argv[1]); bad=[m for m in sys.argv[2:] if not os.path.realpath(importlib.import_module(m).__file__).startswith(root+os.sep)]; sys.exit(('\"'\"'not imported from the virtual environment: '\"'\"'+'\"'\"', '\"'\"'.join(bad)) if bad else 0)' .venv-qa qa_adapter_kit qa_robot robot"
+              }
+            ],
+            "smoke": [
+              {
+                "id": "kit-offline",
+                "title": "Run the shared adapter kit tests (fake adapters, offline)",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pytest",
+                  "-q",
+                  "-p",
+                  "no:cacheprovider",
+                  "-c",
+                  "redevops-qa/pyproject.toml",
+                  "-o",
+                  "pythonpath=",
+                  "--junitxml=qa-evidence/junit-adapter-kit.xml",
+                  "redevops-qa/packages/qa-adapter-kit/tests"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -m pytest -q -p no:cacheprovider -c redevops-qa/pyproject.toml -o pythonpath= --junitxml=qa-evidence/junit-adapter-kit.xml redevops-qa/packages/qa-adapter-kit/tests"
+              },
+              {
+                "id": "robot-offline",
+                "title": "Run the Robot adapter tests (recorded output.xml files, offline)",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pytest",
+                  "-q",
+                  "-p",
+                  "no:cacheprovider",
+                  "-c",
+                  "redevops-qa/pyproject.toml",
+                  "-o",
+                  "pythonpath=",
+                  "--junitxml=qa-evidence/junit-robot-offline.xml",
+                  "redevops-qa/packages/qa-robot/tests"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -m pytest -q -p no:cacheprovider -c redevops-qa/pyproject.toml -o pythonpath= --junitxml=qa-evidence/junit-robot-offline.xml redevops-qa/packages/qa-robot/tests"
+              },
+              {
+                "id": "robot-real",
+                "title": "Run the Robot adapter against real Robot Framework 7.5",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pytest",
+                  "-q",
+                  "-p",
+                  "no:cacheprovider",
+                  "-c",
+                  "redevops-qa/pyproject.toml",
+                  "-o",
+                  "pythonpath=",
+                  "--junitxml=qa-evidence/junit-robot-real.xml",
+                  "-m",
+                  "robot_real",
+                  "redevops-qa/packages/qa-robot/tests/real"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -m pytest -q -p no:cacheprovider -c redevops-qa/pyproject.toml -o pythonpath= --junitxml=qa-evidence/junit-robot-real.xml -m robot_real redevops-qa/packages/qa-robot/tests/real"
+              }
+            ],
+            "check": [
+              {
+                "id": "check-adapter-kit",
+                "title": "Fail on zero tests, any skip or any failure in junit-adapter-kit.xml",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "redevops-qa/tools/check_junit.py",
+                  "qa-evidence/junit-adapter-kit.xml"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python redevops-qa/tools/check_junit.py qa-evidence/junit-adapter-kit.xml"
+              },
+              {
+                "id": "check-robot-offline",
+                "title": "Fail on zero tests, any skip or any failure in junit-robot-offline.xml",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "redevops-qa/tools/check_junit.py",
+                  "qa-evidence/junit-robot-offline.xml"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python redevops-qa/tools/check_junit.py qa-evidence/junit-robot-offline.xml"
+              },
+              {
+                "id": "check-robot-real",
+                "title": "Fail on zero tests, any skip or any failure in junit-robot-real.xml",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "redevops-qa/tools/check_junit.py",
+                  "qa-evidence/junit-robot-real.xml"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python redevops-qa/tools/check_junit.py qa-evidence/junit-robot-real.xml"
+              }
+            ],
+            "uninstall": [
+              {
+                "id": "remove-venv",
+                "title": "Remove the virtual environment (refuses a directory that is not one)",
+                "argv": [
+                  "python3.12",
+                  "-c",
+                  "import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'pyvenv.cfg')); ok or sys.exit('refusing to remove a directory that is not a virtual environment: '+p); shutil.rmtree(p)",
+                  ".venv-qa"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "python3.12 -c 'import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'\"'\"'pyvenv.cfg'\"'\"')); ok or sys.exit('\"'\"'refusing to remove a directory that is not a virtual environment: '\"'\"'+p); shutil.rmtree(p)' .venv-qa"
+              }
+            ]
+          },
+          "evidence": {
+            "directory": "qa-evidence",
+            "files": [
+              "junit-adapter-kit.xml",
+              "junit-robot-offline.xml",
+              "junit-robot-real.xml"
+            ],
+            "description": "One JUnit XML report per smoke step, written to the evidence directory; the check steps fail on zero tests, any skip or any failure. The reports show the adapter and the real engine passing their own tests; they are not an independent verdict."
+          },
+          "uninstall_note": "The steps leave two directories: the virtual environment (removed by the step above) and the evidence directory, which is yours to keep or delete. The checkout is an ordinary clone; delete it when you no longer need it. Nothing is installed outside these directories.",
+          "limitations": [
+            "There is no release tag and no package-registry package: the install is a checkout at the pinned commit.",
+            "Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.",
+            "A native engine pass or fail is not an independent verdict; no verifier is installed.",
+            "Robot Framework 7.5 only; only allowlisted libraries run, so this is not a browser profile."
+          ],
+          "manifest": {
+            "schema": "redevops-qa/install-manifest/1",
+            "profile": "local-python-robot",
+            "profile_status": "verified",
+            "host_status": "verified",
+            "target": "local-python",
+            "host": "linux-x86_64",
+            "channel": "stable",
+            "verifier": {
+              "enabled": false
+            },
+            "source": {
+              "repository": "redevops-io/redevops-qa",
+              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+            },
+            "engines": [
+              {
+                "engine": "robotframework",
+                "adapter_version": "0.1.0",
+                "engine_version": "7.5",
+                "test_level": "engine-backed-ci"
+              }
+            ],
+            "pins": {
+              "python": "3.12",
+              "pip": [
+                "pytest==9.2.0",
+                "pyyaml==6.0.3",
+                "robotframework==7.5"
+              ]
+            },
+            "params": {
+              "checkout_dir": "redevops-qa",
+              "evidence_dir": "qa-evidence",
+              "venv_dir": ".venv-qa"
+            }
+          },
+          "manifest_digest": "sha256:cbf2b37badbb035ab7b5e8883d4b6ba9bdf88f9d84f56b7123ea2d80730ba027"
+        }
       }
     },
     {
@@ -134,15 +418,299 @@
         "checkout_dir": "src.redevops-qa"
       },
       "expected": {
-        "ok": false,
-        "errors": [
-          {
-            "code": "NEEDS_EXPERIMENTAL_CHANNEL",
-            "field": "channel"
-          }
+        "ok": true,
+        "errors": [],
+        "warnings": [
+          "SOURCE_IS_A_CHECKOUT",
+          "NATIVE_RESULT_IS_NOT_A_VERDICT"
         ],
-        "warnings": [],
-        "config": null
+        "config": {
+          "profile": "local-python-robot",
+          "title": "Robot Framework suites in a local Python environment",
+          "status": "verified",
+          "target": "local-python",
+          "host": "linux-x86_64",
+          "channel": "stable",
+          "prerequisites": [
+            "Python 3.12 available as `python3.12` (the packages require 3.11 or newer; 3.12 is the version the steps were run with).",
+            "git, and network access to https://github.com/redevops-io/redevops-qa (a public repository).",
+            "Network access to a Python package index for the pinned packages and for the build backend (setuptools 68 or newer, not pinned here).",
+            "All commands are run from one working directory, the one that contains the checkout, using a POSIX shell.",
+            "Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner."
+          ],
+          "steps": {
+            "source": [
+              {
+                "id": "clone",
+                "title": "Clone the repository",
+                "argv": [
+                  "git",
+                  "clone",
+                  "https://github.com/redevops-io/redevops-qa.git",
+                  "src.redevops-qa"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "git clone https://github.com/redevops-io/redevops-qa.git src.redevops-qa"
+              },
+              {
+                "id": "pin",
+                "title": "Check out the pinned commit",
+                "argv": [
+                  "git",
+                  "-C",
+                  "src.redevops-qa",
+                  "checkout",
+                  "--detach",
+                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "git -C src.redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              }
+            ],
+            "install": [
+              {
+                "id": "venv",
+                "title": "Create a clean virtual environment",
+                "argv": [
+                  "python3.12",
+                  "-m",
+                  "venv",
+                  "/work/qa-venv"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "python3.12 -m venv /work/qa-venv"
+              },
+              {
+                "id": "pip-pins",
+                "title": "Install the pinned Python packages",
+                "argv": [
+                  "/work/qa-venv/bin/python",
+                  "-m",
+                  "pip",
+                  "install",
+                  "--disable-pip-version-check",
+                  "pytest==9.2.0",
+                  "pyyaml==6.0.3",
+                  "robotframework==7.5"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "/work/qa-venv/bin/python -m pip install --disable-pip-version-check pytest==9.2.0 pyyaml==6.0.3 robotframework==7.5"
+              },
+              {
+                "id": "packages",
+                "title": "Install the adapter packages from the checkout (not editable, no dependency resolution)",
+                "argv": [
+                  "/work/qa-venv/bin/python",
+                  "-m",
+                  "pip",
+                  "install",
+                  "--disable-pip-version-check",
+                  "--no-deps",
+                  "src.redevops-qa/packages/qa-adapter-kit",
+                  "src.redevops-qa/packages/qa-robot"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "/work/qa-venv/bin/python -m pip install --disable-pip-version-check --no-deps src.redevops-qa/packages/qa-adapter-kit src.redevops-qa/packages/qa-robot"
+              },
+              {
+                "id": "installed-from-venv",
+                "title": "Check that the packages are imported from the virtual environment, not from the checkout",
+                "argv": [
+                  "/work/qa-venv/bin/python",
+                  "-I",
+                  "-c",
+                  "import importlib,os,sys; root=os.path.realpath(sys.argv[1]); bad=[m for m in sys.argv[2:] if not os.path.realpath(importlib.import_module(m).__file__).startswith(root+os.sep)]; sys.exit(('not imported from the virtual environment: '+', '.join(bad)) if bad else 0)",
+                  "/work/qa-venv",
+                  "qa_adapter_kit",
+                  "qa_robot",
+                  "robot"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "/work/qa-venv/bin/python -I -c 'import importlib,os,sys; root=os.path.realpath(sys.argv[1]); bad=[m for m in sys.argv[2:] if not os.path.realpath(importlib.import_module(m).__file__).startswith(root+os.sep)]; sys.exit(('\"'\"'not imported from the virtual environment: '\"'\"'+'\"'\"', '\"'\"'.join(bad)) if bad else 0)' /work/qa-venv qa_adapter_kit qa_robot robot"
+              }
+            ],
+            "smoke": [
+              {
+                "id": "kit-offline",
+                "title": "Run the shared adapter kit tests (fake adapters, offline)",
+                "argv": [
+                  "/work/qa-venv/bin/python",
+                  "-m",
+                  "pytest",
+                  "-q",
+                  "-p",
+                  "no:cacheprovider",
+                  "-c",
+                  "src.redevops-qa/pyproject.toml",
+                  "-o",
+                  "pythonpath=",
+                  "--junitxml=out/evidence-1/junit-adapter-kit.xml",
+                  "src.redevops-qa/packages/qa-adapter-kit/tests"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "/work/qa-venv/bin/python -m pytest -q -p no:cacheprovider -c src.redevops-qa/pyproject.toml -o pythonpath= --junitxml=out/evidence-1/junit-adapter-kit.xml src.redevops-qa/packages/qa-adapter-kit/tests"
+              },
+              {
+                "id": "robot-offline",
+                "title": "Run the Robot adapter tests (recorded output.xml files, offline)",
+                "argv": [
+                  "/work/qa-venv/bin/python",
+                  "-m",
+                  "pytest",
+                  "-q",
+                  "-p",
+                  "no:cacheprovider",
+                  "-c",
+                  "src.redevops-qa/pyproject.toml",
+                  "-o",
+                  "pythonpath=",
+                  "--junitxml=out/evidence-1/junit-robot-offline.xml",
+                  "src.redevops-qa/packages/qa-robot/tests"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "/work/qa-venv/bin/python -m pytest -q -p no:cacheprovider -c src.redevops-qa/pyproject.toml -o pythonpath= --junitxml=out/evidence-1/junit-robot-offline.xml src.redevops-qa/packages/qa-robot/tests"
+              },
+              {
+                "id": "robot-real",
+                "title": "Run the Robot adapter against real Robot Framework 7.5",
+                "argv": [
+                  "/work/qa-venv/bin/python",
+                  "-m",
+                  "pytest",
+                  "-q",
+                  "-p",
+                  "no:cacheprovider",
+                  "-c",
+                  "src.redevops-qa/pyproject.toml",
+                  "-o",
+                  "pythonpath=",
+                  "--junitxml=out/evidence-1/junit-robot-real.xml",
+                  "-m",
+                  "robot_real",
+                  "src.redevops-qa/packages/qa-robot/tests/real"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "/work/qa-venv/bin/python -m pytest -q -p no:cacheprovider -c src.redevops-qa/pyproject.toml -o pythonpath= --junitxml=out/evidence-1/junit-robot-real.xml -m robot_real src.redevops-qa/packages/qa-robot/tests/real"
+              }
+            ],
+            "check": [
+              {
+                "id": "check-adapter-kit",
+                "title": "Fail on zero tests, any skip or any failure in junit-adapter-kit.xml",
+                "argv": [
+                  "/work/qa-venv/bin/python",
+                  "src.redevops-qa/tools/check_junit.py",
+                  "out/evidence-1/junit-adapter-kit.xml"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "/work/qa-venv/bin/python src.redevops-qa/tools/check_junit.py out/evidence-1/junit-adapter-kit.xml"
+              },
+              {
+                "id": "check-robot-offline",
+                "title": "Fail on zero tests, any skip or any failure in junit-robot-offline.xml",
+                "argv": [
+                  "/work/qa-venv/bin/python",
+                  "src.redevops-qa/tools/check_junit.py",
+                  "out/evidence-1/junit-robot-offline.xml"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "/work/qa-venv/bin/python src.redevops-qa/tools/check_junit.py out/evidence-1/junit-robot-offline.xml"
+              },
+              {
+                "id": "check-robot-real",
+                "title": "Fail on zero tests, any skip or any failure in junit-robot-real.xml",
+                "argv": [
+                  "/work/qa-venv/bin/python",
+                  "src.redevops-qa/tools/check_junit.py",
+                  "out/evidence-1/junit-robot-real.xml"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "/work/qa-venv/bin/python src.redevops-qa/tools/check_junit.py out/evidence-1/junit-robot-real.xml"
+              }
+            ],
+            "uninstall": [
+              {
+                "id": "remove-venv",
+                "title": "Remove the virtual environment (refuses a directory that is not one)",
+                "argv": [
+                  "python3.12",
+                  "-c",
+                  "import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'pyvenv.cfg')); ok or sys.exit('refusing to remove a directory that is not a virtual environment: '+p); shutil.rmtree(p)",
+                  "/work/qa-venv"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "python3.12 -c 'import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'\"'\"'pyvenv.cfg'\"'\"')); ok or sys.exit('\"'\"'refusing to remove a directory that is not a virtual environment: '\"'\"'+p); shutil.rmtree(p)' /work/qa-venv"
+              }
+            ]
+          },
+          "evidence": {
+            "directory": "out/evidence-1",
+            "files": [
+              "junit-adapter-kit.xml",
+              "junit-robot-offline.xml",
+              "junit-robot-real.xml"
+            ],
+            "description": "One JUnit XML report per smoke step, written to the evidence directory; the check steps fail on zero tests, any skip or any failure. The reports show the adapter and the real engine passing their own tests; they are not an independent verdict."
+          },
+          "uninstall_note": "The steps leave two directories: the virtual environment (removed by the step above) and the evidence directory, which is yours to keep or delete. The checkout is an ordinary clone; delete it when you no longer need it. Nothing is installed outside these directories.",
+          "limitations": [
+            "There is no release tag and no package-registry package: the install is a checkout at the pinned commit.",
+            "Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.",
+            "A native engine pass or fail is not an independent verdict; no verifier is installed.",
+            "Robot Framework 7.5 only; only allowlisted libraries run, so this is not a browser profile."
+          ],
+          "manifest": {
+            "schema": "redevops-qa/install-manifest/1",
+            "profile": "local-python-robot",
+            "profile_status": "verified",
+            "host_status": "verified",
+            "target": "local-python",
+            "host": "linux-x86_64",
+            "channel": "stable",
+            "verifier": {
+              "enabled": false
+            },
+            "source": {
+              "repository": "redevops-io/redevops-qa",
+              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+            },
+            "engines": [
+              {
+                "engine": "robotframework",
+                "adapter_version": "0.1.0",
+                "engine_version": "7.5",
+                "test_level": "engine-backed-ci"
+              }
+            ],
+            "pins": {
+              "python": "3.12",
+              "pip": [
+                "pytest==9.2.0",
+                "pyyaml==6.0.3",
+                "robotframework==7.5"
+              ]
+            },
+            "params": {
+              "checkout_dir": "src.redevops-qa",
+              "evidence_dir": "out/evidence-1",
+              "venv_dir": "/work/qa-venv"
+            }
+          },
+          "manifest_digest": "sha256:c84eaa707562e82949862a6d67d8a0fd4a797a8fea2c9bbc4923b467554a401d"
+        }
       }
     },
     {
@@ -160,15 +728,306 @@
         "chromedriver_path": "/usr/local/share/chromedriver-linux64/chromedriver"
       },
       "expected": {
-        "ok": false,
-        "errors": [
-          {
-            "code": "NEEDS_EXPERIMENTAL_CHANNEL",
-            "field": "channel"
-          }
+        "ok": true,
+        "errors": [],
+        "warnings": [
+          "SOURCE_IS_A_CHECKOUT",
+          "NATIVE_RESULT_IS_NOT_A_VERDICT"
         ],
-        "warnings": [],
-        "config": null
+        "config": {
+          "profile": "local-python-selenium",
+          "title": "Selenium (interactive and suite) with the host's Chrome",
+          "status": "verified",
+          "target": "local-python",
+          "host": "linux-x86_64",
+          "channel": "stable",
+          "prerequisites": [
+            "Python 3.12 available as `python3.12` (the packages require 3.11 or newer; 3.12 is the version the steps were run with).",
+            "git, and network access to https://github.com/redevops-io/redevops-qa (a public repository).",
+            "Network access to a Python package index for the pinned packages and for the build backend (setuptools 68 or newer, not pinned here).",
+            "All commands are run from one working directory, the one that contains the checkout, using a POSIX shell.",
+            "Google Chrome and a matching ChromeDriver installed on the host, with their absolute paths given as chrome_binary and chromedriver_path; the steps never download a browser or a driver.",
+            "Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner.",
+            "Chrome and ChromeDriver 156 were present on that runner image."
+          ],
+          "steps": {
+            "source": [
+              {
+                "id": "clone",
+                "title": "Clone the repository",
+                "argv": [
+                  "git",
+                  "clone",
+                  "https://github.com/redevops-io/redevops-qa.git",
+                  "redevops-qa"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "git clone https://github.com/redevops-io/redevops-qa.git redevops-qa"
+              },
+              {
+                "id": "pin",
+                "title": "Check out the pinned commit",
+                "argv": [
+                  "git",
+                  "-C",
+                  "redevops-qa",
+                  "checkout",
+                  "--detach",
+                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              }
+            ],
+            "install": [
+              {
+                "id": "venv",
+                "title": "Create a clean virtual environment",
+                "argv": [
+                  "python3.12",
+                  "-m",
+                  "venv",
+                  ".venv-qa"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "python3.12 -m venv .venv-qa"
+              },
+              {
+                "id": "pip-pins",
+                "title": "Install the pinned Python packages",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pip",
+                  "install",
+                  "--disable-pip-version-check",
+                  "pytest==9.2.0",
+                  "pyyaml==6.0.3",
+                  "selenium==4.52.0"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -m pip install --disable-pip-version-check pytest==9.2.0 pyyaml==6.0.3 selenium==4.52.0"
+              },
+              {
+                "id": "packages",
+                "title": "Install the adapter packages from the checkout (not editable, no dependency resolution)",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pip",
+                  "install",
+                  "--disable-pip-version-check",
+                  "--no-deps",
+                  "redevops-qa/packages/qa-adapter-kit",
+                  "redevops-qa/packages/qa-selenium"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -m pip install --disable-pip-version-check --no-deps redevops-qa/packages/qa-adapter-kit redevops-qa/packages/qa-selenium"
+              },
+              {
+                "id": "installed-from-venv",
+                "title": "Check that the packages are imported from the virtual environment, not from the checkout",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-I",
+                  "-c",
+                  "import importlib,os,sys; root=os.path.realpath(sys.argv[1]); bad=[m for m in sys.argv[2:] if not os.path.realpath(importlib.import_module(m).__file__).startswith(root+os.sep)]; sys.exit(('not imported from the virtual environment: '+', '.join(bad)) if bad else 0)",
+                  ".venv-qa",
+                  "qa_adapter_kit",
+                  "qa_selenium",
+                  "selenium"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -I -c 'import importlib,os,sys; root=os.path.realpath(sys.argv[1]); bad=[m for m in sys.argv[2:] if not os.path.realpath(importlib.import_module(m).__file__).startswith(root+os.sep)]; sys.exit(('\"'\"'not imported from the virtual environment: '\"'\"'+'\"'\"', '\"'\"'.join(bad)) if bad else 0)' .venv-qa qa_adapter_kit qa_selenium selenium"
+              }
+            ],
+            "smoke": [
+              {
+                "id": "kit-offline",
+                "title": "Run the shared adapter kit tests (fake adapters, offline)",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pytest",
+                  "-q",
+                  "-p",
+                  "no:cacheprovider",
+                  "-c",
+                  "redevops-qa/pyproject.toml",
+                  "-o",
+                  "pythonpath=",
+                  "--junitxml=qa-evidence/junit-adapter-kit.xml",
+                  "redevops-qa/packages/qa-adapter-kit/tests"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -m pytest -q -p no:cacheprovider -c redevops-qa/pyproject.toml -o pythonpath= --junitxml=qa-evidence/junit-adapter-kit.xml redevops-qa/packages/qa-adapter-kit/tests"
+              },
+              {
+                "id": "selenium-offline",
+                "title": "Run the Selenium adapter tests (fake browser, recorded reports, offline)",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pytest",
+                  "-q",
+                  "-p",
+                  "no:cacheprovider",
+                  "-c",
+                  "redevops-qa/pyproject.toml",
+                  "-o",
+                  "pythonpath=",
+                  "--junitxml=qa-evidence/junit-selenium-offline.xml",
+                  "redevops-qa/packages/qa-selenium/tests"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python -m pytest -q -p no:cacheprovider -c redevops-qa/pyproject.toml -o pythonpath= --junitxml=qa-evidence/junit-selenium-offline.xml redevops-qa/packages/qa-selenium/tests"
+              },
+              {
+                "id": "selenium-browser",
+                "title": "Run both Selenium adapters against the real Chrome and ChromeDriver",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "-m",
+                  "pytest",
+                  "-q",
+                  "-p",
+                  "no:cacheprovider",
+                  "-c",
+                  "redevops-qa/pyproject.toml",
+                  "-o",
+                  "pythonpath=",
+                  "--junitxml=qa-evidence/junit-selenium-browser.xml",
+                  "-m",
+                  "browser",
+                  "redevops-qa/packages/qa-selenium/tests/browser"
+                ],
+                "env": {
+                  "QA_CHROMEDRIVER_PATH": "/usr/local/share/chromedriver-linux64/chromedriver",
+                  "QA_CHROME_BINARY": "/usr/bin/google-chrome"
+                },
+                "manual": false,
+                "display": "QA_CHROMEDRIVER_PATH=/usr/local/share/chromedriver-linux64/chromedriver QA_CHROME_BINARY=/usr/bin/google-chrome .venv-qa/bin/python -m pytest -q -p no:cacheprovider -c redevops-qa/pyproject.toml -o pythonpath= --junitxml=qa-evidence/junit-selenium-browser.xml -m browser redevops-qa/packages/qa-selenium/tests/browser"
+              }
+            ],
+            "check": [
+              {
+                "id": "check-adapter-kit",
+                "title": "Fail on zero tests, any skip or any failure in junit-adapter-kit.xml",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "redevops-qa/tools/check_junit.py",
+                  "qa-evidence/junit-adapter-kit.xml"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python redevops-qa/tools/check_junit.py qa-evidence/junit-adapter-kit.xml"
+              },
+              {
+                "id": "check-selenium-offline",
+                "title": "Fail on zero tests, any skip or any failure in junit-selenium-offline.xml",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "redevops-qa/tools/check_junit.py",
+                  "qa-evidence/junit-selenium-offline.xml"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python redevops-qa/tools/check_junit.py qa-evidence/junit-selenium-offline.xml"
+              },
+              {
+                "id": "check-selenium-browser",
+                "title": "Fail on zero tests, any skip or any failure in junit-selenium-browser.xml",
+                "argv": [
+                  ".venv-qa/bin/python",
+                  "redevops-qa/tools/check_junit.py",
+                  "qa-evidence/junit-selenium-browser.xml"
+                ],
+                "env": {},
+                "manual": false,
+                "display": ".venv-qa/bin/python redevops-qa/tools/check_junit.py qa-evidence/junit-selenium-browser.xml"
+              }
+            ],
+            "uninstall": [
+              {
+                "id": "remove-venv",
+                "title": "Remove the virtual environment (refuses a directory that is not one)",
+                "argv": [
+                  "python3.12",
+                  "-c",
+                  "import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'pyvenv.cfg')); ok or sys.exit('refusing to remove a directory that is not a virtual environment: '+p); shutil.rmtree(p)",
+                  ".venv-qa"
+                ],
+                "env": {},
+                "manual": false,
+                "display": "python3.12 -c 'import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'\"'\"'pyvenv.cfg'\"'\"')); ok or sys.exit('\"'\"'refusing to remove a directory that is not a virtual environment: '\"'\"'+p); shutil.rmtree(p)' .venv-qa"
+              }
+            ]
+          },
+          "evidence": {
+            "directory": "qa-evidence",
+            "files": [
+              "junit-adapter-kit.xml",
+              "junit-selenium-offline.xml",
+              "junit-selenium-browser.xml"
+            ],
+            "description": "One JUnit XML report per smoke step, written to the evidence directory; the check steps fail on zero tests, any skip or any failure. The browser report shows the adapters driving the real Chrome against a page the test serves from loopback."
+          },
+          "uninstall_note": "The steps leave two directories: the virtual environment (removed by the step above) and the evidence directory, which is yours to keep or delete. The checkout is an ordinary clone; delete it when you no longer need it. Nothing is installed outside these directories.",
+          "limitations": [
+            "There is no release tag and no package-registry package: the install is a checkout at the pinned commit.",
+            "Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.",
+            "A native engine pass or fail is not an independent verdict; no verifier is installed.",
+            "Chrome and ChromeDriver only; their versions are the host's and only the versions on the CI runner image were exercised."
+          ],
+          "manifest": {
+            "schema": "redevops-qa/install-manifest/1",
+            "profile": "local-python-selenium",
+            "profile_status": "verified",
+            "host_status": "verified",
+            "target": "local-python",
+            "host": "linux-x86_64",
+            "channel": "stable",
+            "verifier": {
+              "enabled": false
+            },
+            "source": {
+              "repository": "redevops-io/redevops-qa",
+              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+            },
+            "engines": [
+              {
+                "engine": "selenium",
+                "adapter_version": "0.1.0",
+                "engine_version": "4.52.0",
+                "test_level": "engine-backed-ci"
+              }
+            ],
+            "pins": {
+              "python": "3.12",
+              "pip": [
+                "pytest==9.2.0",
+                "pyyaml==6.0.3",
+                "selenium==4.52.0"
+              ]
+            },
+            "params": {
+              "checkout_dir": "redevops-qa",
+              "chrome_binary": "/usr/bin/google-chrome",
+              "chromedriver_path": "/usr/local/share/chromedriver-linux64/chromedriver",
+              "evidence_dir": "qa-evidence",
+              "venv_dir": ".venv-qa"
+            }
+          },
+          "manifest_digest": "sha256:5d3fe05f42a89c73d110d8ee1950c47e11c781f74f39ac591d4b08b4d64973d7"
+        }
       }
     },
     {
@@ -189,6 +1048,7 @@
         "warnings": [
           "SOURCE_IS_A_CHECKOUT",
           "EXPERIMENTAL_PROFILE",
+          "HOST_NOT_VERIFIED",
           "NATIVE_RESULT_IS_NOT_A_VERDICT"
         ],
         "config": {
@@ -442,7 +1302,7 @@
           "manifest": {
             "schema": "redevops-qa/install-manifest/1",
             "profile": "local-python-robot",
-            "profile_status": "experimental",
+            "profile_status": "verified",
             "host_status": "experimental",
             "target": "local-python",
             "host": "macos-arm64",
@@ -476,7 +1336,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:413227b775709e7e7707c861cd2e192f6384636ec6963254ab880ac414fce532"
+          "manifest_digest": "sha256:0c048eab9b67548c69baef36ecbbd3ea5cc0027fd20c18d12248e1e99d9ff8bf"
         }
       }
     },
@@ -498,6 +1358,7 @@
         "warnings": [
           "SOURCE_IS_A_CHECKOUT",
           "EXPERIMENTAL_PROFILE",
+          "HOST_NOT_VERIFIED",
           "NATIVE_RESULT_IS_NOT_A_VERDICT"
         ],
         "config": {
@@ -751,7 +1612,7 @@
           "manifest": {
             "schema": "redevops-qa/install-manifest/1",
             "profile": "local-python-robot",
-            "profile_status": "experimental",
+            "profile_status": "verified",
             "host_status": "experimental",
             "target": "local-python",
             "host": "linux-arm64",
@@ -785,7 +1646,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:dd80d01193d1acd311cbe66397f7badd8847f1855812fa3833096793f49d9fb0"
+          "manifest_digest": "sha256:66a3edf615d9727c8a2df839e3091f2d69edaf8489d9b7d3bbda2bc7078d96c2"
         }
       }
     },
@@ -1444,6 +2305,7 @@
         "warnings": [
           "SOURCE_IS_A_CHECKOUT",
           "EXPERIMENTAL_PROFILE",
+          "HOST_NOT_VERIFIED",
           "NATIVE_RESULT_IS_NOT_A_VERDICT"
         ],
         "config": {
@@ -1701,7 +2563,7 @@
           "manifest": {
             "schema": "redevops-qa/install-manifest/1",
             "profile": "local-python-selenium",
-            "profile_status": "experimental",
+            "profile_status": "verified",
             "host_status": "experimental",
             "target": "local-python",
             "host": "macos-arm64",
@@ -1737,7 +2599,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:cf8486e29f7179b12415877a7a7583b8382cf2e03d7bbce2244888031156d1e0"
+          "manifest_digest": "sha256:d54ffa83ea78999409d9f5eee83434b53e2f253c7735c2c4d955e3c050d86baa"
         }
       }
     },

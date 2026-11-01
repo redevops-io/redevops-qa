@@ -33,3 +33,6 @@ The Appium adapters are in [packages/qa-appium](packages/qa-appium/README.md).
 The engine capability manifest (what each engine has been shown to do, with its evidence) is [qa-capabilities.json](qa-capabilities.json)
 with its schema in [schemas](schemas/qa-capabilities.schema.json); the generated matrix is [docs/QA_CAPABILITIES.md](docs/QA_CAPABILITIES.md).
 `python tools/check_capabilities.py` checks it (schema, pins, evidence, agreement with the adapters, freshness against `main`).
+The install profiles (exact pins, prerequisites per host, smoke commands, evidence, uninstall, and which profile is verified by which CI job) are
+[qa-install-profiles.json](qa-install-profiles.json), rendered in [docs/QA_INSTALL_PROFILES.md](docs/QA_INSTALL_PROFILES.md); the configuration
+generator the installer page is built from is `tools/qa_install_config.py`, specified by `tests/vectors/install-config-vectors.json`.

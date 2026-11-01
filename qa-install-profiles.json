@@ -43,7 +43,7 @@
       "engines": [
         "robotframework"
       ],
-      "status": "experimental",
+      "status": "verified",
       "disabled_reason": null,
       "python": {
         "version": "3.12",
@@ -97,11 +97,22 @@
       "hosts": [
         {
           "os_arch": "linux-x86_64",
-          "status": "experimental",
+          "status": "verified",
           "prerequisites": [
             "Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner."
           ],
-          "verified_by": null,
+          "verified_by": {
+            "workflow": "tests.yml",
+            "job_key": "profile-local-python-robot",
+            "job_name": "install profile local-python-robot",
+            "run_id": 41264392648,
+            "job_id": 124724056968,
+            "head_sha": "66b792d05fcf4ff2e5ccc44742a256d686c2cc9b",
+            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648",
+            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056968",
+            "completed_on": "2026-11-01",
+            "summary": "install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, from the pinned commit in a clean virtual environment"
+          },
           "disabled_reason": null,
           "note": ""
         },
@@ -329,7 +340,7 @@
       "engines": [
         "selenium"
       ],
-      "status": "experimental",
+      "status": "verified",
       "disabled_reason": null,
       "python": {
         "version": "3.12",
@@ -396,12 +407,23 @@
       "hosts": [
         {
           "os_arch": "linux-x86_64",
-          "status": "experimental",
+          "status": "verified",
           "prerequisites": [
             "Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner.",
             "Chrome and ChromeDriver 156 were present on that runner image."
           ],
-          "verified_by": null,
+          "verified_by": {
+            "workflow": "tests.yml",
+            "job_key": "profile-local-python-selenium",
+            "job_name": "install profile local-python-selenium",
+            "run_id": 41264392648,
+            "job_id": 124724056825,
+            "head_sha": "66b792d05fcf4ff2e5ccc44742a256d686c2cc9b",
+            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648",
+            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056825",
+            "completed_on": "2026-11-01",
+            "summary": "install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, from the pinned commit in a clean virtual environment"
+          },
           "disabled_reason": null,
           "note": ""
         },
