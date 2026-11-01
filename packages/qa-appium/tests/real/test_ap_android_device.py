@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """Real Appium against an attached Android emulator or device. Marked ``appium_android``; run only by the ``appium-android`` CI job, which needs a
 worker whose operator provisioned the Android SDK and an emulator under Google's terms. This repository does not provision them. It fails, never
-skips, when they are absent, and it has not been observed to pass: until it has, nothing here is a claim about real emulator behaviour."""
+skips, when they are absent. It was observed to pass locally on 2026-11-01 (see the package README for the exact environment) and has not run in CI, so
+nothing here is a claim about other API levels, physical devices or iOS."""
 import pytest
 
 from qa_adapter_kit import InteractiveActionRequest, InteractiveSession, Status
