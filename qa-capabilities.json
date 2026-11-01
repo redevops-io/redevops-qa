@@ -192,7 +192,7 @@
         "Verified on a Linux x86_64 hosted runner only; macOS, Windows and Linux arm64 have no run.",
         "The real driver is exercised against pages served from loopback, not against an external site.",
         "Pre-release adapter (0.1.0.dev0); nothing is published, and the adapter needs the pinned harness tree from pins.toml on its import path.",
-        "The lane is not deterministic: its popup test (`assert 2 == 1` on the number of pages) failed in 3 of the 27 completed runs since the lane was fixed, with no change to the adapter (jobs 124725855749, 124849661087 and 124849741361), and the same commits passed on re-run or in a sibling run. A green run is evidence, not a guarantee.",
+        "The lane is not deterministic: its popup test (`assert 2 == 1` on the number of pages) failed intermittently on 2026-11-01 with no change to the adapter (for example jobs 124725855749, 124849661087 and 124849741361), and the same commits passed on re-run or in a sibling run. A green run is evidence, not a guarantee.",
         "Network isolation is the egress gateway's job (packages/qa-egress); the adapter's request gate is a second layer.",
         "A native PASS or FAIL from the engine is not the verifier's verdict: the canonical status stays UNVERIFIED until an independent verifier supplies one, and no install profile in this repository installs a verifier yet."
       ],
