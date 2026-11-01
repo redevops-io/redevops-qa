@@ -191,6 +191,7 @@
         "Verified on a Linux x86_64 hosted runner only; macOS, Windows and Linux arm64 have no run.",
         "The real driver is exercised against pages served from loopback, not against an external site.",
         "Pre-release adapter (0.1.0.dev0); nothing is published, and the adapter needs the pinned harness tree from pins.toml on its import path.",
+        "The lane is not fully deterministic: the popup test failed once and passed on re-run against the same commit (job 124725855749, run 41264993239, attempt 1; attempt 2 passed), so a green run is evidence, not a guarantee.",
         "Network isolation is the egress gateway's job (packages/qa-egress); the adapter's request gate is a second layer.",
         "A native PASS or FAIL from the engine is not the verifier's verdict: the canonical status stays UNVERIFIED until an independent verifier supplies one, and no install profile in this repository installs a verifier yet."
       ],
