@@ -31,7 +31,7 @@ markers = [
     "check(id): conformance check (CHK1..CHK7, ADR A.2.5 item 4) a test belongs to",
     "not_applicable: a conformance item declared not applicable at this pin set (a receipt category, never a skip)",
     "appium_server: needs the Appium server and client installed (no device); collected only by the appium server CI job, never by the offline suite",
-    "appium_android: needs the Appium server, the client and an attached Android emulator or device; collected only by the Android CI job, never by the offline suite",
+    "appium_android: needs the Appium server, the client and an attached Android emulator or device; collected only by the manual Android workflow, never by the offline suite",
     "robot_real: needs Robot Framework installed; collected only by the robot lane CI job, never by the offline suite",
     "browser: needs a real Chromium and the Playwright package; collected only by the browser CI job, never by the offline suite",
 ]
