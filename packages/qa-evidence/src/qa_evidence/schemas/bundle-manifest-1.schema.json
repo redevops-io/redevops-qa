@@ -12,6 +12,7 @@
     "anchor",
     "run_id",
     "lanes",
+    "plan_digest",
     "assertion_set_digests",
     "environment",
     "tools",
@@ -73,8 +74,7 @@
           "uniqueItems": true,
           "items": {
             "enum": [
-              "ci-artifact-attestation",
-              "signed-bundle"
+              "ci-artifact-attestation"
             ]
           }
         },
@@ -194,6 +194,10 @@
     },
     "extensions": {
       "$ref": "#/$defs/extensions"
+    },
+    "plan_digest": {
+      "$ref": "#/$defs/digest",
+      "description": "digest of the frozen plan; equal to the digest of assertion-lock.json"
     }
   },
   "$defs": {
@@ -219,7 +223,8 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 100,
-      "description": "relative, POSIX separators, NFC; the full path rules are enforced by the verifier"
+      "pattern": "^[A-Za-z0-9._@+=,/-]+$",
+      "description": "relative, ASCII, POSIX separators; the full path rules (no empty, dot or dot-dot component, no leading or trailing dot) are enforced by the verifier"
     },
     "size": {
       "type": "integer",

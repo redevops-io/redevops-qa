@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """Where a bundle's files come from: a directory, a canonical archive, or memory. Listing never reads file data; reading is bounded.
 
-Directories are walked with ``lstat`` and never followed through a symbolic link or a Windows reparse point (a junction); anything that is
+Directories are walked with ``lstat`` (an empty directory is a finding, because the archive form cannot hold one) and never followed through a symbolic link or a Windows reparse point (a junction); anything that is
 not a regular file or a directory is a finding. Files are opened with ``O_NOFOLLOW`` where the platform has it and checked to be regular
 after opening.
 """
@@ -79,6 +79,8 @@ class DirSource(Source):
         except OSError as exc:
             self.problems.append(("UNREADABLE", prefix.rstrip("/"), f"cannot list directory: {exc.strerror}"))
             return
+        if not children:
+            self.problems.append(("EMPTY_DIRECTORY", prefix.rstrip("/"), "an empty directory has no counterpart in the archive form"))
         for child in children:
             rel = prefix + child.name
             if len(self.entries) > self._limits.max_files:

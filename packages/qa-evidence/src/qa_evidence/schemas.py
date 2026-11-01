@@ -36,7 +36,7 @@ def validator_for(schema_id: str) -> Validator:
 
 
 def parse_version(text: Any):
-    m = VERSION_RE.match(text) if isinstance(text, str) else None
+    m = VERSION_RE.fullmatch(text) if isinstance(text, str) else None
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 

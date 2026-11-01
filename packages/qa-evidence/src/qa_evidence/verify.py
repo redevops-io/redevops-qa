@@ -13,9 +13,9 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from . import report as rpt
 from .canon import CanonError, dumps_canonical, loads_strict, sha256_bytes
-from .constants import (ANCHOR_BLOCK_STATEMENT, ANCHOR_NAME, ANCHOR_SCHEMA, DEFAULT_LIMITS, DIGEST_RE, FORMAT_DOC, FORMAT_DOC_NAME,
-                        INTEGRITY_STATEMENT, MANIFEST_NAME, MANIFEST_SCHEMA, REPORT_SCHEMA, RESERVED_UNLISTED, Limits)
-from .model import AnchorResult, Finding, VerifyResult
+from .constants import (ANCHOR_BLOCK_STATEMENT, ANCHOR_NAME, ANCHOR_SCHEMA, ASSERTION_LOCK_NAME, DEFAULT_LIMITS, DIGEST_RE, FORMAT_DOC,
+                        FORMAT_DOC_NAME, INTEGRITY_STATEMENT, MANIFEST_NAME, MANIFEST_SCHEMA, NATIVE_DIR_RE, REPORT_SCHEMA, RESERVED_UNLISTED, Limits)
+from .model import AnchorResult, Finding, PlanResult, VerifyResult
 from .paths import fold_key, path_problems
 from .schemas import check_document
 from .sources import MemorySource, Source, SourceError, open_source
@@ -36,25 +36,31 @@ def _add(findings: List[Finding], code: str, path: str, message: str) -> None:
 
 
 def _read_json(source: Source, path: str, limits: Limits, findings: List[Finding], tag: str):
-    """Read, parse strictly and require canonical bytes. Returns (bytes or None, document or None)."""
+    """Read, parse strictly and require canonical bytes. Returns ``(bytes or None, document, good)``.
+
+    ``good`` is the explicit status: True only when the bytes parsed to a JSON OBJECT in canonical form. A document that parses to
+    ``null`` or any other non-object is unreadable (a finding is added); it is never confused with 'nothing to check'."""
     try:
         data = source.read_all(path, limits.max_json_bytes)
     except OSError as exc:
         _add(findings, f"{tag}_UNREADABLE", path, f"cannot read: {exc.strerror or exc}")
-        return None, None
+        return None, None, False
     try:
         doc = loads_strict(data, limits)
     except CanonError as exc:
         _add(findings, f"{tag}_UNREADABLE", path, f"{exc.code}: {exc}")
-        return data, None
+        return data, None, False
+    if not isinstance(doc, dict):
+        _add(findings, f"{tag}_UNREADABLE", path, "the document must be a JSON object")
+        return data, None, False
     try:
         canonical = dumps_canonical(doc)
     except (TypeError, ValueError):
         _add(findings, f"{tag}_UNREADABLE", path, "the document cannot be put in canonical form")
-        return data, None
+        return data, None, False
     if canonical != data:
         _add(findings, f"{tag}_NOT_CANONICAL", path, "the bytes are not the canonical form of the document (sorted keys, two-space indent, ASCII escapes, one trailing newline)")
-    return data, doc
+    return data, doc, True
 
 
 def _schema_findings(findings, infos, notes, label, schema_id, doc, file_path):
@@ -138,15 +144,25 @@ def _manifest_checks(man: Mapping[str, Any], limits: Limits, findings: List[Find
         _add(findings, "OVERSIZE_BUNDLE", file_name, f"declared sizes add up to {total}, above the cap of {limits.max_total_bytes}")
     if len(man["files"]) > limits.max_files:
         _add(findings, "TOO_MANY_FILES", file_name, f"more than {limits.max_files} files are listed")
+    for i, f in enumerate(man["files"]):
+        if NATIVE_DIR_RE.fullmatch(f["path"]) and f["role"] != "native-artifact":
+            _add(findings, "NATIVE_ARTIFACT_LOCATION", f"{file_name}#/files/{i}", f"{f['path']!r} is in a lane's native directory but has the role {f['role']!r}")
+        if f["role"] == "native-artifact" and not NATIVE_DIR_RE.fullmatch(f["path"]):
+            _add(findings, "NATIVE_ARTIFACT_LOCATION", f"{file_name}#/files/{i}", f"{f['path']!r} has the role native-artifact but is not under lanes/<lane>/native/")
     reports = [f for f in man["files"] if f["role"] == "report"]
     if len(reports) != 1 or reports[0]["path"] != man["report_path"]:
         _add(findings, "REPORT_ENTRY", f"{file_name}#/files", "exactly one file must have the role report, and it must be the report_path")
+    locks = [f for f in man["files"] if f["role"] == "assertion-lock"]
+    if len(locks) != 1 or locks[0]["path"] != ASSERTION_LOCK_NAME:
+        _add(findings, "ASSERTION_LOCK_MISSING", f"{file_name}#/files", f"exactly one file must have the role assertion-lock, and it must be {ASSERTION_LOCK_NAME}")
     doc = listed.get(FORMAT_DOC_NAME)
     if doc is None or doc["role"] != "documentation":
         _add(findings, "FORMAT_DOC_MISSING", f"{file_name}#/files", f"{FORMAT_DOC_NAME} must be listed with the role documentation")
     lane_ids = [x["lane_id"] for x in man["lanes"]]
     run_ids = [x["run_id"] for x in man["lanes"]]
     for i, x in enumerate(man["lanes"]):
+        if x["run_id"] != f"{man['run_id']}.{x['lane_id']}":
+            _add(findings, "LANE_RUN_ID_MISMATCH", f"{file_name}#/lanes/{i}/run_id", f"a lane run id must be <run id>.<lane id>, here {man['run_id']}.{x['lane_id']}")
         if lane_ids.count(x["lane_id"]) > 1:
             _add(findings, "DUPLICATE_LANE_ID", f"{file_name}#/lanes/{i}/lane_id", f"lane id {x['lane_id']!r} is used more than once")
         if run_ids.count(x["run_id"]) > 1:
@@ -167,6 +183,14 @@ def _cross_checks(man, rep, listed, findings: List[Finding]) -> None:
             _add(findings, here, f"environment/{key}", f"the manifest and the report disagree about {key}")
     if sorted(man["assertion_set_digests"]) != [rep["assertion_set"]["digest"]]:
         _add(findings, here, "assertion_set_digests", "the manifest's assertion digests are not the report's assertion set digest")
+    if man["plan_digest"] != rep["plan_digest"]:
+        _add(findings, here, "plan_digest", "the manifest and the report disagree about the plan digest")
+    lock = listed.get(ASSERTION_LOCK_NAME)
+    if lock is not None and lock["role"] == "assertion-lock" and lock["digest"] != rep["assertion_set"]["digest"]:
+        _add(findings, "ASSERTION_LOCK_MISMATCH", ASSERTION_LOCK_NAME, "the assertion lock is not the file whose digest is the report's assertion-set digest")
+    verifier = rep["verdict"]["provenance"]["verifier"]
+    if man["tools"].get(verifier["id"]) != verifier["version"]:
+        _add(findings, "TOOLS_VERIFIER_MISMATCH", f"{MANIFEST_NAME}#/tools", f"the manifest must list the verifier {verifier['id']!r} with the version {verifier['version']!r} the report names")
     for li, lane in enumerate(rep["lanes"]):
         for ai, art in enumerate(lane["native"]["artifacts"]):
             entry = listed.get(art["path"])
@@ -175,6 +199,9 @@ def _cross_checks(man, rep, listed, findings: List[Finding]) -> None:
                 _add(findings, "NATIVE_ARTIFACT_MISMATCH", where, f"{art['path']!r} is not listed in the manifest with this digest and size")
             elif entry["role"] != "native-artifact":
                 _add(findings, "NATIVE_ARTIFACT_MISMATCH", where, f"{art['path']!r} is listed with the role {entry['role']!r}, not native-artifact")
+    # what the engines wrote, whatever the producer called it: every digest of a native artifact, of any file under a lane's native directory
+    native_digests = {e["digest"] for e in listed.values() if NATIVE_DIR_RE.fullmatch(e["path"]) or e["role"] == "native-artifact"}
+    native_digests |= {a["digest"] for lane in rep["lanes"] for a in lane["native"]["artifacts"]}
     for ri, res in enumerate(rep["accounting"]["results"]):
         prov = res["verdict"]["provenance"]
         ev = None if prov is None else prov["evidence"]
@@ -182,6 +209,10 @@ def _cross_checks(man, rep, listed, findings: List[Finding]) -> None:
             continue
         entry = listed.get(ev["path"])
         where = f"report.json#/accounting/results/{ri}/verdict/provenance/evidence"
+        if ev["digest"] in native_digests:
+            _add(findings, "EVIDENCE_IS_NATIVE_BYTES", where, "the evidence has the same bytes as a native artifact: a verdict is computed from a recorded observation, never from what the engine wrote")
+        if NATIVE_DIR_RE.fullmatch(ev["path"]):
+            _add(findings, "EVIDENCE_IN_NATIVE_DIRECTORY", where, f"{ev['path']!r} is inside a lane's native output directory")
         if entry is None or entry["digest"] != ev["digest"]:
             _add(findings, "EVIDENCE_NOT_IN_MANIFEST", where, f"{ev['path']!r} is not listed in the manifest with this digest")
         elif entry["role"] not in ("observation", "record"):
@@ -197,15 +228,15 @@ def _anchor(source, safe, limits, findings, infos, notes, manifest_digest, suppl
         if ANCHOR_NAME not in safe:
             state = "invalid"
         else:
-            data, doc = _read_json(source, ANCHOR_NAME, limits, findings, "ANCHOR")
-            if doc is None or not _schema_findings(findings, infos, notes, "anchor", ANCHOR_SCHEMA, doc, ANCHOR_NAME):
+            data, doc, good = _read_json(source, ANCHOR_NAME, limits, findings, "ANCHOR")
+            if not good or not _schema_findings(findings, infos, notes, "anchor", ANCHOR_SCHEMA, doc, ANCHOR_NAME):
                 state = "invalid"
             else:
                 docs.anchor_doc = doc
                 declared, anchor_type, reference = doc["manifest_digest"], doc["anchor_type"], doc["anchor_reference"]
                 sidecar_ok = True
     if supplied is not None:
-        if not isinstance(supplied, str) or not DIGEST_RE.match(supplied):
+        if not isinstance(supplied, str) or not DIGEST_RE.fullmatch(supplied):
             _add(findings, "ANCHOR_VALUE_MALFORMED", "anchor", "the supplied anchor value must look like sha256:<64 lower-case hex digits>")
             return AnchorResult("invalid", anchor_type, reference, None, declared, manifest_digest)
         if manifest_digest is None:
@@ -224,7 +255,7 @@ def _anchor(source, safe, limits, findings, infos, notes, manifest_digest, suppl
     return AnchorResult(state, anchor_type, reference, None, declared, manifest_digest)
 
 
-def verify_source(source: Source, *, anchor: Optional[str] = None, limits: Limits = DEFAULT_LIMITS):
+def verify_source(source: Source, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, limits: Limits = DEFAULT_LIMITS):
     """Verify an opened source. Returns ``(VerifyResult, Documents)``."""
     findings: List[Finding] = []
     infos: List[Dict[str, str]] = []
@@ -238,10 +269,10 @@ def verify_source(source: Source, *, anchor: Optional[str] = None, limits: Limit
     if MANIFEST_NAME not in safe:
         _add(findings, "MANIFEST_MISSING", MANIFEST_NAME, "the bundle has no readable manifest")
     else:
-        data, doc = _read_json(source, MANIFEST_NAME, limits, findings, "MANIFEST")
+        data, doc, good = _read_json(source, MANIFEST_NAME, limits, findings, "MANIFEST")
         if data is not None:
             manifest_digest = sha256_bytes(data)
-        if doc is not None and _schema_findings(findings, infos, notes, "manifest", MANIFEST_SCHEMA, doc, MANIFEST_NAME):
+        if good and _schema_findings(findings, infos, notes, "manifest", MANIFEST_SCHEMA, doc, MANIFEST_NAME):
             man = doc
             docs.manifest = doc
             listed = _manifest_checks(man, limits, findings)
@@ -281,27 +312,47 @@ def verify_source(source: Source, *, anchor: Optional[str] = None, limits: Limit
         if rpath not in safe:
             _add(findings, "REPORT_MISSING", rpath, "the report named by the manifest is not in the bundle")
         else:
-            _, rdoc = _read_json(source, rpath, limits, findings, "REPORT")
-            if rdoc is not None and _schema_findings(findings, infos, notes, "report", REPORT_SCHEMA, rdoc, rpath):
+            _, rdoc, rgood = _read_json(source, rpath, limits, findings, "REPORT")
+            if rgood and _schema_findings(findings, infos, notes, "report", REPORT_SCHEMA, rdoc, rpath):
                 docs.report = rdoc
                 for code, pointer, message in rpt.check_report(rdoc):
                     _add(findings, code, f"{rpath}#{pointer}", message)
                 _cross_checks(man, rdoc, listed, findings)
     result_anchor = _anchor(source, safe, limits, findings, infos, notes, manifest_digest, anchor, docs)
+    result_plan = _plan(plan_digest, docs, findings)
+    # The invariant that no path through the code above can skip: a bundle is only ok if BOTH documents were read, were objects and validated.
+    complete = docs.manifest is not None and docs.report is not None
+    if not complete:
+        missing = [name for name, doc in (("manifest", docs.manifest), ("report", docs.report)) if doc is None]
+        _add(findings, "INCOMPLETE_VERIFICATION", "", "the " + " and the ".join(missing) + " could not be read as a valid document, so nothing in the bundle was checked against it")
     result = VerifyResult(findings=findings, anchor=result_anchor, manifest_digest=manifest_digest, informational=infos, notes=notes,
-                          file_count=len(source.entries), form=source.kind)
+                          file_count=len(source.entries), form=source.kind, complete=complete, plan=result_plan)
     return result, docs
 
 
-def verify_bundle(location: str, *, anchor: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> VerifyResult:
+def _plan(supplied, docs: Documents, findings: List[Finding]) -> PlanResult:
+    """Compare the report's plan digest with a value supplied from outside the bundle. Without one the state is ``absent``."""
+    declared = docs.report["plan_digest"] if docs.report is not None else None
+    if supplied is None:
+        return PlanResult("absent", None, declared)
+    if not isinstance(supplied, str) or not DIGEST_RE.fullmatch(supplied):
+        _add(findings, "PLAN_VALUE_MALFORMED", "plan", "the supplied plan digest must look like sha256:<64 lower-case hex digits>")
+        return PlanResult("invalid", None, declared)
+    if declared != supplied:
+        _add(findings, "PLAN_DIGEST_MISMATCH", "plan", f"the supplied plan digest {supplied} is not the plan digest in the report ({declared})")
+        return PlanResult("mismatch", supplied, declared)
+    return PlanResult("verified", supplied, declared)
+
+
+def verify_bundle(location: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> VerifyResult:
     """Verify a bundle directory or archive at ``location``. Raises ``SourceError`` only when the location cannot be opened."""
     source = open_source(location, limits)
     try:
-        return verify_source(source, anchor=anchor, limits=limits)[0]
+        return verify_source(source, anchor=anchor, plan_digest=plan_digest, limits=limits)[0]
     finally:
         source.close()
 
 
-def verify_files(files: Mapping[str, bytes], *, anchor: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> VerifyResult:
+def verify_files(files: Mapping[str, bytes], *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> VerifyResult:
     """Verify bundle files held in memory (path to bytes)."""
-    return verify_source(MemorySource(files), anchor=anchor, limits=limits)[0]
+    return verify_source(MemorySource(files), anchor=anchor, plan_digest=plan_digest, limits=limits)[0]

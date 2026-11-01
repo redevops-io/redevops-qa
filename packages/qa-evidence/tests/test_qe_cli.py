@@ -87,7 +87,7 @@ def test_json_output_is_valid_and_carries_the_anchor_state(good):
     assert doc["manifest_digest"] == b.manifest_digest and doc["findings"] == []
     code, out, _ = run("inspect", archive, "--json", "--anchor", b.manifest_digest)
     doc = json.loads(out)
-    assert code == 0 and doc["verification"]["anchor"]["state"] == "verified" and doc["verification"]["assurance"] == "anchored-to-supplied-digest"
+    assert code == 0 and doc["verification"]["anchor"]["state"] == "verified" and doc["verification"]["assurance"] == "matches-supplied-anchor"
     assert doc["summary"]["independent_verdict"]["outcome"] == "FAILED" and doc["summary"]["lanes"][0]["native"]["status"] == "NATIVE_PASS"
 
 

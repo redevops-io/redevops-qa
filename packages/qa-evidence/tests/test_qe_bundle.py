@@ -11,7 +11,7 @@ import pytest
 
 from qa_evidence.build import BuildError, FileSpec, anchor_document, build_bundle, describe_environment, read_files, write_archive, write_directory
 from qa_evidence.canon import dumps_canonical, sha256_bytes
-from qa_evidence.constants import ANCHOR_NAME, FORMAT_DOC, FORMAT_DOC_NAME, INTEGRITY_STATEMENT, MANIFEST_NAME, REPORT_NAME
+from qa_evidence.constants import ANCHOR_NAME, ASSERTION_LOCK_NAME, FORMAT_DOC, FORMAT_DOC_NAME, INTEGRITY_STATEMENT, MANIFEST_NAME, REPORT_NAME
 from qa_evidence.tarfmt import write_tar
 from qa_evidence.verify import verify_bundle, verify_files
 
@@ -22,28 +22,29 @@ SRC = HERE.parent / "src"
 
 # Golden vectors: recomputed here from first principles (hashlib over the bytes), and fixed as constants. They are the same on a Mac and
 # on the Linux CI runner, and they change only when the format changes.
-GOLDEN_MANIFEST_DIGEST = "sha256:3389a0cf5b32e56b72d42203937f96fd0c28aea6b3552210ca361ae84ffd82b5"
-GOLDEN_ARCHIVE_DIGEST = "sha256:77b6564ac53e4ca8c4ea7dc2f5b86419ec0f966c8d7989d7d837543c14894c09"
+GOLDEN_MANIFEST_DIGEST = "sha256:b1797156f3a9601219d0b1ae4eeaf068dd7f7fc5214474db9e471fed36c92113"
+GOLDEN_ARCHIVE_DIGEST = "sha256:79756bc1ae52cafe00f4b6ccb954f773efc62cc1791b32eeec5e4380692b45fa"
 GOLDEN_FILES = {
-    "BUNDLE-FORMAT.txt": "sha256:cf677e7fd2a244cc4ea715aa4bde5197159950754cd5982a3bbe18b36f47fa05",
-    "lanes/browser/native.txt": "sha256:c58b67997070d1e8cdcc446a0e8733b815b9053995f05a401b42eec882b26742",
+    "BUNDLE-FORMAT.txt": "sha256:d99b82c24d8793900791a0bfb59723cd2bcc8d86dc35d775fd8e908f72213eae",
+    "assertion-lock.json": "sha256:64dc238a95e54c7de6889b39b76a141c3f996f979d1748a767fcf17f2e20cd3c",
+    "lanes/browser/native/native.txt": "sha256:c58b67997070d1e8cdcc446a0e8733b815b9053995f05a401b42eec882b26742",
     "lanes/browser/observations.json": "sha256:2b0c9aa46b536748f98e9b80ecee3627c50bc22eeb0713b06a0fb32aa3785846",
+    "lanes/robot/native/output.xml": "sha256:91d8240dd501537d2bf00fcd43b3b8dcbbc5745d7a2c35aa466d98d2d2b01cc0",
     "lanes/robot/observations.json": "sha256:f9a2020648ae5d4bff5ded1c9c30514d95be870d24df1a299f22645b25a11abe",
-    "lanes/robot/output.xml": "sha256:91d8240dd501537d2bf00fcd43b3b8dcbbc5745d7a2c35aa466d98d2d2b01cc0",
     "logs/orchestrator.log": "sha256:f81a97ea85a6db544337fe579efc84550798e7cbace37d9cbeaff26a0781bde2",
-    "report.json": "sha256:14df4f970ec9d5d2f3d2f4ce510a32469ef311c455101ad6ea39e1dcab32307c",
+    "report.json": "sha256:4019d8f46cecac77049d6b487fc28904211248f66f3565dd9a16d8d5411ba5ce",
 }
 
 
 def test_the_bundle_has_the_documented_layout():
     b = build_base()
-    assert sorted(b.files) == sorted([MANIFEST_NAME, REPORT_NAME, FORMAT_DOC_NAME, "lanes/browser/native.txt", "lanes/browser/observations.json",
-                                      "lanes/robot/output.xml", "lanes/robot/observations.json", "logs/orchestrator.log"])
+    assert sorted(b.files) == sorted([MANIFEST_NAME, REPORT_NAME, FORMAT_DOC_NAME, ASSERTION_LOCK_NAME, "lanes/browser/native/native.txt", "lanes/browser/observations.json",
+                                      "lanes/robot/native/output.xml", "lanes/robot/observations.json", "logs/orchestrator.log"])
     man = load(b.files, MANIFEST_NAME)
     assert [f["path"] for f in man["files"]] == sorted(f["path"] for f in man["files"]) and MANIFEST_NAME not in [f["path"] for f in man["files"]]
     assert {f["path"]: (f["digest"], f["size"]) for f in man["files"]} == {p: (sha256_bytes(d), len(d)) for p, d in b.files.items() if p != MANIFEST_NAME}
     assert man["run_id"] == "r0-test" and [x["lane_id"] for x in man["lanes"]] == ["browser", "robot"]
-    assert man["lanes"][1]["engine"] == {"name": "robotframework", "version": "7.5"} and man["tools"] == {"orchestrator": "0.1.0", "verifier": "0.1.0"}
+    assert man["lanes"][1]["engine"] == {"name": "robotframework", "version": "7.5"} and man["tools"] == {"orchestrator": "0.1.0", "qa-verify": "0.1.0"}
     assert {k: man["environment"][k] for k in ("os", "arch", "python")} == ENV
     assert man["assertion_set_digests"] == [load(b.files, REPORT_NAME)["assertion_set"]["digest"]]
     assert man["integrity"] == {"mechanism": "sha256-file-digests", "keyed": False, "statement": INTEGRITY_STATEMENT}
@@ -159,7 +160,7 @@ def test_the_builder_refuses_an_invalid_report():
 
 def test_the_builder_refuses_a_report_that_does_not_match_the_files():
     report, files, tools = inputs()
-    files["lanes/robot/output.xml"] = (b"other", "native-artifact")
+    files["lanes/robot/native/output.xml"] = (b"other", "native-artifact")
     with pytest.raises(BuildError) as exc:
         build_bundle(report=report, files=files, tools=tools)
     assert "NATIVE_ARTIFACT_MISMATCH" in {c for c, _, _ in exc.value.problems}
@@ -247,17 +248,20 @@ def test_a_ci_style_flow_builds_records_the_digest_and_verifies_against_it_later
 def test_the_anchor_document_is_data_only_and_validated():
     doc = anchor_document("ci-artifact-attestation", "ref", "sha256:" + "a" * 64)
     assert set(doc) == {"schema", "schema_version", "anchor_type", "anchor_reference", "manifest_digest"}
-    for args in (("trust-me", "ref", "sha256:" + "a" * 64), ("signed-bundle", "", "sha256:" + "a" * 64), ("signed-bundle", "ref", "abc")):
+    for args in (("trust-me", "ref", "sha256:" + "a" * 64), ("signed-bundle", "ref", "sha256:" + "a" * 64), ("ci-artifact-attestation", "", "sha256:" + "a" * 64), ("ci-artifact-attestation", "ref", "abc")):
         with pytest.raises(BuildError):
             anchor_document(*args)
     assert dumps_canonical(doc).endswith(b"\n")
 
 
-def test_a_bundle_with_no_assertions_is_inconclusive_not_verified():
-    from qa_evidence.report import assemble_report
+def test_a_run_with_no_assertions_is_not_a_bundle_and_never_a_verified_outcome():
+    """Every lane needs a frozen assertion, so a run that froze nothing cannot be built; and the outcome function never says VERIFIED for it."""
+    from qa_evidence.report import assemble_report, assertion_set_digest, compute_outcome
     report, files, tools = inputs()
-    empty = assemble_report(run_id="r0-test", started_at=report["started_at"], finished_at=report["finished_at"], plan_digest=None, environment=ENV,
+    empty = assemble_report(run_id="r0-test", started_at=report["started_at"], finished_at=report["finished_at"], plan_digest=assertion_set_digest([]), environment=ENV,
                             lanes=report["lanes"], frozen=[], results=[], verifier={"id": "qa-verify", "version": "0.1.0"})
-    b = build_bundle(report=empty, files={"lanes/browser/native.txt": (BROWSER_NATIVE, "native-artifact"),
-                                          "lanes/robot/output.xml": files["lanes/robot/output.xml"]}, tools=tools)
-    assert verify_files(b.files).ok and load(b.files, REPORT_NAME)["verdict"]["outcome"] == "INCONCLUSIVE"
+    assert empty["verdict"]["outcome"] == "INCONCLUSIVE" and compute_outcome([], 0, ["NATIVE_PASS"]) == "INCONCLUSIVE"
+    with pytest.raises(BuildError) as exc:
+        build_bundle(report=empty, files={"lanes/browser/native/native.txt": (BROWSER_NATIVE, "native-artifact"),
+                                          "lanes/robot/native/output.xml": files["lanes/robot/native/output.xml"]}, tools=tools)
+    assert "LANE_WITHOUT_ASSERTIONS" in {c for c, _, _ in exc.value.problems}

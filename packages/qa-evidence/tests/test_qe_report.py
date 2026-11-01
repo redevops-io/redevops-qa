@@ -39,7 +39,7 @@ def test_the_report_keeps_native_and_verdict_in_separate_fields_with_disjoint_wo
     assert set(lane["native"]) == {"status", "raw_status", "exit_code", "artifacts"}
     assert set(res) == {"assertion_id", "lane_id", "native_status", "verdict"} and set(res["verdict"]) == {"state", "reason_code", "provenance"}
     assert set(res["verdict"]["provenance"]) == {"verifier", "assertion_digest", "evidence"}
-    assert set(report["verdict"]["provenance"]) == {"verifier", "assertion_set_digest", "evidence_set_digest"}
+    assert set(report["verdict"]["provenance"]) == {"verifier", "plan_digest", "assertion_set_digest", "evidence_set_digest"}
 
 
 REQUIRED_TOP = ["schema", "schema_version", "run_id", "started_at", "finished_at", "plan_digest", "environment", "lanes", "assertion_set", "accounting",
@@ -178,7 +178,7 @@ def test_the_run_outcome_comes_only_from_the_verdicts(states, frozen, outcome):
 def test_a_frozen_assertion_without_a_result_is_recorded_as_unaccounted():
     rep, _, _ = inputs()
     results = [r for r in _results(rep) if r["assertion_id"] != "A-URL"]
-    out = assemble_report(run_id="r0-test", started_at="2026-01-01T00:00:00Z", finished_at="2026-01-01T00:00:09Z", plan_digest=None,
+    out = assemble_report(run_id="r0-test", started_at="2026-01-01T00:00:00Z", finished_at="2026-01-01T00:00:09Z", plan_digest=rep["plan_digest"],
                           environment=rep["environment"], lanes=rep["lanes"], frozen=rep["assertion_set"]["assertions"], results=results,
                           verifier={"id": "qa-verify", "version": "0.1.0"})
     entry = next(e for e in out["accounting"]["results"] if e["assertion_id"] == "A-URL")

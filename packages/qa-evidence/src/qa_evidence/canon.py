@@ -103,16 +103,16 @@ def digest_of(value: Any) -> str:
     return sha256_bytes(dumps_canonical(value))
 
 
-_STRIP = {"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"}
+_STRIP = {"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp", "Zs"}
 
 
 def safe_text(value: Any, limit: int = 2000) -> str:
-    """Render any value as one line of printable text: control, format (bidi, zero-width), separator and unassigned characters become
+    """Render any value as one line of printable text: control, format (bidi, zero-width), line and paragraph separators, every space separator but the plain space, and unassigned characters become
     visible ``\\uXXXX`` escapes, so a hostile string cannot move a cursor, hide text or reorder it in a terminal or a page."""
     text = value if isinstance(value, str) else json.dumps(value, sort_keys=True, ensure_ascii=True)
     out = []
     for ch in text[:limit]:
-        if unicodedata.category(ch) in _STRIP or ch in "  ":
+        if (unicodedata.category(ch) in _STRIP and ch != " ") or ch in "\u2028\u2029":
             out.append("\\u%04x" % ord(ch) if ord(ch) < 0x10000 else "\\U%08x" % ord(ch))
         else:
             out.append(ch)

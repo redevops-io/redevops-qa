@@ -22,25 +22,25 @@ def base():
 def test_the_clean_bundle_has_no_finding_and_says_it_is_not_anchored(base):
     r = verify_files(base.files)
     assert r.findings == [] and r.ok and r.internally_consistent
-    assert r.anchor.state == "absent" and not r.anchor.established
+    assert r.anchor.state == "absent" and not r.anchor.matches
     assert r.assurance == "internal-consistency-only" and r.assurance_notice == ANCHOR_ABSENT_NOTICE
 
 
 def test_every_result_says_what_the_anchor_state_is(base):
     j = verify_files(base.files).to_json()
-    assert j["anchor"]["state"] == "absent" and j["anchor"]["established"] is False and j["assurance"] == "internal-consistency-only"
+    assert j["anchor"]["state"] == "absent" and j["anchor"]["matches_supplied_value"] is False and j["assurance"] == "internal-consistency-only"
 
 
 # ---- one change at a time -------------------------------------------------------------------------------------------------------------
 def _altered_artifact(f):
     f = dict(f)
-    f["lanes/robot/output.xml"] = f["lanes/robot/output.xml"][:-2] + b"X\n"
+    f["lanes/robot/native/output.xml"] = f["lanes/robot/native/output.xml"][:-2] + b"X\n"
     return f
 
 
 def _deleted_artifact(f):
     f = dict(f)
-    del f["lanes/browser/native.txt"]
+    del f["lanes/browser/native/native.txt"]
     return f
 
 
@@ -208,7 +208,7 @@ def _native_artifact_digest_differs_in_report(f):
 def _native_artifact_role_changed(f):
     def go(m):
         for e in m["files"]:
-            if e["path"] == "lanes/browser/native.txt":
+            if e["path"] == "lanes/browser/native/native.txt":
                 e["role"] = "other"
     return edit(f, MANIFEST_NAME, go)
 
@@ -307,8 +307,8 @@ def test_a_native_pass_is_not_a_verdict_and_the_bundle_keeps_both(base):
 # ---- paths, collisions, sizes, links (directory and archive forms) ---------------------------------------------------------------------
 @pytest.mark.parametrize("evil,code", [("../escape.txt", "PATH_TRAVERSAL"), ("a/../../x", "PATH_TRAVERSAL"), ("/abs/x", "PATH_ABSOLUTE"),
                                        ("C:/x", "PATH_UNSAFE"), ("C:x", "PATH_UNSAFE"), ("a\\b", "PATH_UNSAFE"), ("a//b", "PATH_UNSAFE"),
-                                       ("a/./b", "PATH_UNSAFE"), ("nul", "PATH_UNSAFE"), ("e\u0301.txt", "PATH_NOT_NFC"), ("a b", "PATH_UNSAFE"),
-                                       (".hidden", "PATH_UNSAFE"), ("trail.", "PATH_UNSAFE"), ("bad\u202ename", "PATH_UNSAFE")])
+                                       ("a/./b", "PATH_UNSAFE"), ("nul", "PATH_UNSAFE"), ("e\u0301.txt", "PATH_NOT_ASCII"), ("a b", "PATH_UNSAFE"),
+                                       (".hidden", "PATH_UNSAFE"), ("trail.", "PATH_UNSAFE"), ("bad\u202ename", "PATH_NOT_ASCII")])
 def test_an_unsafe_path_in_the_archive_is_refused(tmp_path, base, evil, code):
     files = dict(base.files)
     files[evil] = b"x"
@@ -342,7 +342,7 @@ def test_a_manifest_that_lists_the_manifest_or_the_anchor_is_refused(base):
 
 def test_case_colliding_names_are_refused_in_an_archive(tmp_path, base):
     files = dict(base.files)
-    files["lanes/robot/Output.xml"] = b"other bytes"
+    files["lanes/robot/native/Output.xml"] = b"other bytes"
     archive = tmp_path / "case.tar"
     archive.write_bytes(write_tar(files))
     assert "CASE_COLLISION" in codes(verify_bundle(str(archive)))
@@ -464,7 +464,7 @@ def test_a_bundle_location_that_is_itself_a_symbolic_link_is_not_opened(tmp_path
 # ---- anchor ------------------------------------------------------------------------------------------------------------------------------
 def test_a_correct_external_anchor_is_verified_and_the_result_says_the_value_was_not_authenticated(base):
     r = verify_files(base.files, anchor=base.manifest_digest)
-    assert r.ok and r.anchor.state == "verified" and r.anchor.established and r.assurance == "anchored-to-supplied-digest"
+    assert r.ok and r.anchor.state == "verified" and r.anchor.matches and r.assurance == "matches-supplied-anchor"
     assert "did not authenticate" in r.anchor.notice
 
 
@@ -481,7 +481,7 @@ def test_a_malformed_anchor_value_is_refused(base, value):
 
 def test_an_anchor_sidecar_alone_is_declared_not_established(base):
     r = verify_files(base.with_anchor("ci-artifact-attestation", "https://example.invalid/run/1").files)
-    assert r.ok and r.anchor.state == "declared" and not r.anchor.established
+    assert r.ok and r.anchor.state == "declared" and not r.anchor.matches
     assert r.anchor.anchor_type == "ci-artifact-attestation" and r.anchor.reference.endswith("/run/1")
     assert "NOT established" in r.anchor.notice and r.assurance == "internal-consistency-only"
 
@@ -540,7 +540,7 @@ def test_a_rechained_forged_manifest_without_an_anchor_verifies_as_internally_co
     forged = rechain(files)
     r = verify_files(forged)
     assert r.findings == [] and r.internally_consistent and r.ok
-    assert r.anchor.state == "absent" and r.anchor.established is False
+    assert r.anchor.state == "absent" and r.anchor.matches is False
     assert r.assurance == "internal-consistency-only" and r.assurance_notice == ANCHOR_ABSENT_NOTICE
     assert r.manifest_digest != base.manifest_digest
 

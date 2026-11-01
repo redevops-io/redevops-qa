@@ -8,11 +8,11 @@ import platform
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple, Union
 
 from .canon import dumps_canonical, sha256_bytes
-from .constants import (ANCHOR_BLOCK_STATEMENT, ANCHOR_NAME, ANCHOR_SCHEMA, ANCHOR_TYPES, DEFAULT_LIMITS, FORMAT_DOC, FORMAT_DOC_NAME,
+from .constants import (ANCHOR_BLOCK_STATEMENT, ANCHOR_NAME, ASSERTION_LOCK_NAME, ANCHOR_SCHEMA, ANCHOR_TYPES, DEFAULT_LIMITS, FORMAT_DOC, FORMAT_DOC_NAME,
                         INTEGRITY_STATEMENT, MANIFEST_NAME, MANIFEST_SCHEMA, REPORT_NAME, REPORT_SCHEMA, RESERVED_UNLISTED, ROLES,
                         SCHEMA_VERSION, Limits)
 from .paths import path_problems
-from .report import check_report
+from .report import assertion_lock_bytes, check_report
 from .schemas import check_document
 from .sources import open_source
 from .tarfmt import write_tar
@@ -83,9 +83,9 @@ def build_bundle(*, report: Mapping[str, Any], files: Mapping[str, Union[FileSpe
         spec = FileSpec(*spec)
         for code, message in path_problems(path, limits):
             problems.append((code, path, message))
-        if path in RESERVED_UNLISTED or path in (REPORT_NAME, FORMAT_DOC_NAME):
+        if path in RESERVED_UNLISTED or path in (REPORT_NAME, FORMAT_DOC_NAME, ASSERTION_LOCK_NAME):
             problems.append(("RESERVED_PATH", path, "this name is written by the builder"))
-        if spec.role not in ROLES or spec.role in ("report", "documentation"):
+        if spec.role not in ROLES or spec.role in ("report", "documentation", "assertion-lock"):
             problems.append(("BAD_ROLE", path, f"role {spec.role!r} is not allowed for a caller-supplied file"))
         if not isinstance(spec.data, (bytes, bytearray)):
             problems.append(("BAD_DATA", path, "file data must be bytes"))
@@ -95,6 +95,9 @@ def build_bundle(*, report: Mapping[str, Any], files: Mapping[str, Union[FileSpe
     report_bytes = dumps_canonical(report)
     entries[REPORT_NAME] = FileSpec(report_bytes, "report")
     entries[FORMAT_DOC_NAME] = FileSpec(FORMAT_DOC.encode("utf-8"), "documentation")
+    entries[ASSERTION_LOCK_NAME] = FileSpec(assertion_lock_bytes(report["assertion_set"]["assertions"]), "assertion-lock")
+    verifier = report["verdict"]["provenance"]["verifier"]
+    tools = {verifier["id"]: verifier["version"], **dict(tools)}
     manifest: Dict[str, Any] = {
         "schema": MANIFEST_SCHEMA, "schema_version": SCHEMA_VERSION,
         "integrity": {"mechanism": "sha256-file-digests", "keyed": False, "statement": INTEGRITY_STATEMENT},
@@ -103,6 +106,7 @@ def build_bundle(*, report: Mapping[str, Any], files: Mapping[str, Union[FileSpe
         "run_id": report["run_id"],
         "lanes": sorted(({"lane_id": x["lane_id"], "run_id": x["run_id"], "engine": dict(x["engine"])} for x in report["lanes"]),
                         key=lambda x: (x["lane_id"], x["run_id"])),
+        "plan_digest": report["plan_digest"],
         "assertion_set_digests": [report["assertion_set"]["digest"]],
         "environment": dict(report["environment"]),
         "tools": dict(tools),

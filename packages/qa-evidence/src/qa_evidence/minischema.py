@@ -4,7 +4,7 @@
 It supports only the keywords below and FAILS when a schema uses any other keyword, so a rule can never be silently ignored:
 ``type`` (name or list), ``enum``, ``const``, ``required``, ``properties``, ``additionalProperties`` (``false`` or a schema),
 ``propertyNames`` (``pattern``, ``maxLength``), ``items``, ``minItems``, ``maxItems``, ``uniqueItems``, ``minLength``, ``maxLength``,
-``pattern`` (``re.search``), ``minimum``, ``maximum`` and a local ``$ref`` of the form ``#/$defs/<name>``. Annotation keywords
+``pattern`` (a full match; every pattern must be anchored with ``^`` and ``$`` so that a validator that searches agrees), ``minimum``, ``maximum`` and a local ``$ref`` of the form ``#/$defs/<name>``. Annotation keywords
 (``$schema``, ``$id``, ``$defs``, ``title``, ``description``, ``$comment``) are accepted.
 
 One extension, ``x-qa-informational: true`` on an object schema, marks that object as INFORMATIONAL: properties it does not declare are
@@ -13,15 +13,17 @@ scalars. Every other object refuses unknown properties. Standard validators igno
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List, NamedTuple
 
 ANNOTATIONS = frozenset({"$schema", "$id", "$defs", "title", "description", "$comment"})
 KEYWORDS = frozenset({"type", "enum", "const", "required", "properties", "additionalProperties", "propertyNames", "items", "minItems", "maxItems",
                       "uniqueItems", "minLength", "maxLength", "pattern", "minimum", "maximum", "$ref", "x-qa-informational"})
-INFO_KEY_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+INFO_KEY_RE = re.compile(r"[a-z][a-z0-9_.-]{0,63}")
 INFO_VALUE_MAX = 1024
 MAX_REF_DEPTH = 32
+TYPE_NAMES = frozenset({"null", "boolean", "integer", "string", "array", "object"})
 
 
 class SchemaError(ValueError):
@@ -50,6 +52,11 @@ def check_schema(schema: Any, root: Any = None, where: str = "#") -> None:
     if ref is not None:
         if not isinstance(ref, str) or not ref.startswith("#/$defs/") or ref[8:] not in root.get("$defs", {}):
             raise SchemaError(f"{where}: unresolvable $ref {ref!r}")
+        beside = set(schema) - {"$ref"} - ANNOTATIONS
+        if beside:
+            raise SchemaError(f"{where}: keywords beside a $ref would be ignored: {sorted(beside)}")
+        if "$ref" in root["$defs"][ref[8:]]:
+            raise SchemaError(f"{where}: a $ref may not point at another $ref")
     for name, sub in schema.get("$defs", {}).items():
         check_schema(sub, root, f"{where}/$defs/{name}")
     for name, sub in schema.get("properties", {}).items():
@@ -69,10 +76,18 @@ def check_schema(schema: Any, root: Any = None, where: str = "#") -> None:
         check_schema(schema["items"], root, f"{where}/items")
     if "pattern" in schema:
         re.compile(schema["pattern"])
+        if not (schema["pattern"].startswith("^") and schema["pattern"].endswith("$")):
+            raise SchemaError(f"{where}: a pattern must be anchored with ^ and $")
+    for name in (schema.get("type") if isinstance(schema.get("type"), list) else [schema.get("type")]):
+        if name is not None and name not in TYPE_NAMES:
+            raise SchemaError(f"{where}: unsupported type {name!r}")
     if "propertyNames" in schema:
         extra = set(schema["propertyNames"]) - {"pattern", "maxLength"}
         if extra:
             raise SchemaError(f"{where}: propertyNames supports only pattern and maxLength, got {sorted(extra)}")
+        names_pattern = schema["propertyNames"].get("pattern")
+        if names_pattern is not None and not (names_pattern.startswith("^") and names_pattern.endswith("$")):
+            raise SchemaError(f"{where}: a pattern must be anchored with ^ and $")
 
 
 def _type_ok(value: Any, name: str) -> bool:
@@ -125,7 +140,7 @@ class Validator:
                 add("LENGTH", f"shorter than {schema['minLength']}")
             if "maxLength" in schema and len(value) > schema["maxLength"]:
                 add("LENGTH", f"longer than {schema['maxLength']}")
-            if "pattern" in schema and not re.search(schema["pattern"], value):
+            if "pattern" in schema and not re.fullmatch(schema["pattern"], value):
                 add("PATTERN", "does not match the required pattern")
         if isinstance(value, int) and not isinstance(value, bool):
             if "minimum" in schema and value < schema["minimum"]:
@@ -137,7 +152,7 @@ class Validator:
                 add("ITEMS", f"fewer than {schema['minItems']} items")
             if "maxItems" in schema and len(value) > schema["maxItems"]:
                 add("ITEMS", f"more than {schema['maxItems']} items")
-            if schema.get("uniqueItems") and len({repr(v) for v in value}) != len(value):
+            if schema.get("uniqueItems") and len({json.dumps(v, sort_keys=True) for v in value}) != len(value):
                 add("UNIQUE", "items are not unique")
             if "items" in schema:
                 for i, item in enumerate(value):
@@ -153,7 +168,7 @@ class Validator:
             for key in sorted(value):
                 sub = f"{pointer}/{_escape(key)}"
                 if names is not None:
-                    if "pattern" in names and not re.search(names["pattern"], key):
+                    if "pattern" in names and not re.fullmatch(names["pattern"], key):
                         issues.append(SchemaIssue("PATTERN", sub, "property name does not match the required pattern"))
                     if "maxLength" in names and len(key) > names["maxLength"]:
                         issues.append(SchemaIssue("LENGTH", sub, "property name is too long"))
@@ -161,7 +176,7 @@ class Validator:
                     self._walk(props[key], value[key], sub, issues, info, depth + 1)
                 elif informational:
                     item = value[key]
-                    ok = INFO_KEY_RE.match(key) is not None and (item is None or isinstance(item, (bool, int)) or (
+                    ok = INFO_KEY_RE.fullmatch(key) is not None and (item is None or isinstance(item, (bool, int)) or (
                         isinstance(item, str) and len(item) <= INFO_VALUE_MAX))
                     if ok:
                         info.append(sub)

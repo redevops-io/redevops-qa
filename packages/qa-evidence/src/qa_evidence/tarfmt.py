@@ -5,7 +5,7 @@ Every header is generated, not copied: mode 0644, uid and gid 0, no user or grou
 no prefix, name of at most 100 bytes. Entries are sorted by path (code point order, which is UTF-8 byte order) and the archive is
 padded to a multiple of 10240 bytes, as ``tar`` does. Reading re-generates the canonical header of every entry and compares it byte for
 byte with what is on disk, so a symbolic link, a hard link, a device, an extended (pax or GNU) header, a different time, owner or mode,
-a directory member, a different order and trailing data all show up as one finding: the archive is not the canonical form. Standard
+a directory member, a different order, non-zero padding and trailing data all show up as one finding: the archive is not the canonical form. Standard
 tools read the archive (``tar -tf``, ``tarfile``); only this reader trusts it. There is no compression, so the bytes do not depend on a
 compressor version.
 """
@@ -125,7 +125,12 @@ def scan_tar(fh: BinaryIO, total: int, limits: Limits = DEFAULT_LIMITS) -> Tuple
         if len(entries) > limits.max_files:
             problems.append(("TOO_MANY_FILES", "", f"more than {limits.max_files} entries"))
             return entries, problems
-        pos = data_start + size + (-size % BLOCK)
+        pad = -size % BLOCK
+        if pad:
+            fh.seek(data_start + size)
+            if fh.read(pad).strip(b"\x00"):
+                problems.append(("ARCHIVE_NONCANONICAL", name, "the padding after the entry data is not zero (it could hide data)"))
+        pos = data_start + size + pad
     if not ended:
         problems.append(("ARCHIVE_NONCANONICAL", "", "the end-of-archive marker is missing"))
     return entries, problems

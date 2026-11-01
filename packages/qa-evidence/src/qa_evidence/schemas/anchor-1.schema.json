@@ -21,8 +21,7 @@
     },
     "anchor_type": {
       "enum": [
-        "ci-artifact-attestation",
-        "signed-bundle"
+        "ci-artifact-attestation"
       ]
     },
     "anchor_reference": {

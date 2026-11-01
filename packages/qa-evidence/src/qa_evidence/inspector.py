@@ -23,16 +23,18 @@ class Inspection(NamedTuple):
 
 
 def _disagreements(report) -> List[Dict[str, Any]]:
+    """Lanes whose native status and independent verdicts do not tell the same story. A lane with no assertion at all is shown too."""
     out = []
     for lane in report["lanes"]:
         states = [r["verdict"]["state"] for r in report["accounting"]["results"] if r["lane_id"] == lane["lane_id"]]
         native = lane["native"]["status"]
         if not states:
+            out.append({"code": "ENGINE_VERIFIER_DISAGREE", "lane_id": lane["lane_id"], "native_status": native, "verdict_states": []})
             continue
         all_verified = all(s == "VERIFIED" for s in states)
         if native == "NATIVE_PASS" and not all_verified:
             out.append({"code": "ENGINE_VERIFIER_DISAGREE", "lane_id": lane["lane_id"], "native_status": native, "verdict_states": sorted(set(states))})
-        elif native in ("NATIVE_FAIL", "NATIVE_ERROR", "NATIVE_TIMEOUT") and all_verified:
+        elif native != "NATIVE_PASS" and all_verified:
             out.append({"code": "ENGINE_VERIFIER_DISAGREE", "lane_id": lane["lane_id"], "native_status": native, "verdict_states": sorted(set(states))})
     return out
 
@@ -66,12 +68,12 @@ def summarise(manifest: Optional[Dict[str, Any]], report: Optional[Dict[str, Any
     }
 
 
-def inspect_bundle(location: str, *, anchor: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> Inspection:
+def inspect_bundle(location: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> Inspection:
     """Verify and summarise. ``content_trusted`` is true only when verification found nothing; otherwise the summary is shown for
     diagnosis and must not be relied on. Raises ``SourceError`` when the location cannot be opened."""
     source = open_source(location, limits)
     try:
-        result, docs = verify_source(source, anchor=anchor, limits=limits)
+        result, docs = verify_source(source, anchor=anchor, plan_digest=plan_digest, limits=limits)
     finally:
         source.close()
     files = []

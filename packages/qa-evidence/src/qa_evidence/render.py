@@ -22,6 +22,8 @@ def render_text(ins: Inspection) -> str:
     lines: List[str] = ["QA EVIDENCE BUNDLE", _RULE]
     lines.append("Verification : " + ("OK - internally consistent" if v.ok else f"FAILED - {len(v.findings)} finding(s)"))
     lines.append("External anchor: " + v.anchor.notice)
+    if v.plan is not None:
+        lines.append("Frozen assertion set: " + v.plan.notice)
     lines.append(f"Anchor state  : {v.anchor.state}" + (f" (type {_t(v.anchor.anchor_type)}, reference {_t(v.anchor.reference)})" if v.anchor.anchor_type else ""))
     lines.append(f"Manifest digest: {_t(v.manifest_digest)}")
     lines.append(f"Form, files   : {v.form}, {v.file_count} file(s)")
@@ -108,8 +110,11 @@ def render_html(ins: Inspection) -> str:
     out.append("<h1>QA evidence bundle</h1>")
     vclass = "ok" if v.ok else "bad"
     out.append('<div class="banner %s">Verification: %s</div>' % (vclass, "OK - internally consistent" if v.ok else "FAILED - %d finding(s)" % len(v.findings)))
-    aclass = "ok" if v.anchor.established else ("bad" if v.anchor.state in ("mismatch", "invalid") else "warn")
+    aclass = "ok" if v.anchor.matches else ("bad" if v.anchor.state in ("mismatch", "invalid") else "warn")
     out.append('<div class="banner %s">External anchor: %s</div>' % (aclass, e(v.anchor.notice)))
+    if v.plan is not None:
+        pclass = "ok" if v.plan.matches else ("bad" if v.plan.state in ("mismatch", "invalid") else "warn")
+        out.append('<div class="banner %s">Frozen assertion set: %s</div>' % (pclass, e(v.plan.notice)))
     out.append('<p class="small">Anchor state: <code>%s</code>%s. Manifest digest: <code>%s</code>. Form: %s, %d file(s).</p>' % (
         e(v.anchor.state), (" (type %s, reference %s)" % (e(v.anchor.anchor_type), e(v.anchor.reference))) if v.anchor.anchor_type else "",
         e(v.manifest_digest), e(v.form), v.file_count))

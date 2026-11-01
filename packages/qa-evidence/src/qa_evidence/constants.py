@@ -30,7 +30,23 @@ ROLES = ("report", "native-artifact", "assertion-lock", "observation", "record",
 LANE_STATUSES = ("NATIVE_PASS", "NATIVE_FAIL", "NATIVE_ERROR", "NATIVE_SKIPPED", "NATIVE_TIMEOUT", "NATIVE_UNAVAILABLE")
 VERDICT_STATES = ("VERIFIED", "FAILED", "INCONCLUSIVE", "UNACCOUNTED")
 OUTCOMES = ("VERIFIED", "FAILED", "INCONCLUSIVE")
-ANCHOR_TYPES = ("ci-artifact-attestation", "signed-bundle")
+#: Only a CI artifact attestation is an anchor type of this format version. Signed bundles are not supported and are not accepted as a type.
+ANCHOR_TYPES = ("ci-artifact-attestation",)
+ASSERTION_LOCK_NAME = "assertion-lock.json"
+#: Everything under lanes/<lane id>/native/ is what that lane's engine wrote; nothing else may live there and no verdict may be based on it.
+NATIVE_DIR_RE = re.compile(r"lanes/[^/]+/native/.+")
+#: Native statuses under which a lane ran to completion. Any other status caps the run outcome at INCONCLUSIVE.
+COMPLETING_STATUSES = ("NATIVE_PASS", "NATIVE_FAIL")
+
+#: Closed vocabulary of reason codes per verdict state, and the run-level code per outcome.
+REASON_CODES = {
+    "VERIFIED": ("EQUALS_EXPECTED", "PREDICATE_HOLDS"),
+    "FAILED": ("EXPECTED_VALUE_DIFFERS", "PREDICATE_VIOLATED"),
+    "INCONCLUSIVE": ("EVIDENCE_MISSING", "EVIDENCE_UNUSABLE", "ASSERTION_INTEGRITY", "VERIFIER_ERROR"),
+    "UNACCOUNTED": ("NO_RESULT_RECORDED",),
+}
+RUN_REASONS = {"VERIFIED": ("ALL_ASSERTIONS_VERIFIED",), "FAILED": ("ASSERTION_FAILED",),
+               "INCONCLUSIVE": ("NOT_ALL_ASSERTIONS_VERIFIED", "ENGINE_DID_NOT_COMPLETE")}
 
 # ---- caps (documented in the README; the verifier refuses anything above them, and refuses a manifest that declares more) -------------
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -68,9 +84,17 @@ DEFAULT_LIMITS = Limits()
 ANCHOR_ABSENT_NOTICE = "no external anchor: integrity against deliberate re-forging NOT established"
 ANCHOR_DECLARED_NOTICE = ("anchor data is present in the bundle but was NOT checked against an external value: "
                           "integrity against deliberate re-forging NOT established")
-ANCHOR_VERIFIED_NOTICE = ("the recomputed manifest digest equals the supplied anchor value; this tool did not authenticate where that "
-                          "value came from (it does not implement or check any attestation)")
+ANCHOR_VERIFIED_NOTICE = ("the recomputed manifest digest matches the supplied anchor value; this tool did not authenticate where that "
+                          "value came from (it does not implement or check any attestation), so this is a match, not proof of integrity")
 ANCHOR_MISMATCH_NOTICE = "the recomputed manifest digest does NOT equal the supplied anchor value: the bundle is not the one that was anchored"
+
+DIGEST_ORIGIN_NOTICE = ("this digest is only meaningful as an anchor if it is obtained from a trusted external channel that the producer of the "
+                        "bundle cannot write; a digest taken from the same bundle proves nothing about it")
+PLAN_ABSENT_NOTICE = ("frozen assertion set not checked against an external plan digest: the set is declared by the producer of the bundle "
+                      "(an assertion removed together with every digest would not be noticed)")
+PLAN_VERIFIED_NOTICE = "the plan digest in the report matches the supplied value; this tool did not authenticate where that value came from"
+PLAN_MISMATCH_NOTICE = "the plan digest in the report does NOT match the supplied value: this is not the frozen assertion set that was asked for"
+PLAN_INVALID_NOTICE = "the supplied plan digest is malformed: the frozen assertion set was not checked"
 
 INTEGRITY_STATEMENT = (
     "File digests and the manifest are UNKEYED hashes. They detect accidental changes and partial edits. They do NOT detect deliberate "
@@ -104,11 +128,16 @@ Files
                          the assertion digests, and an explicit anchor block
   report.json            the run report (schema qa-evidence/run-report): per-lane native results, assertion accounting, the independent
                          verdict with provenance, redaction notes and limitations
+  assertion-lock.json    the frozen assertions (id, lane, digest); its sha256 is the assertion-set digest and the plan digest
   anchor.json            optional; data only (anchor type, anchor reference, manifest digest); not covered by the manifest
   everything else        native artifacts, recorded observations, logs
 
 What the digests do and do not show
   %s
+
+Frozen assertions
+  The assertion set is declared by whoever produced the bundle. Only a plan digest obtained from outside the bundle (python -m qa_evidence
+  verify BUNDLE --plan-digest sha256:HEX) shows that it is the set that was asked for; without one, verification says so.
 
 Native results and verdicts
   A lane's native result is the engine's own report. A verdict is produced by an independent verifier over recorded observations and

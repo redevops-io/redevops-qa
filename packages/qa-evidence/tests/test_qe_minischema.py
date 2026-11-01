@@ -31,7 +31,7 @@ def issues(schema, value):
     ({"type": "object", "properties": {"a": STR}, "required": ["a"], "additionalProperties": False}, {"a": "x"}, {}, "REQUIRED"),
     ({"type": "object", "properties": {"a": STR}, "additionalProperties": False}, {"a": "x"}, {"a": "x", "b": 1}, "UNKNOWN_FIELD"),
     ({"type": "object", "additionalProperties": STR}, {"k": "v"}, {"k": 1}, "TYPE"),
-    ({"type": "object", "additionalProperties": STR, "propertyNames": {"pattern": "^k"}}, {"k1": "v"}, {"x": "v"}, "PATTERN"),
+    ({"type": "object", "additionalProperties": STR, "propertyNames": {"pattern": "^k.*$"}}, {"k1": "v"}, {"x": "v"}, "PATTERN"),
     ({"type": "object", "additionalProperties": STR, "propertyNames": {"maxLength": 2}}, {"k": "v"}, {"kkk": "v"}, "LENGTH"),
     ({"$ref": "#/$defs/s", "$defs": {"s": {"type": "string"}}}, "a", 1, "TYPE"),
 ])

@@ -37,11 +37,8 @@
       "$ref": "#/$defs/time"
     },
     "plan_digest": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "pattern": "^sha256:[0-9a-f]{64}$"
+      "$ref": "#/$defs/digest",
+      "description": "digest of the frozen plan; for this format version equal to the assertion-set digest, which is the digest of assertion-lock.json"
     },
     "environment": {
       "$ref": "#/$defs/environment"
@@ -372,6 +369,7 @@
           "additionalProperties": false,
           "required": [
             "verifier",
+            "plan_digest",
             "assertion_set_digest",
             "evidence_set_digest"
           ],
@@ -396,6 +394,9 @@
               "$ref": "#/$defs/digest"
             },
             "evidence_set_digest": {
+              "$ref": "#/$defs/digest"
+            },
+            "plan_digest": {
               "$ref": "#/$defs/digest"
             }
           }
@@ -507,7 +508,8 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 100,
-      "description": "relative, POSIX separators, NFC; the full path rules are enforced by the verifier"
+      "pattern": "^[A-Za-z0-9._@+=,/-]+$",
+      "description": "relative, ASCII, POSIX separators; the full path rules (no empty, dot or dot-dot component, no leading or trailing dot) are enforced by the verifier"
     },
     "size": {
       "type": "integer",
