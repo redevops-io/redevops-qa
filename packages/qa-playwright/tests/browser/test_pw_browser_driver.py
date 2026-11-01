@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """Driver fidelity against a real Chromium: the adapter over ``PlaywrightDriver`` behaves as it does over the fake driver.
 
-NOT RUN in the environment this file was written in (no Playwright package, no network). It runs in the browser CI job only.
+Runs in the browser CI job only (it needs Playwright and Chromium and never skips).
 """
 import json
 
@@ -19,6 +19,12 @@ from qa_playwright import AdapterConfig, EgressProfile, PlaywrightAdapter, Playw
 pytestmark = pytest.mark.browser
 
 DECISION = "rcv1:" + "ab" * 32
+
+
+def on_worker(session, fn):
+    """Run ``fn(playwright_session)`` on the driver's worker thread. Playwright's sync objects belong to that thread, so a test
+    that must look inside the browser goes through it (the adapter holds a ``ThreadedSession`` proxy, never the raw session)."""
+    return session._run(lambda: fn(session._inner))
 
 
 def build(server, *, trace=False, allow=None):
@@ -66,9 +72,10 @@ def test_navigate_locate_fill_click_and_assert_through_real_chromium(session):
     act(adapter, handle, ActionKind.CLICK, one(adapter, handle, LocatorDescriptor(test_id="submit")))
     out = adapter.assert_(handle, AssertionSubject(kind=SubjectKind.UI_ELEMENT, locator=LocatorDescriptor(role="status")))
     assert out.resolution is Resolution.RESOLVED and out.value == "Welcome back"
-    (first, second) = adapter.receipt_payloads(handle)
-    assert first.state_before_hash != first.state_after_hash or first.action_kind == "fill"
-    assert second.state_changed
+    (navigated, filled, clicked) = adapter.receipt_payloads(handle)         # one payload per action, in order
+    assert [navigated.action_kind, filled.action_kind, clicked.action_kind] == ["navigate", "fill", "click"]
+    assert navigated.state_changed and filled.state_changed        # a new page; a value typed into a field
+    assert clicked.state_changed                                   # the status line went from empty to "Welcome back"
 
 
 def test_label_and_test_id_locators_and_the_checkbox_value(session):
@@ -167,8 +174,8 @@ def test_a_popup_is_closed_and_the_session_still_has_one_page(session):
     adapter, handle, server = session
     goto(adapter, handle, server, "/popup")
     act(adapter, handle, ActionKind.CLICK, one(adapter, handle, LocatorDescriptor(role="link", name="Open")))
-    pages = adapter._sessions[handle.session_id].ds._context.pages
-    assert len(pages) == 1
+    ds = adapter._sessions[handle.session_id].ds
+    assert on_worker(ds, lambda inner: len(inner._context.pages)) == 1
 
 
 def test_a_download_link_does_not_break_the_session_and_nothing_is_saved(session):
@@ -184,10 +191,10 @@ def test_an_unlisted_origin_is_never_requested_by_a_navigation_or_a_subresource(
         goto_host = server.url("/home", host="localhost")
         act(adapter, handle, ActionKind.NAVIGATE, None, goto_host)
     assert not [entry for entry in server.log if entry[2].startswith("localhost")]
-    page = server.url("/subres")
     goto(adapter, handle, server, "/subres")
     sess = adapter._sessions[handle.session_id].ds
-    sess._page.evaluate("(u) => fetch(u).catch(() => null)", server.url("/api/ok", host="localhost"))
+    on_worker(sess, lambda inner: inner._page.evaluate("(u) => fetch(u).catch(() => null)",
+                                                       server.url("/api/ok", host="localhost")))
     assert not [entry for entry in server.log if entry[2].startswith("localhost")]
 
 

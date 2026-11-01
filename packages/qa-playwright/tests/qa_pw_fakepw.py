@@ -30,6 +30,7 @@ class World:
         self.stopped = False
         self.browsers_closed = 0
         self.contexts_closed = 0
+        self.cdp_sessions: List[CdpSession] = []
 
     def touch(self, name: str) -> None:
         ident = threading.get_ident()
@@ -58,6 +59,24 @@ class Locator(_Obj):
     def aria_snapshot(self, **kw: Any) -> str:
         self._world.touch("aria_snapshot")
         return '- heading "Welcome"'
+
+
+class CdpSession(_Obj):
+    """A DevTools session: records ``send`` calls and keeps the ``Fetch.requestPaused`` handler so a test can fire events."""
+
+    def __init__(self, world: World) -> None:
+        super().__init__(world)
+        self.handlers: Dict[str, Any] = {}
+        self.sent: List[Tuple[str, Dict[str, Any]]] = []
+
+    def on(self, event: str, handler: Any) -> None:
+        self._world.touch("cdp.on")
+        self.handlers[event] = handler
+
+    def send(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        self._world.touch("cdp.send")
+        self.sent.append((method, dict(params or {})))
+        return {}
 
 
 class Page(_Obj):
@@ -115,6 +134,12 @@ class Context(_Obj):
 
     def route_web_socket(self, pattern: str, handler: Any) -> None:
         self._world.touch("route_web_socket")
+
+    def new_cdp_session(self, page: Any) -> CdpSession:
+        self._world.touch("new_cdp_session")
+        session = CdpSession(self._world)
+        self._world.cdp_sessions.append(session)
+        return session
 
     def new_page(self) -> Page:
         self._world.touch("new_page")
