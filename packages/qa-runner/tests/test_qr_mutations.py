@@ -12,6 +12,8 @@ BUNDLE = "test_qr_bundle.py"
 ORCH = "test_qr_orchestrate.py"
 CLI = "test_qr_cli.py"
 PARTS = "test_qr_lane_parts.py"
+SCRIPT = "test_qr_judge_script.py"
+ROBOT = "test_qr_robot_lane.py"
 
 
 def t(file, name):
@@ -76,6 +78,32 @@ CASES = [
     ("the exit code of a failed run", "orchestrate.py", '    if outcome == "FAILED":\n        return K.EXIT_FAILED', '    if outcome == "FAILED":\n        return K.EXIT_INCONCLUSIVE', [t(ORCH, "test_the_exit_code_table")]),
     ("a lane that did not complete is an environment exit", "orchestrate.py", 'if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]):',
      "if False:", [t(ORCH, "test_the_exit_code_table")]),
+    # ---- the Robot lane: plan.py -----------------------------------------------------------------------------------------------------
+    ("a Robot lane holds SCRIPT assertions only", "plan.py", '        if a["executor"] != "SCRIPT":', "        if False:", [t(PLAN, "test_robot_lane_refusals")]),
+    ("the check program must be the registered one", "plan.py", '        if given.get("program_hash") != ref["program_hash"]:', "        if False:", [t(PLAN, "test_robot_lane_refusals")]),
+    ("the check program must be registered by id and version", "plan.py", '        if given.get("id") != ref["id"] or given.get("version") != ref["version"]:', "        if False:",
+     [t(PLAN, "test_robot_lane_refusals")]),
+    ("a Robot assertion reads exactly the lane's record", "plan.py", "        if [{k: v for k, v in i.items() if v is not None} for i in inputs] != want:", "        if False:",
+     [t(PLAN, "test_robot_lane_refusals")]),
+    ("a Robot lane has no steps", "plan.py", "    if spec.steps:", "    if False:", [t(PLAN, "test_robot_lane_refusals")]),
+    ("an engine only takes its own egress profile", "plan.py", '        if lane["egress"] not in EGRESS_PROFILES[lane["engine"]]:', "        if False:",
+     [t(PLAN, "test_robot_lane_refusals"), t(PLAN, "test_a_browser_lane_may_not_use_the_not_enforced_profile_or_a_script_assertion")]),
+    ("the suite files are hashed into the lock", "plan.py", '"suite": l.suite, "suite_files": dict(sorted(l.suite_files.items())), ', "",
+     [t(PLAN, "test_the_robot_plan_freezes_with_the_suite_files_and_the_program_hash_pinned")]),
+    # ---- the Robot lane: judge.py ------------------------------------------------------------------------------------------------------
+    ("the record must be what the importer derives from the engine's report", "judge.py", "        if dumps_canonical(derived_record(native, lane.lane_id, full_run)) != data:", "        if False:",
+     [t(SCRIPT, "test_a_record_that_differs_in_any_way_from_the_derived_one_is_unusable"), t(SCRIPT, "test_a_record_that_does_not_belong_to_the_native_report_next_to_it_is_unusable")]),
+    ("a record needs its native report", "judge.py", "    if data is None or native is None:", "    if data is None:", [t(SCRIPT, "test_a_missing_record_or_a_missing_native_report_is_missing_evidence")]),
+    ("only the record is staged for the check", "judge.py", "            target.write_bytes(data)\n", "            target.write_bytes(data)\n            (root / 'native.xml').write_bytes(native)\n",
+     [t(SCRIPT, "test_the_check_program_receives_the_record_alone_and_never_an_expected_value")]),
+    ("a replay from another run is refused", "judge.py", "    full_run = f\"{run_id}.{lane.lane_id}\"", "    full_run = 'r0-other.' + lane.lane_id", [t(SCRIPT, "test_a_replay_of_another_runs_record_is_unusable")]),
+    # ---- the Robot lane: lane_robot.py ------------------------------------------------------------------------------------------------
+    ("suite files must be the frozen ones", "lane_robot.py", "    if {rel: _sha(d) for rel, d in copies.items()} != fl.suite_files:", "    if False:", [t(ROBOT, "test_suite_files_that_changed_after_freezing_are_refused_before_anything_runs")]),
+    ("an engine failure is a native failure", "lane_robot.py", '        status, raw = "NATIVE_FAIL", "FAIL"', '        status, raw = "NATIVE_PASS", "FAIL"', [t(ROBOT, "test_the_discount_defect_is_a_native_fail_and_a_failed_assertion")]),
+    ("an engine timeout is a timeout", "lane_robot.py", "        if result.error_code is ErrorCode.TIMEOUT:", "        if False:", [t(ROBOT, "test_an_engine_that_hangs_is_a_timeout_and_never_verified")]),
+    ("a target that did not start leaves the lane unavailable", "lane_robot.py", "    if origin is None:\n", "    if False:\n", [t(ROBOT, "test_a_target_that_does_not_start_leaves_the_robot_lane_unavailable")]),
+    ("a cancelled run skips the lane", "lane_robot.py", "    if cancel is not None and cancel.cancelled:", "    if False:", [t(ROBOT, "test_a_run_cancelled_before_the_lane_starts_skips_it")]),
+    ("the egress profile of a Robot lane says not enforced", "lane_robot.py", '"profile": "not-enforced"', '"profile": "gateway"', [t(ROBOT, "test_the_egress_profile_of_a_robot_lane_says_it_is_not_enforced")]),
     # ---- lane_browser.py -------------------------------------------------------------------------------------------------------------
     ("declared preconditions cannot be attested", "lane_browser.py", "        return True if not spec.preconditions else None", "        return True",
      [t(PARTS, "test_preconditions_and_fixtures_nothing_here_can_attest_are_unknown_never_true")]),
@@ -91,7 +119,7 @@ CASES = [
     # ---- cli.py and doctor.py --------------------------------------------------------------------------------------------------------
     ("an existing bundle is never overwritten", "cli.py", "    if args.run_id is not None and (target / args.run_id).exists():", "    if False:",
      [t(CLI, "test_an_existing_bundle_directory_is_never_overwritten")]),
-    ("a crash is not a product failure", "cli.py", "    except Exception as exc:\n        print(f\"internal error", "    except ZeroDivisionError as exc:\n        print(f\"internal error", [t(CLI, "test_a_crash_of_the_runner_has_its_own_exit_status_and_leaks_nothing")]),
+    ("a crash is not a product failure", "cli.py", "    except Exception as exc:\n        # the class of the failure", "    except ZeroDivisionError as exc:\n        # the class of the failure", [t(CLI, "test_a_crash_of_the_runner_has_its_own_exit_status_and_leaks_nothing")]),
     ("doctor fails on a playwright of another version", "doctor.py", "    if have != PLAYWRIGHT_PIN:", "    if False:", [t(CLI, "test_another_playwright_version_fails")]),
     ("doctor fails when playwright is missing", "doctor.py", "    if have is None:\n        return Check(\"playwright\"", "    if False:\n        return Check(\"playwright\"",
      [t(CLI, "test_a_missing_playwright_fails_with_the_remedy_and_installs_nothing")]),

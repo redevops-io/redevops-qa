@@ -66,6 +66,41 @@ def browser_spec() -> Dict[str, Any]:
     }
 
 
+def _script_assertion(assertion_id: str, lane_id: str, expected: Any, program_ref: Dict[str, str]) -> Dict[str, Any]:
+    return {"schema_id": "runtime-contracts/qa/assertion-spec", "schema_version": "0.1", "assertion_id": assertion_id, "executor": "SCRIPT", "determinism": "DETERMINISTIC",
+            "on_unresolvable": "INDETERMINATE", "predicate": {"op": "EQUALS", "expected": expected}, "check_program_ref": dict(program_ref),
+            "subject": {"kind": "RESOURCE_INPUTS", "inputs": [{"kind": "MANIFEST_PATH", "path": f"lanes/{lane_id}/observations.json"}], "subject_alternates": []},
+            "verifier_id": VERIFIER_ID, "verifier_version_range": VERIFIER_RANGE}
+
+
+def robot_spec() -> Dict[str, Any]:
+    """The Robot lane's spec: no steps (the suite is the engine's work) and one SCRIPT assertion. The expected value is FROZEN here, in the assertion; the observation
+    record the suite's run produces never carries it and the check program never receives it."""
+    from .suites import evidence_program_ref
+    expected = {"documents": 1, "input_errors": [], "observations": {"order_101_total_cents": 9450, "order_102_total_cents": 9999, "order_103_total_cents": 9000,
+                                                                       "order_104_total_cents": 9005}}
+    return {
+        "schema_id": "runtime-contracts/qa/test-spec", "schema_version": "0.1", "id": "golden-order-discount", "version": 1,
+        "target": {"app_id": "qa-fixture-app", "build_sha": "0123456789abcdef", "environment_profile": "local"},
+        "steps": [], "assertions": [_script_assertion("A-ORDER-RULE", "robot", expected, evidence_program_ref())],
+        "budget": {"deadline_ms": 60000, "max_model_calls": 0, "max_recovery_attempts": 0, "max_retries": 0, "max_tokens": 0},
+        "egress_profile": "lane", "allowed_side_effects": [], "preconditions": [], "fixtures": [], "depends_on": [], "cleanup": [], "sensitivity_labels": [],
+    }
+
+
+def robot_lane() -> Dict[str, Any]:
+    return {"lane_id": "robot", "engine": K.ENGINE_ROBOT, "egress": "not-enforced", "deadline_s": 120, "suite": "order-discount", "spec": robot_spec()}
+
+
+def browser_lane() -> Dict[str, Any]:
+    return {"lane_id": "browser", "engine": K.ENGINE_PLAYWRIGHT, "egress": "origin-only", "deadline_s": 120, "spec": browser_spec()}
+
+
+def robot_plan() -> Dict[str, Any]:
+    """A one-lane plan with the Robot lane (``examples/robot-plan.json``)."""
+    return {"schema": K.PLAN_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": "golden-fixture-robot", "target": {"kind": "fixture-app"}, "lanes": [robot_lane()]}
+
+
 def golden_plan() -> Dict[str, Any]:
-    lanes: List[Dict[str, Any]] = [{"lane_id": "browser", "engine": K.ENGINE_PLAYWRIGHT, "egress": "origin-only", "deadline_s": 120, "spec": browser_spec()}]
+    lanes: List[Dict[str, Any]] = [browser_lane()]
     return {"schema": K.PLAN_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": "golden-fixture", "target": {"kind": "fixture-app"}, "lanes": lanes}

@@ -19,7 +19,7 @@ SCHEMA_VERSION = "1.0"
 #: the engines this release can run (R0 scope: Linux x86_64, Playwright Chromium and Robot Framework; Selenium and Appium are excluded)
 ENGINE_PLAYWRIGHT = "playwright-chromium"
 ENGINE_ROBOT = "robot-framework"
-ENGINES = (ENGINE_PLAYWRIGHT,)
+ENGINES = (ENGINE_PLAYWRIGHT, ENGINE_ROBOT)
 
 ORIGIN_PLACEHOLDER = "{origin}"
 DEFECTS = ("none", "discount", "settings")

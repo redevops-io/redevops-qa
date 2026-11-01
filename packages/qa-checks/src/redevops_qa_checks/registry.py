@@ -262,5 +262,14 @@ BUILTIN_MODULES = ("image_references", "image_name_map", "security_context", "re
                    "connectivity_traffic", "connectivity_policy_state")
 
 
+#: programs that read evidence a test engine recorded rather than infrastructure manifests; not part of ``builtin_registry`` (its program list and hashes are unchanged)
+EVIDENCE_MODULES = ("robot_observations",)
+
+
+def evidence_registry() -> ProgramRegistry:
+    """A registry of the evidence programs only (``evidence.robot-observations``): nothing else is registered, so nothing else can be named by an assertion."""
+    return ProgramRegistry(s for m in EVIDENCE_MODULES for s in spec_from_module(f"{__package__}.programs.{m}"))
+
+
 def builtin_registry(extra_modules: Iterable[str] = ()) -> ProgramRegistry:
     return ProgramRegistry(s for m in (*BUILTIN_MODULES, *extra_modules) for s in spec_from_module(f"{__package__}.programs.{m}"))

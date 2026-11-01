@@ -16,7 +16,7 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from qa_adapter_kit.status import ErrorCode
 from qa_adapter_kit.supervisor import CancelToken
@@ -62,6 +62,7 @@ class RunOptions:
     cancel: Optional[CancelToken] = None
     clock: Callable[[], str] = utc_now
     lane_command: Optional[Callable[[FrozenLane, str], List[str]]] = None       # test seam: the argv of a lane child (default: the real lane module)
+    robot_launcher: Optional[Sequence[str]] = None                              # test seam: replaces "-m robot" in the Robot adapter's command (offline tests)
 
 
 @dataclass(frozen=True)
@@ -231,9 +232,15 @@ def run_plan(up: Upstreams, frozen: FrozenPlan, opts: RunOptions = RunOptions())
         except EnvironmentFault as exc:
             log.append(f"target not started: {exc.code}")
         for fl in frozen.lanes:
-            if fl.engine != K.ENGINE_PLAYWRIGHT:
+            deadline = float(fl.deadline_s if opts.lane_deadline_s is None else min(opts.lane_deadline_s, fl.deadline_s))
+            if fl.engine == K.ENGINE_PLAYWRIGHT:
+                outcomes.append(run_browser_lane(fl, run_id=run_id, origin=origin, workdir=workdir, opts=opts, log=log))
+            elif fl.engine == K.ENGINE_ROBOT:
+                from .lane_robot import run_robot_lane
+                outcomes.append(run_robot_lane(fl, run_id=run_id, origin=origin, workdir=workdir, cancel=opts.cancel, deadline_s=deadline, log=log,
+                                               launcher=opts.robot_launcher))
+            else:
                 raise PlanError("UNSUPPORTED_ENGINE", f"no runner for engine {fl.engine!r}")
-            outcomes.append(run_browser_lane(fl, run_id=run_id, origin=origin, workdir=workdir, opts=opts, log=log))
     finally:
         app.stop()
     request_log = _read_bounded(Path(workdir) / "requests.jsonl", 16 * 1024 * 1024) or b""

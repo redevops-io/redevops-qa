@@ -1,0 +1,83 @@
+{
+  "lanes": [
+    {
+      "deadline_s": 120,
+      "egress": "not-enforced",
+      "engine": "robot-framework",
+      "lane_id": "robot",
+      "spec": {
+        "allowed_side_effects": [],
+        "assertions": [
+          {
+            "assertion_id": "A-ORDER-RULE",
+            "check_program_ref": {
+              "id": "evidence.robot-observations",
+              "program_hash": "sha256:29fce3915c52d16c22fef29954495e148924fb01850d70fb46f43c0d65667163",
+              "version": "1.0.0"
+            },
+            "determinism": "DETERMINISTIC",
+            "executor": "SCRIPT",
+            "on_unresolvable": "INDETERMINATE",
+            "predicate": {
+              "expected": {
+                "documents": 1,
+                "input_errors": [],
+                "observations": {
+                  "order_101_total_cents": 9450,
+                  "order_102_total_cents": 9999,
+                  "order_103_total_cents": 9000,
+                  "order_104_total_cents": 9005
+                }
+              },
+              "op": "EQUALS"
+            },
+            "schema_id": "runtime-contracts/qa/assertion-spec",
+            "schema_version": "0.1",
+            "subject": {
+              "inputs": [
+                {
+                  "kind": "MANIFEST_PATH",
+                  "path": "lanes/robot/observations.json"
+                }
+              ],
+              "kind": "RESOURCE_INPUTS",
+              "subject_alternates": []
+            },
+            "verifier_id": "det-verifier",
+            "verifier_version_range": ">=1.0,<2"
+          }
+        ],
+        "budget": {
+          "deadline_ms": 60000,
+          "max_model_calls": 0,
+          "max_recovery_attempts": 0,
+          "max_retries": 0,
+          "max_tokens": 0
+        },
+        "cleanup": [],
+        "depends_on": [],
+        "egress_profile": "lane",
+        "fixtures": [],
+        "id": "golden-order-discount",
+        "preconditions": [],
+        "schema_id": "runtime-contracts/qa/test-spec",
+        "schema_version": "0.1",
+        "sensitivity_labels": [],
+        "steps": [],
+        "target": {
+          "app_id": "qa-fixture-app",
+          "build_sha": "0123456789abcdef",
+          "environment_profile": "local"
+        },
+        "version": 1
+      },
+      "suite": "order-discount"
+    }
+  ],
+  "plan_id": "golden-fixture-robot",
+  "schema": "redevops-qa/plan",
+  "schema_version": "1.0",
+  "target": {
+    "kind": "fixture-app"
+  }
+}

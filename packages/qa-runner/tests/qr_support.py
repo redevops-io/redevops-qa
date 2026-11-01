@@ -37,3 +37,11 @@ GATEWAY_DOWN = str(Path(__file__).resolve().parent / "gateway_down_lane.py")
 
 def gateway_down(lane, input_path):
     return [sys.executable, GATEWAY_DOWN, input_path]
+
+
+FAKE_ROBOT = str(Path(__file__).resolve().parent / "fake_robot.py")
+
+
+def fake_robot(mode):
+    """A ``RunOptions.robot_launcher`` that runs the Robot test double in ``mode`` instead of ``-m robot``."""
+    return (FAKE_ROBOT, mode)

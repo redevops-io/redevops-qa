@@ -10,9 +10,11 @@ file and the observation file has no field for a verdict: an unknown field is re
 from __future__ import annotations
 
 import copy
+import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from qa_evidence.canon import CanonError, loads_strict, sha256_bytes
+from qa_evidence.canon import CanonError, dumps_canonical, loads_strict, sha256_bytes
 
 from . import constants as K
 from .deps import Upstreams
@@ -90,6 +92,27 @@ def _state(verdict: str, reason: Optional[str], op: str) -> Tuple[str, str]:
     return "INCONCLUSIVE", "EVIDENCE_UNUSABLE"
 
 
+def native_output_path(lane_id: str) -> str:
+    return f"lanes/{lane_id}/native/output.xml"
+
+
+def derived_record(native_output: bytes, lane_id: str, run_id: str) -> Dict[str, Any]:
+    """The Robot observation record as the importer derives it from the engine's own ``output.xml``. Raises ``EvidenceUnusable`` if the report cannot be imported."""
+    from qa_adapter_kit import MalformedReport
+    from qa_robot import observation_document, parse_observations
+    try:
+        return observation_document(parse_observations(native_output), run_id=run_id, lane_id=lane_id)
+    except MalformedReport:
+        raise EvidenceUnusable("NATIVE_REPORT_REFUSED", "the engine's report cannot be imported") from None
+
+
+def _programs(up: Upstreams, lane: FrozenLane):
+    if lane.engine == K.ENGINE_ROBOT:
+        from redevops_qa_checks.registry import evidence_registry
+        return evidence_registry()
+    return up.harness.specstore.InMemoryProgramRegistry({})
+
+
 def judge_lane(up: Upstreams, lane: FrozenLane, *, run_id: str, files: Mapping[str, bytes]) -> List[Dict[str, Any]]:
     """One result per frozen assertion of ``lane``, in assertion-id order: ``state`` (VERIFIED, FAILED, INCONCLUSIVE), a reason code from the closed list, and
     the evidence file (path and digest) the verdict was computed from. ``files`` maps bundle-relative paths to bytes; a file that is not there is missing evidence."""
@@ -97,13 +120,16 @@ def judge_lane(up: Upstreams, lane: FrozenLane, *, run_id: str, files: Mapping[s
     docs = [copy.deepcopy(a) for a in lane.assertions]
     try:
         pin = lane.harness_pin
-        frozen = h.verifier.load_frozen_assertions(h.specstore.InMemorySpecStore({pin: docs}), pin, lineage=h.verifier.ApprovedLineage([pin]),
-                                                   programs=h.specstore.InMemoryProgramRegistry({}))
+        programs = _programs(up, lane)
+        frozen = h.verifier.load_frozen_assertions(h.specstore.InMemorySpecStore({pin: docs}), pin, lineage=h.verifier.ApprovedLineage([pin]), programs=programs)
     except Exception:
         return _all(lane, "INCONCLUSIVE", "ASSERTION_INTEGRITY")
     executors = {a.assertion_id: a.executor.value for a in frozen.assertions}
-    if any(e != "PLAYWRIGHT" for e in executors.values()):
-        return _all(lane, "INCONCLUSIVE", "VERIFIER_ERROR")          # no other executor exists in this lane kind
+    wanted = "SCRIPT" if lane.engine == K.ENGINE_ROBOT else "PLAYWRIGHT"
+    if any(e != wanted for e in executors.values()):
+        return _all(lane, "INCONCLUSIVE", "VERIFIER_ERROR")          # a lane holds the assertions of its own kind of engine only
+    if lane.engine == K.ENGINE_ROBOT:
+        return _judge_script(up, lane, frozen, programs, run_id, files)
     path = observation_path(lane.lane_id)
     data = files.get(path)
     if data is None:
@@ -133,3 +159,47 @@ def judge_lane(up: Upstreams, lane: FrozenLane, *, run_id: str, files: Mapping[s
         state, reason = _state(verdict, result.reason_code, a.predicate.op.value)
         out.append(_result(aid, state, reason, evidence, harness_verdict=verdict))
     return out
+
+
+def _judge_script(up: Upstreams, lane: FrozenLane, frozen: Any, programs: Any, run_id: str, files: Mapping[str, bytes]) -> List[Dict[str, Any]]:
+    """The SCRIPT executor: the hash-pinned check program, run by the harness verifier over the lane's observation record, compared with the value frozen in the assertion.
+
+    The record must be exactly what the importer derives from the engine's own ``output.xml`` that is in the bundle (so it names this run and this report and cannot be
+    hand-written or carried over from another run), and it is the only file the check program can read: it is staged alone in a fresh case root."""
+    h = up.harness
+    path = observation_path(lane.lane_id)
+    data, native = files.get(path), files.get(native_output_path(lane.lane_id))
+    if data is None or native is None:
+        return _all(lane, "INCONCLUSIVE", "EVIDENCE_MISSING")
+    evidence = {"path": path, "digest": sha256_bytes(data)}
+    full_run = f"{run_id}.{lane.lane_id}"
+    try:
+        if dumps_canonical(derived_record(native, lane.lane_id, full_run)) != data:
+            raise EvidenceUnusable("NOT_DERIVED", "the observation record is not what the importer derives from the engine's report")
+    except (EvidenceUnusable, CanonError):
+        return _all(lane, "INCONCLUSIVE", "EVIDENCE_UNUSABLE", evidence)
+    try:
+        from redevops_qa_checks.adapter import CheckAdapter
+        from redevops_qa_checks.manifests import tree_digest
+        with tempfile.TemporaryDirectory(prefix="redevops-qa-judge-") as tmp:
+            root = Path(tmp) / "case"
+            target = root.joinpath(*path.split("/"))
+            target.parent.mkdir(parents=True)
+            target.write_bytes(data)
+            adapter = CheckAdapter(root, registry=programs)
+            workspace = adapter.open_workspace(h.records.CheckProfile(case_root_digest=tree_digest(root), tier=h.records.CheckTier("OFFLINE")))
+            verifier = h.verifier.DeterministicVerifier(programs=programs, check_adapter=adapter)
+            out: List[Dict[str, Any]] = []
+            for a in sorted(frozen.assertions, key=lambda x: x.assertion_id):
+                try:
+                    result = verifier.verify_assertion(frozen, a.assertion_id, workspace=workspace)
+                except Exception:
+                    out.append(_result(a.assertion_id, "INCONCLUSIVE", "VERIFIER_ERROR", evidence))
+                    continue
+                verdict = result.check.verdict.value
+                state, reason = _state(verdict, result.reason_code, a.predicate.op.value)
+                out.append(_result(a.assertion_id, state, reason, evidence, harness_verdict=verdict))
+            adapter.close_workspace(workspace)
+            return out
+    except Exception:
+        return _all(lane, "INCONCLUSIVE", "VERIFIER_ERROR", evidence)

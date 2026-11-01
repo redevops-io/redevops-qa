@@ -1,8 +1,8 @@
 # qa-runner
 
 The `redevops-qa` command: it checks a machine (`doctor`), runs a frozen test plan against the fixture app and writes an evidence bundle (`run`). The
-remaining subcommands (`freeze`, `verify`, `report`, `inspect`, `demo`) and the Robot Framework lane come in the following parts of this work; this part
-runs ONE Playwright Chromium lane.
+remaining subcommands (`freeze`, `verify`, `report`, `inspect`, `demo`) and the two-lane plan come in the following parts of this work; this part runs ONE lane per plan:
+a Playwright Chromium lane (`examples/golden-plan.json`) or a Robot Framework lane (`examples/robot-plan.json`), which a plan may also combine (the offline tests do).
 
 Licence: the family licence of this repository (source-available, not open source; see `LICENSE.md`). Standard library and the repository's own packages
 only; the two pinned upstreams (`runtime-contracts`, `agent-harness`) are found through `pins.toml`, as the bridge does it, and are neither installed nor
@@ -52,6 +52,27 @@ expected values. Freezing:
 A step value may start with `{origin}`; the origin of this start of the target is substituted when the lane runs, so one frozen plan serves every start of
 the app (a different port each time).
 
+## The Robot lane
+
+A Robot lane names a reviewed suite shipped with this package (`"suite": "order-discount"`: `src/qa_runner/robot_suite/order_discount.robot` and the library `OrderApi.py`).
+Freezing hashes the suite files and the registered check program into the lock; the run copies the files into a fresh workspace, requires the copies to hash as frozen, and
+gives the Robot adapter the library's hash as the only reviewed library (the adapter refuses any other library file, any library not on its allowlist and any construct that
+loads code at run time). The suite runs under the kit supervisor with `QA_BASE_URL` as the only variable it is given.
+
+* **Robot records, the verifier judges.** The suite reads the order totals from the target's API and records them as `qa-observe:<name>=<value>` tags; its own
+  `Should Be Equal` lines are the engine's native check. The runner keeps the raw `output.xml` as a native artifact and derives the observation record from it
+  (`qa_robot.parse_observations`). The frozen assertion (`executor = SCRIPT`, `EQUALS`) holds the expected values and pins the hash of the check program
+  `evidence.robot-observations`; the harness `DeterministicVerifier` runs that program (through the `qa-checks` adapter, over a case root that holds the record and nothing else)
+  and compares its observation with the frozen value. The program is never given the expected value and the record carries none.
+* **Native result and verdict stay apart.** `NATIVE_PASS`/`NATIVE_FAIL` is what Robot said; the verdict is the comparison. A native PASS with a record that does not satisfy the
+  frozen assertion is not VERIFIED; a native FAIL whose record satisfies it is INCONCLUSIVE (`NATIVE_FAIL_VERIFIED_ASSERTIONS`).
+* **The record must be what the importer derives from the engine's own report that is in the bundle** (same run id, same lane, same digest of `output.xml`, canonical bytes): a
+  hand-written record, one from another run or one that does not belong to the report next to it is unusable evidence (`EVIDENCE_UNUSABLE`).
+* **Egress is not enforced for a Robot lane.** A Robot library opens its own sockets. The lane's egress profile says `not-enforced` and the plan must say so (`"egress": "not-enforced"`;
+  a browser lane must use `origin-only`).
+* **Not detectable from the record:** a suite that records a value it did not observe. What protects against that is the review of the suite and library (their hashes are frozen and
+  checked before the run, and the copies are in the bundle) and the target's request log (`logs/target-requests.jsonl`), not the record.
+
 ## What a run does
 
 1. The fixture app starts as a child process (`--shutdown-on-stdin-eof`, its own process group) and is stopped in a `finally` block.
@@ -82,6 +103,10 @@ lanes/browser/observations.json        the observed values the verdicts are comp
 lanes/browser/egress-profile.json      the allow-list the lane ran under, as data (record)
 lanes/browser/gateway-log.jsonl        decisions of the egress gateway: scheme, host, port, verdict; no path, query or header (log)
 lanes/browser/browser-guard-log.jsonl  decisions of the adapter's in-browser request gate, the second layer (log)
+lanes/robot/native/output.xml          the Robot engine's own report; also robot-summary.json and adapter-result.json (native)
+lanes/robot/observations.json          the observation record derived from output.xml: what the check program reads (observation)
+lanes/robot/suite/*                    the reviewed suite files the engine ran, as hashed in the lock (record)
+lanes/robot/egress-profile.json        says that egress is not enforced for this lane (record)
 logs/                                  orchestration log, tails of the lane output, the target's request log (log)
 ```
 
@@ -97,13 +122,14 @@ Plus the files `qa-evidence` writes: `report.json`, `bundle-manifest.json`, `ass
   is run for evidence.
 * Egress: the gateway and the request gate are exercised against Chromium on the machines named in the tests. Nothing here claims that all traffic of every
   engine passes the gateway; Robot Framework lanes will not.
-* The browser lane has run on macOS arm64 (development) and in the CI job named in the pull request; no other platform.
+* The browser and Robot lanes have run on macOS arm64 (development) and in the CI jobs named in the pull requests; no other platform.
 
 ## Tests
 
 ```text
 python -m pytest -q packages/qa-runner/tests                                   # offline: no browser; the lane child is a test double in fake_lane.py
 python -m pytest -q -m browser packages/qa-runner/tests/browser                # real Chromium (Playwright 1.64.1 and a browser installed)
+python -m pytest -q -m robot_real packages/qa-runner/tests/real                # real Robot Framework 7.5 (no browser needed)
 ```
 
 The offline tests include a mutation suite (`test_qr_mutations.py`): each removes one guard from a copy of the source and requires a named test to fail. The
