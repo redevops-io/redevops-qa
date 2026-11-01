@@ -326,7 +326,10 @@ def verify_source(source: Source, *, anchor: Optional[str] = None, plan_digest: 
         missing = [name for name, doc in (("manifest", docs.manifest), ("report", docs.report)) if doc is None]
         _add(findings, "INCOMPLETE_VERIFICATION", "", "the " + " and the ".join(missing) + " could not be read as a valid document, so nothing in the bundle was checked against it")
     result = VerifyResult(findings=findings, anchor=result_anchor, manifest_digest=manifest_digest, informational=infos, notes=notes,
-                          file_count=len(source.entries), form=source.kind, complete=complete, plan=result_plan)
+                          file_count=len(source.entries), form=source.kind, complete=complete, plan=result_plan,
+                          run_outcome=({"outcome": docs.report["verdict"]["outcome"], "reason_code": docs.report["verdict"]["reason_code"]}
+                                       if docs.report is not None else None),
+                          disagreements=rpt.engine_verifier_disagreements(docs.report) if docs.report is not None else None)
     return result, docs
 
 

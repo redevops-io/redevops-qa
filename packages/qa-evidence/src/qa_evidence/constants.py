@@ -46,7 +46,7 @@ REASON_CODES = {
     "UNACCOUNTED": ("NO_RESULT_RECORDED",),
 }
 RUN_REASONS = {"VERIFIED": ("ALL_ASSERTIONS_VERIFIED",), "FAILED": ("ASSERTION_FAILED",),
-               "INCONCLUSIVE": ("NOT_ALL_ASSERTIONS_VERIFIED", "ENGINE_DID_NOT_COMPLETE")}
+               "INCONCLUSIVE": ("NOT_ALL_ASSERTIONS_VERIFIED", "ENGINE_DID_NOT_COMPLETE", "NATIVE_FAIL_VERIFIED_ASSERTIONS")}
 
 # ---- caps (documented in the README; the verifier refuses anything above them, and refuses a manifest that declares more) -------------
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
