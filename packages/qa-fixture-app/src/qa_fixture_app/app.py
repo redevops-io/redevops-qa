@@ -206,7 +206,9 @@ class FixtureApp:
             "<li><a href=\"/orders\">Orders</a></li>\n</ul>"))
 
     def _health(self, request: Request) -> Response:
-        return Response.json(200, {"defect": self.defect, "status": "ok"})
+        # Trust boundary: the app never reveals which defect is seeded (not here, not anywhere). The defect is known to whoever
+        # started the process (its arguments and the stdout ready line), not to the checks that talk to the app.
+        return Response.json(200, {"status": "ok"})
 
     def _login_page(self, request: Request) -> Response:
         alert = "\n<p role=\"alert\">Wrong email or password</p>" if request.query_value("bad") == "1" else ""

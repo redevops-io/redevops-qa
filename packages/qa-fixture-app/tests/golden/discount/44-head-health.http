@@ -1,9 +1,0 @@
-HEAD /health
---- 200
-Server: qa-fixture-app
-Content-Type: application/json
-Cache-Control: no-store
-X-Content-Type-Options: nosniff
-Content-Length: 45
-Connection: close
-

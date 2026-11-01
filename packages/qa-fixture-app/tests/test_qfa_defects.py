@@ -9,13 +9,13 @@ import qfa_support as s
 
 from qa_fixture_app import DEFECT_DESCRIPTIONS, DEFECTS, FixtureApp, Request, create_server
 
-# What each defect changes, as scenario step ids. /health (and its HEAD) change in every defect mode because they name the active
-# defect; everything else in the set is the defect's own behaviour. This table is the documented diff (README, "Seeded defects").
+# What each defect changes, as scenario step ids: only the defect's own behaviour (/health is identical in every mode, see below).
+# This table is the documented diff (README, "Seeded defects").
 HEALTH = {"health", "head-health"}
 DOCUMENTED_DIFF = {
-    "discount": HEALTH | {"orders-page", "order-page-101", "order-page-103", "order-page-104", "api-orders", "api-order-101",
+    "discount": {"orders-page", "order-page-101", "order-page-103", "order-page-104", "api-orders", "api-order-101",
                           "api-order-103", "api-order-104", "api-discount-10000", "api-discount-10005", "api-discount-10500"},
-    "settings": HEALTH | {"settings-saved-page", "api-settings-saved", "settings-reload"},
+    "settings": {"settings-saved-page", "api-settings-saved", "settings-reload"},
 }
 # Fields that may differ inside the JSON bodies of the changed steps.
 DOCUMENTED_FIELDS = {"discount": {"discount_cents", "total_cents"}, "settings": {"notifications", "theme"}}
@@ -42,7 +42,7 @@ def test_the_diff_against_none_is_exactly_the_documented_one(transcripts, mode):
 
 @pytest.mark.parametrize("mode", ["discount", "settings"])
 def test_only_the_documented_fields_differ_in_the_changed_json_bodies(transcripts, mode):
-    for sid in DOCUMENTED_DIFF[mode] - HEALTH:
+    for sid in DOCUMENTED_DIFF[mode]:
         a, b = _body(transcripts["none"][sid]), _body(transcripts[mode][sid])
         if not a.lstrip().startswith(b"{"):
             continue
@@ -73,9 +73,38 @@ def test_headers_status_and_redirects_never_differ_except_content_length_of_chan
 
 
 @pytest.mark.parametrize("mode", ["discount", "settings"])
-def test_health_differs_only_in_the_defect_name(transcripts, mode):
-    a, b = json.loads(_body(transcripts["none"]["health"])), json.loads(_body(transcripts[mode]["health"]))
-    assert a == {"defect": "none", "status": "ok"} and b == {"defect": mode, "status": "ok"}
+def test_health_get_and_head_are_byte_identical_in_every_defect_mode(transcripts, mode):
+    for step in sorted(HEALTH):
+        assert transcripts[mode][step] == transcripts["none"][step], (mode, step)
+    assert json.loads(_body(transcripts["none"]["health"])) == {"status": "ok"}
+    assert _body(transcripts["none"]["head-health"]) == b""
+
+
+def _response_part(raw: bytes) -> bytes:
+    """Status line, headers and body of a transcript, without the request lines that precede '--- <status>'."""
+    return raw[raw.index(b"\n--- ") + 1:]
+
+
+def test_no_response_reveals_which_defect_is_seeded(transcripts):
+    # (1) the word "defect" appears in no response of any mode; (2) the active defect's name occurs in every response of its mode exactly
+    # as often as in the same response of the defect-free app, so nothing in a header or body says which defect is on.
+    for mode in s.MODES:
+        for sid, raw in transcripts[mode].items():
+            part = _response_part(raw).lower()
+            assert b"defect" not in part, (mode, sid)
+            if mode != "none":
+                assert part.count(mode.encode()) == _response_part(transcripts["none"][sid]).lower().count(mode.encode()), (mode, sid)
+
+
+def test_the_defect_is_visible_only_in_the_ready_line_and_the_arguments(tmp_path):
+    for mode in ("discount", "settings"):
+        with s.spawn(tmp_path, defect=mode) as run:
+            assert run.ready["defect"] == mode
+            health = s.run_scenario(run.url, [("h", "GET", "/health", None), ("o", "GET", "/", None)])
+            assert mode.encode() not in _response_part(health["h"]).lower()
+            assert b"defect" not in health["h"] and b"defect" not in health["o"]
+            run.proc.terminate()
+            run.proc.wait(timeout=30)
 
 
 def test_the_discount_defect_leaves_every_orders_total_equal_to_its_subtotal_and_settings_work(transcripts):

@@ -69,7 +69,7 @@ cents only. Orders 102 and 103 sit on either side of the threshold; 104 exercise
 
 | Method and path | Response |
 |---|---|
-| `GET /health` | `{"defect": "<active defect>", "status": "ok"}` |
+| `GET /health` | `{"status": "ok"}`, byte-identical in every defect mode. |
 | `GET /` | Index page with links. `GET /favicon.ico` is an empty 204. |
 | `GET /login`, `POST /login` | Form with labelled `Email` and `Password`. Success: 303 to `/account` and cookie `sid=sess-NNNN`. Failure: 303 to `/login?bad=1`, which shows `role=alert` "Wrong email or password". |
 | `GET /account` | "Welcome, alice" with a link to settings; 303 to `/login` when anonymous. |
@@ -93,8 +93,9 @@ Exactly one defect at most (`--defect`, or `create_server(defect=...)`); there i
 | `discount` | The discount rule is not applied: `discount_cents` is 0 and the total equals the subtotal. | `/api/discount` for subtotals of at least 10000; `/api/orders`, `/api/orders/101`, `/103`, `/104`; `/orders`, `/orders/101`, `/103`, `/104`. Orders 102 (below the threshold), unknown ids, validation errors and all of settings are unchanged. |
 | `settings` | Saving settings is acknowledged but nothing is stored. | After a save: `GET /settings` (with or without `?saved=1`) and `GET /api/me/settings` keep the previous values. The `POST /settings` response itself, login, orders and the rule are unchanged. |
 
-`/health` names the active defect, so it differs in every defect mode by that one field. The tests diff the complete response
-set of each mode against `none` and fail unless the difference is exactly the one in this table.
+The app never reveals which defect is seeded: `/health` is byte-identical in every mode and no response body or header names the
+active defect. The defect is visible only to whoever starts the process (its arguments and the stdout `ready` line). The tests diff
+the complete response set of each mode against `none` and fail unless the difference is exactly the one in this table.
 
 ## Request log
 
@@ -139,7 +140,7 @@ a reference that does not share the engine's code or the app's.
 ## Tests
 
 ```text
-python -m pytest -q packages/qa-fixture-app/tests
+python -m pytest -q packages/qa-fixture-app/tests     # run from the repository root; the package is not in the root testpaths, CI job `fixture-app` runs it
 python packages/qa-fixture-app/tests/regen_golden.py     # rewrite tests/golden from the current code; review the diff
 ```
 

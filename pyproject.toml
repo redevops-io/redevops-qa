@@ -12,7 +12,6 @@ testpaths = [
     "packages/qa-robot/tests",
     "packages/qa-appium/tests",
     "packages/qa-checks/tests",
-    "packages/qa-fixture-app/tests",
 ]
 pythonpath = [
     "packages/qa-bridge/src",

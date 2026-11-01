@@ -27,7 +27,7 @@ def test_the_ready_line_is_one_json_line_naming_a_loopback_url_and_the_defect(tm
                          "url": "http://127.0.0.1:%d" % ready["port"]}
         assert ready["port"] > 0
         status = s.run_scenario(run.url, [("h", "GET", "/health", None)])["h"]
-        assert b'"defect": "discount"' in status
+        assert b'"status": "ok"' in status and b"discount" not in status
         run.proc.terminate()
         assert run.proc.wait(timeout=30) == 0
 
