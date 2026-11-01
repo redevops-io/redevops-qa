@@ -175,7 +175,18 @@ def test_a_popup_is_closed_and_the_session_still_has_one_page(session):
     goto(adapter, handle, server, "/popup")
     act(adapter, handle, ActionKind.CLICK, one(adapter, handle, LocatorDescriptor(role="link", name="Open")))
     ds = adapter._sessions[handle.session_id].ds
-    assert on_worker(ds, lambda inner: len(inner._context.pages)) == 1
+
+    def pages_after_the_popup_is_closed(inner):
+        # The popup is closed from the page event handler, and the browser reports the close asynchronously: the context can still
+        # list the popup for a moment after the click returns. Playwright's sync API delivers events only while it is being called,
+        # so give it a bounded time to do so; the page count must still reach one, and a popup that is never closed fails here.
+        for _ in range(50):
+            if len(inner._context.pages) == 1:
+                break
+            inner._page.wait_for_timeout(100)
+        return len(inner._context.pages)
+
+    assert on_worker(ds, pages_after_the_popup_is_closed) == 1
 
 
 def test_a_download_link_does_not_break_the_session_and_nothing_is_saved(session):
