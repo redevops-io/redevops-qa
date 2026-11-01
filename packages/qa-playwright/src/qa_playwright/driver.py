@@ -106,7 +106,7 @@ class ElementQuery:
 
 @dataclass(frozen=True)
 class ElementInfo:
-    ref: str                       # opaque to the adapter; stable for one element while it stays attached
+    ref: str                       # opaque to the adapter; stable for one element while it stays attached to the document it was resolved in
     role: str
     name: str
     visible: bool
