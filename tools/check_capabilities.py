@@ -11,7 +11,8 @@ What it checks (offline, no network, no secret, except the explicit ``--verify-c
 * each ``test_level`` is supported by its evidence (no level without the kind of evidence it needs) and the entry's level is the strongest one
   reached anywhere;
 * the manifest and the adapters' manifests in code agree on adapter ids, adapter versions, engine versions and execution modes;
-* freshness: every ``last_verified_sha`` (and every CI evidence head commit) is an ancestor of the main branch;
+* freshness: every ``last_verified_sha`` (and every CI evidence head commit) is an ancestor of the main branch; with ``--verify-ci`` every cited run
+  is also green as a whole, not only the cited job;
 * ``docs/QA_CAPABILITIES.md`` equals the document generated from the JSON.
 
 Usage: ``python tools/check_capabilities.py [--root DIR] [--main-ref REF] [--no-freshness] [--write-docs] [--verify-ci] [--cross-check]``.
@@ -345,7 +346,7 @@ def _code(text: Any) -> str:
 
 def evidence_link(ev: Dict[str, Any]) -> str:
     if ev["kind"] == "ci-job":
-        return f"[CI run {ev['run_id']}]({ev['run_url']}), [job {ev['job_id']}]({ev['url']}) ({_cell(ev['job_name'])}; {_cell(ev['tests'])})"
+        return f"[CI run {ev['run_id']}]({ev['run_url']}) (whole run green), [job {ev['job_id']}]({ev['url']}) ({_cell(ev['job_name'])}; {_cell(ev['tests'])})"
     return f"[{_cell(ev['path'])}]({_relative_from_docs(ev['path'])})"
 
 
@@ -464,6 +465,8 @@ def verify_ci_problems(manifest: Dict[str, Any], fetch: Callable[[str], Any] = _
                 continue
             if run.get("head_sha") != ev["head_sha"]:
                 out.append(f"{at}: run {ev['run_id']} head is {run.get('head_sha')}, not {ev['head_sha']}")
+            if run.get("conclusion") != ev["run_conclusion"]:
+                out.append(f"{at}: run {ev['run_id']} as a whole concluded {run.get('conclusion')}, not {ev['run_conclusion']} (a visitor following the link must not see a red run)")
             job = next((j for j in jobs.get("jobs", []) if j.get("id") == ev["job_id"]), None)
             if job is None:
                 out.append(f"{at}: run {ev['run_id']} has no job {ev['job_id']}")

@@ -177,6 +177,7 @@
           "completed_on": "2026-11-01",
           "tests": "28 passed, 0 skipped, 0 failed",
           "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "run_conclusion": "success",
           "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716422274"
         },
         {
@@ -332,6 +333,7 @@
           "completed_on": "2026-11-01",
           "tests": "11 passed, 0 skipped, 0 failed",
           "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "run_conclusion": "success",
           "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398989"
         },
         {
@@ -348,6 +350,7 @@
           "completed_on": "2026-11-01",
           "tests": "135 passed, 0 skipped, 0 failed",
           "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "run_conclusion": "success",
           "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398886"
         }
       ],
@@ -472,6 +475,7 @@
           "completed_on": "2026-11-01",
           "tests": "10 passed, 0 skipped, 0 failed",
           "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "run_conclusion": "success",
           "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399117"
         },
         {
@@ -488,6 +492,7 @@
           "completed_on": "2026-11-01",
           "tests": "133 passed, 0 skipped, 0 failed",
           "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "run_conclusion": "success",
           "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399114"
         }
       ],
@@ -673,6 +678,7 @@
           "completed_on": "2026-11-01",
           "tests": "5 passed, 1 deselected (the device test), 0 skipped, 0 failed",
           "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "run_conclusion": "success",
           "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399113"
         },
         {
@@ -689,6 +695,7 @@
           "completed_on": "2026-11-01",
           "tests": "69 passed, 0 skipped, 0 failed",
           "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "run_conclusion": "success",
           "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399045"
         },
         {

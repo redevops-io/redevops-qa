@@ -76,7 +76,7 @@ Dependencies:
 
 Evidence:
 
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543), [job 124716422274](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716422274) (browser lane; 28 passed, 0 skipped, 0 failed): real Chromium through Playwright 1.64.1; the job runs the browser tests of qa-playwright and of qa-egress and fails on zero tests or any skip. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716422274](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716422274) (browser lane; 28 passed, 0 skipped, 0 failed): real Chromium through Playwright 1.64.1; the job runs the browser tests of qa-playwright and of qa-egress and fails on zero tests or any skip. Head commit `938eb486b508`, completed 2026-11-01.
 * [packages/qa-playwright/tests/browser](../packages/qa-playwright/tests/browser): the tests the browser lane runs for this adapter.
 
 Limitations:
@@ -120,8 +120,8 @@ Dependencies:
 
 Evidence:
 
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543), [job 124716398989](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398989) (selenium browser lane; 11 passed, 0 skipped, 0 failed): real Chrome and ChromeDriver through Selenium 4.52.0: the interactive driver against a loopback page and a real Selenium suite run under the supervisor. Head commit `938eb486b508`, completed 2026-11-01.
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543), [job 124716398886](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398886) (selenium adapter (offline; 135 passed, 0 skipped, 0 failed): the adapter against a fake browser and recorded pytest JUnit reports, with real pytest under the supervisor; no Selenium installed. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716398989](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398989) (selenium browser lane; 11 passed, 0 skipped, 0 failed): real Chrome and ChromeDriver through Selenium 4.52.0: the interactive driver against a loopback page and a real Selenium suite run under the supervisor. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716398886](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398886) (selenium adapter (offline; 135 passed, 0 skipped, 0 failed): the adapter against a fake browser and recorded pytest JUnit reports, with real pytest under the supervisor; no Selenium installed. Head commit `938eb486b508`, completed 2026-11-01.
 
 Limitations:
 
@@ -160,8 +160,8 @@ Dependencies:
 
 Evidence:
 
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543), [job 124716399117](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399117) (robot real lane; 10 passed, 0 skipped, 0 failed): real Robot Framework 7.5 run by the supervisor through the suite adapter: native statuses, selectors, library refusals, timeout, scrubbed environment. Head commit `938eb486b508`, completed 2026-11-01.
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543), [job 124716399114](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399114) (robot adapter (offline; 133 passed, 0 skipped, 0 failed): the importer against output.xml files recorded from real runs and against hostile ones, plus the allowlist scan; no Robot Framework installed. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399117](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399117) (robot real lane; 10 passed, 0 skipped, 0 failed): real Robot Framework 7.5 run by the supervisor through the suite adapter: native statuses, selectors, library refusals, timeout, scrubbed environment. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399114](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399114) (robot adapter (offline; 133 passed, 0 skipped, 0 failed): the importer against output.xml files recorded from real runs and against hostile ones, plus the allowlist scan; no Robot Framework installed. Head commit `938eb486b508`, completed 2026-11-01.
 
 Limitations:
 
@@ -207,8 +207,8 @@ Dependencies:
 Evidence:
 
 * [packages/qa-appium/README.md](../packages/qa-appium/README.md): local run observed on 2026-11-01, Apple-silicon Mac, Android 17 (API 37, arm64-v8a, Google APIs with Play) emulator, Appium 3.9.0, UiAutomator2 8.7.3, client 6.1.1; 3 run(s); one test (the Settings app opens on the attached device and the screenshot is a real PNG): 0 skipped, 0 failed in each of three runs; a full adapter session on the same emulator also passed open_app, read, check, tap, type and back but is not part of the suite. a real Android emulator session through the adapter, recorded in the package README; the tested tree is not recorded, so the commit that records it is used.
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543), [job 124716399113](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399113) (appium server lane; 5 passed, 1 deselected (the device test), 0 skipped, 0 failed): real Appium 3.9.0 server and client 6.1.1 on loopback with no Android SDK and no device; drives no app. Head commit `938eb486b508`, completed 2026-11-01.
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543), [job 124716399045](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399045) (appium adapters (offline; 69 passed, 0 skipped, 0 failed): the adapter against a fake device, capabilities and server policy; no Appium installed. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399113](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399113) (appium server lane; 5 passed, 1 deselected (the device test), 0 skipped, 0 failed): real Appium 3.9.0 server and client 6.1.1 on loopback with no Android SDK and no device; drives no app. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399045](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399045) (appium adapters (offline; 69 passed, 0 skipped, 0 failed): the adapter against a fake device, capabilities and server policy; no Appium installed. Head commit `938eb486b508`, completed 2026-11-01.
 * [.github/workflows/appium-android.yml](../.github/workflows/appium-android.yml): the manual device workflow (Run workflow, naming a worker with an emulator or device); it has no run in Actions.
 
 Limitations:

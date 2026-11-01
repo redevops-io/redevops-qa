@@ -87,7 +87,7 @@
     "verified_by": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["workflow", "job_key", "job_name", "run_id", "job_id", "head_sha", "run_url", "url", "completed_on", "summary"],
+      "required": ["workflow", "job_key", "job_name", "run_id", "job_id", "head_sha", "source_commit", "run_conclusion", "run_url", "url", "completed_on", "summary"],
       "properties": {
         "workflow": {"const": "tests.yml"},
         "job_key": {"$ref": "#/$defs/slug"},
@@ -95,6 +95,8 @@
         "run_id": {"type": "integer", "minimum": 1},
         "job_id": {"type": "integer", "minimum": 1},
         "head_sha": {"$ref": "#/$defs/sha"},
+        "source_commit": {"$ref": "#/$defs/sha"},
+        "run_conclusion": {"enum": ["success"]},
         "run_url": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+$"},
         "url": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+/job/[0-9]+$"},
         "completed_on": {"$ref": "#/$defs/date"},
