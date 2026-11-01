@@ -66,3 +66,28 @@ def descendants(root: int, table=None):
 def group_members(pgids, table=None):
     table = table or process_table()
     return {pid for pid, (_, pgid, _) in table.items() if pgid in pgids}
+
+
+def run_limited(argv, *, timeout=30.0, mem_mb=1536, env=None, cwd=None):
+    """Run ``argv`` in a child that cannot take the machine down: its own process group, killed whole at ``timeout`` (the test FAILS then, it never waits longer), a cap on its address space
+    where the platform enforces one (Linux: ``RLIMIT_AS``; macOS ignores it, the timeout and the capped writers are the protection there) and a CPU-time cap."""
+    import resource
+    import signal
+    import subprocess
+
+    def limits():
+        os.setsid()
+        for what, value in ((getattr(resource, "RLIMIT_AS", None), mem_mb * 1024 * 1024), (resource.RLIMIT_CPU, int(timeout) + 5)):
+            if what is not None:
+                try:
+                    resource.setrlimit(what, (value, value))
+                except (ValueError, OSError):
+                    pass
+    proc = subprocess.Popen(argv, preexec_fn=limits, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        raise AssertionError(f"the child did not finish within {timeout:g} seconds (it was killed): {argv[:4]}")
+    return proc.returncode, out, err

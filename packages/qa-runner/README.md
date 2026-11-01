@@ -80,6 +80,14 @@ native status that says so; its assertions are `INCONCLUSIVE`; the run is never 
 (`accounting.results[].verdict`) are separate fields with disjoint vocabularies. For the browser lane the native status is the harness executor's outcome
 (`PASS` becomes `NATIVE_PASS`, `PRODUCT_FAIL` becomes `NATIVE_FAIL`, anything else `NATIVE_ERROR` or `NATIVE_TIMEOUT`); it is never converted into a verdict.
 
+## Bounded reads
+
+Every file this package reads that it did not write itself (a plan or lock, what a lane or the target wrote, the lane input) goes through `safe_read.read_regular`: one descriptor opened without blocking,
+`fstat`-ed, refused unless it is a regular file (a FIFO, a device, a directory and a symbolic link in a lane's output are refused unread), refused above the byte cap before any read, read with a running
+total that stops at the cap (a file that grows while it is read), and read within a deadline. The reference check of the target has the same shape for network reads: no answer above 1 MiB, a total deadline
+of 30 seconds for the whole check (a watcher ends the connection; a server that sends one byte every few seconds does not stretch it) and the run's cancel ends it. The tests that probe this run in a child with
+a hard timeout, FIFOs with no writer or with a capped one, a sparse file and a growing file; none opens an unbounded source.
+
 ## Bundle contents
 
 ```

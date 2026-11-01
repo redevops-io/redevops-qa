@@ -34,6 +34,7 @@ from .egress import policy_config
 from .errors import EnvironmentFault, PlanError
 from .corroborate import REFERENCE_CHECK_PATH, request_log_path
 from .judge import observation_document, observation_path
+from .safe_read import UnsafeRead, read_regular
 from .plan import FrozenLane, FrozenPlan, materialise_spec
 from .procs import FixtureApp, child_env, make_workdir, run_child
 
@@ -97,11 +98,10 @@ def exit_code_for(report: Mapping[str, Any], cancelled: bool = False) -> int:
 
 
 def _read_bounded(path: Path, limit: int) -> Optional[bytes]:
+    """A file a lane or the target wrote: read through ``safe_read`` (one descriptor, regular files only, no symlink, byte and time caps), or ``None``."""
     try:
-        if not path.is_file() or path.is_symlink() or path.stat().st_size > limit:
-            return None
-        return path.read_bytes()
-    except OSError:
+        return read_regular(str(path), max_bytes=limit, deadline_s=10.0, follow_symlinks=False)
+    except UnsafeRead:
         return None
 
 
@@ -268,7 +268,7 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
             window = b"".join(l + b"\n" for l in _log_lines(req_path)[before:])       # what the target itself served while this lane ran
             outcomes.append(dataclasses.replace(out, files={**out.files, request_log_path(fl.lane_id): (window, "log")}))
         if origin is not None and not (opts.cancel is not None and opts.cancel.cancelled) and any(l.probes for l in frozen.lanes):
-            reference = _reference_check(origin, log)          # after every lane: the check saves one setting in the (throwaway) target
+            reference = _reference_check(origin, log, opts.cancel)          # after every lane: the check saves one setting in the (throwaway) target
     finally:
         app.stop()
     request_log = _read_bounded(req_path, 16 * 1024 * 1024) or b""
@@ -296,11 +296,11 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
                       lanes=tuple((l["lane_id"], l["native"]["status"]) for l in report["lanes"]), cancelled=cancelled)
 
 
-def _reference_check(origin: str, log: List[str]) -> Optional[Dict[str, Any]]:
+def _reference_check(origin: str, log: List[str], cancel: Any = None) -> Optional[Dict[str, Any]]:
     """The independent probe of the target: ``qa_fixture_app.reference_check`` restates the seed data and the rule on its own and talks plain HTTP. ``None`` when it cannot run."""
     try:
         from qa_fixture_app.reference_check import run_checks
-        result = run_checks(origin)
+        result = run_checks(origin, cancelled=(lambda: cancel.cancelled) if cancel is not None else None)       # bounded in bytes and in total time, and ended by a cancel
         return json.loads(json.dumps(result))
     except Exception as exc:
         log.append(f"the reference check of the target could not run ({type(exc).__name__})")

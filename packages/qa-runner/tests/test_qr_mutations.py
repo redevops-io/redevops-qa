@@ -111,6 +111,16 @@ CASES = [
      [t(ORCH, "test_a_lane_deadline_outside_1_to_3600_is_refused_before_anything_starts")]),
     ("a run id that could be read as a cut-off digest is not generated", "orchestrate.py", "base64.b32encode", "base64.b16encode",
      [t(ORCH, "test_a_generated_run_id_has_64_random_bits_and_fits_the_lane_ids_and_is_not_read_as_a_cut_off_digest")]),
+    # ---- bounded reads (retest R1) and the bounded reference check (R3) -----------------------------------------------------------------------
+    ("a read refuses what is not a regular file", "safe_read.py", "        if not stat.S_ISREG(info.st_mode):", "        if False:", [t("test_qr_safe_read.py", "test_a_fifo_with_no_writer_is_refused_at_once_and_nothing_hangs"), t("test_qr_safe_read.py", "test_a_fifo_fed_more_than_the_cap_is_refused_without_a_single_byte_being_read")]),
+    ("a read is opened without blocking", "safe_read.py", "os.O_RDONLY | os.O_NONBLOCK |", "os.O_RDONLY |", [t("test_qr_safe_read.py", "test_a_fifo_with_no_writer_is_refused_at_once_and_nothing_hangs")]),
+    ("a read refuses a file larger than the cap at the open", "safe_read.py", "        if info.st_size > max_bytes:", "        if False:", [t("test_qr_safe_read.py", "test_a_file_larger_than_the_cap_is_refused_before_a_single_read")]),
+    ("a read stops at the cap whatever the size said", "safe_read.py", "            if total > max_bytes:", "            if False:", [t("test_qr_safe_read.py", "test_the_running_total_caps_a_read_whose_size_was_small_at_the_open")]),
+    ("a read has a deadline", "safe_read.py", "            if time.monotonic() > end:", "            if False:", [t("test_qr_safe_read.py", "test_a_read_that_runs_out_of_time_is_stopped")]),
+    ("an internal read never follows a symlink", "safe_read.py", " | getattr(os, \"O_NOFOLLOW\", 0)", "", [t("test_qr_safe_read.py", "test_an_internal_read_never_follows_a_symlink_and_never_opens_a_fifo_blocking")]),
+    ("the plan is read through the bounded read", "cli.py", "        return read_regular(path, max_bytes=MAX_PLAN_BYTES, deadline_s=PLAN_READ_SECONDS)", "        return open(path, 'rb').read()", [t("test_qr_safe_read.py", "test_a_fifo_with_no_writer_is_refused_at_once_and_nothing_hangs")]),
+    ("the lane and target files are read through the bounded read", "orchestrate.py", "        return read_regular(str(path), max_bytes=limit, deadline_s=10.0, follow_symlinks=False)", "        return path.read_bytes() if path.is_file() and not path.is_symlink() else None", [t("test_qr_safe_read.py", "test_the_orchestrators_reads_of_lane_and_target_files_are_the_same_bounded_read")]),
+    ("the reference check is cancellable", "orchestrate.py", "cancelled=(lambda: cancel.cancelled) if cancel is not None else None)", "cancelled=None)", [t(ORCH, "test_the_reference_check_of_a_stalled_target_ends_when_the_run_is_cancelled")]),
     # ---- lane_browser.py -------------------------------------------------------------------------------------------------------------
     ("declared preconditions cannot be attested", "lane_browser.py", "        return True if not spec.preconditions else None", "        return True",
      [t(PARTS, "test_preconditions_and_fixtures_nothing_here_can_attest_are_unknown_never_true")]),
