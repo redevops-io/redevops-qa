@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """seed-copy: a copy in a work root, one named deterministic transformation, a recorded diff, and a list of refusals."""
+import hashlib
+import itertools
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -9,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import qc_protected as QP
 from redevops_qa_checks import cli
 from redevops_qa_checks import seed_copy as SC
 from redevops_qa_checks.manifests import tree_digest
@@ -242,7 +246,7 @@ def test_the_record_the_diff_and_the_marker_describe_exactly_what_changed(source
     on_disk = json.loads((work / "v1.record.json").read_text(encoding="utf-8"))
     assert on_disk == rec and rec["diff_sha256"] == json.loads((work / "v1" / ".qa-dev-variant").read_text(encoding="utf-8"))["diff_sha256"]
     marker = json.loads((work / "v1" / SC.DEV_MARKER_FILE).read_text(encoding="utf-8"))
-    assert marker["dev"] is True and "not part of any sealed" in marker["note"]
+    assert marker["dev"] is True and "not part of any protected or reference set" in marker["note"]
 
 
 def test_applying_the_diff_to_the_source_gives_the_copy(source, work, base):
@@ -387,42 +391,128 @@ def test_a_source_that_is_a_link_or_a_file_or_missing_is_refused(source, work, b
         assert reason(e) == why
 
 
-@pytest.mark.parametrize("word", ["frozen", "sealed", "heldout", "held-out", "baseline-freeze", "pinned-head", "Frozen", "x_frozen_y"])
+@pytest.mark.parametrize("word", QP.TOKENS)
 def test_a_path_that_names_a_protected_corpus_is_refused_as_source_and_as_work_root(base, word):
-    bad_source = base / f"{word}-corpus"
-    bad_source.mkdir()
-    (bad_source / "a.yaml").write_text(SERVICE, encoding="utf-8")
-    good_work = SC.create_work_root(base / "ok-work")
+    for i, variant in enumerate((word, word.upper(), word.title(), f"x_{word}_y", f"{word}-corpus", f"corpus.{word}")):
+        bad_source = base / f"s{i}" / variant                                      # one directory per variant (case-insensitive file systems)
+        bad_source.mkdir(parents=True)
+        (bad_source / "a.yaml").write_text(SERVICE, encoding="utf-8")
+        good_work = SC.create_work_root(base / f"ok-work-{i}")
+        with pytest.raises(SC.SeedRefused) as e:
+            SC.seed_copy(bad_source, good_work, "v1", "change-port", {"from_port": 8080, "to_port": 9})
+        assert reason(e) == "SOURCE_PROTECTED_MARKER" and not (good_work / "v1").exists(), variant
+        with pytest.raises(SC.SeedRefused) as e:
+            SC.create_work_root(base / f"{variant}-work")
+        assert reason(e) == "OUTPUT_PROTECTED_MARKER", variant
+
+
+@pytest.mark.parametrize("word", QP.TOKENS)
+def test_a_path_segment_anywhere_in_the_source_path_is_enough(base, word):
+    deep = base / word / "inner" / "tree"
+    deep.mkdir(parents=True)
+    (deep / "a.yaml").write_text(SERVICE, encoding="utf-8")
+    w = SC.create_work_root(base / "w-deep")
     with pytest.raises(SC.SeedRefused) as e:
-        SC.seed_copy(bad_source, good_work, "v1", "change-port", {"from_port": 8080, "to_port": 9})
-    assert reason(e) == "SOURCE_PROTECTED_MARKER" and not (good_work / "v1").exists()
-    with pytest.raises(SC.SeedRefused) as e:
-        SC.create_work_root(base / f"{word}-work")
-    assert reason(e) == "OUTPUT_PROTECTED_MARKER"
+        SC.seed_copy(deep, w, "v1", "change-port", {"from_port": 8080, "to_port": 9})
+    assert reason(e) == "SOURCE_PROTECTED_MARKER"
 
 
-@pytest.mark.parametrize("name", ["frozen-copy", "sealed", "heldout-1", "held-out", "baseline-freeze", "x.frozen.y"])
-def test_an_output_name_that_names_a_protected_corpus_is_refused(source, work, name):
-    with pytest.raises(SC.SeedRefused) as e:
-        SC.seed_copy(source, work, name, "change-port", {"from_port": 8080, "to_port": 9})
-    assert reason(e) == "OUTPUT_PROTECTED_MARKER" and not (work / name).exists()
+@pytest.mark.parametrize("word", QP.TOKENS)
+def test_an_output_name_that_names_a_protected_corpus_is_refused(source, work, word):
+    for name in (word, f"{word}-copy", f"{word}-1", f"x.{word}.y"):
+        if not SC._NAME.fullmatch(name):
+            continue
+        with pytest.raises(SC.SeedRefused) as e:
+            SC.seed_copy(source, work, name, "change-port", {"from_port": 8080, "to_port": 9})
+        assert reason(e) == "OUTPUT_PROTECTED_MARKER" and not (work / name).exists(), name
 
 
-def test_ordinary_names_that_merely_contain_the_letters_are_not_refused(base):
-    d = base / "unfrozenish"
+@pytest.mark.parametrize("word", QP.TOKENS)
+def test_names_that_only_contain_the_letters_are_not_refused(base, word):
+    for i, name in enumerate(QP.near_misses(word)):
+        assert SC.has_marker(base / name) is None, name
+    d = base / QP.near_misses(word)[0]
     d.mkdir()
     (d / "a.yaml").write_text(SERVICE, encoding="utf-8")
     w = SC.create_work_root(base / "w-ok")
     SC.seed_copy(d, w, "ok-1", "change-port", {"from_port": 8080, "to_port": 9})
-    assert SC.has_marker(base / "reselling-sealing") is None
+    assert SC.has_marker(base / "reselling-sealing") is None and SC.has_marker(base / "unfrozenish") is None
 
 
-@pytest.mark.parametrize("marker", sorted(SC.MARKER_FILES))
-def test_a_source_that_contains_a_marker_file_is_refused(source, work, marker):
-    (source / marker).write_text("x", encoding="utf-8")
+@pytest.mark.parametrize("marker", QP.MARKER_FILES)
+def test_a_source_that_contains_an_earlier_marker_file_is_refused(source, work, marker):
+    for name in (marker, marker.upper(), marker.lower()):
+        (source / name).write_text("x", encoding="utf-8")
+        with pytest.raises(SC.SeedRefused) as e:
+            run(source, work, tag="1")
+        assert reason(e) == "SOURCE_PROTECTED_MARKER", name
+        (source / name).unlink()
+    (source / "sub").mkdir()
+    (source / "sub" / marker).write_text("x", encoding="utf-8")                  # in a sub-directory too
     with pytest.raises(SC.SeedRefused) as e:
         run(source, work, tag="1")
     assert reason(e) == "SOURCE_PROTECTED_MARKER"
+
+
+@pytest.mark.parametrize("marker", sorted(SC.MARKER_FILES))
+def test_a_source_that_contains_the_protected_marker_file_is_refused(source, work, marker):
+    assert marker == ".qa-protected"
+    for name in (marker, marker.upper()):
+        (source / name).write_text("", encoding="utf-8")
+        with pytest.raises(SC.SeedRefused) as e:
+            run(source, work, tag="1")
+        assert reason(e) == "SOURCE_PROTECTED_MARKER" and not (work / "v1").exists(), name
+        (source / name).unlink()
+    (source / "app" / marker).mkdir()                                               # a directory of that name marks the tree as well
+    with pytest.raises(SC.SeedRefused) as e:
+        run(source, work, tag="1")
+    assert reason(e) == "SOURCE_PROTECTED_MARKER"
+
+
+def test_file_names_that_only_resemble_a_marker_file_do_not_refuse_the_source(source, work):
+    for marker in (*QP.MARKER_FILES, ".qa-protected"):
+        for name in (marker + "x", "x" + marker, marker + ".txt"):
+            (source / name).write_text("x", encoding="utf-8")
+    for name in ("qa-protected", ".qa_protected"):
+        (source / name).write_text("x", encoding="utf-8")
+    run(source, work, tag="1")                                                      # none of them is a marker file
+
+
+def test_the_digest_lists_are_exactly_the_digests_of_the_test_only_lists():
+    assert set(SC.PROTECTED_TOKEN_DIGESTS) == {hashlib.sha256(t.encode()).hexdigest() for t in QP.TOKENS}
+    assert set(SC.LEGACY_MARKER_FILE_DIGESTS) == {hashlib.sha256(t.lower().encode()).hexdigest() for t in QP.MARKER_FILES}
+    assert tuple(SC.PROTECTED_MARKERS) == tuple(SC.PROTECTED_TOKEN_DIGESTS) and len(SC.PROTECTED_TOKEN_DIGESTS) == len(set(SC.PROTECTED_TOKEN_DIGESTS))
+    assert all(re.fullmatch(r"[0-9a-f]{64}", d) for d in (*SC.PROTECTED_TOKEN_DIGESTS, *SC.LEGACY_MARKER_FILE_DIGESTS))
+
+
+def _generated_components():
+    pieces = [*QP.TOKENS, "x", "un", "s", "ed", "freeze", "held", "head", "out", "pinned", "baseline", "1"]
+    seps = ["", "-", "_", ".", " ", "--", "\u00e9"]
+    for a, sep1, b, sep2, c in itertools.product(pieces, seps, pieces, seps, pieces):
+        yield a + sep1 + b + sep2 + c
+    swaps = {"s": "\u017f", "k": "\u212a", "i": "\u0130"}
+    for t in QP.TOKENS:
+        yield "".join(swaps.get(ch, ch) for ch in t)                                # letters that match an ASCII letter when case is ignored
+        yield "".join(swaps.get(ch, ch) for ch in t).upper()
+        yield "\u0131".join(t.split("i"))
+        yield t.upper()
+        yield t.title()
+
+
+def test_the_digest_matcher_refuses_exactly_what_the_original_word_matcher_refused():
+    n = 0
+    for part in _generated_components():
+        n += 1
+        assert (SC.part_marker(part) is not None) == (QP.reference_part_marker(part) is not None), repr(part)
+    assert n > 100000
+
+
+@pytest.mark.parametrize("word", QP.TOKENS)
+def test_the_refusal_does_not_print_the_token(base, word):
+    with pytest.raises(SC.SeedRefused) as e:
+        SC.create_work_root(base / f"{word}-w")
+    shown = json.dumps(e.value.details, default=str) + str(e.value)
+    assert word not in shown.lower() and e.value.details["marker"] == hashlib.sha256(word.encode()).hexdigest()[:16]
 
 
 def test_an_existing_output_or_diff_or_record_is_refused_and_left_alone(source, work):

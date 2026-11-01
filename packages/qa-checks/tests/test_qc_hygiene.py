@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
-"""Repository hygiene for this package: no secret-shaped strings, neutral wording, no frozen-source markers, determinism
-across hash seeds, and identical results on repeat runs. Patterns are assembled at run time so this file does not match them."""
+"""Repository hygiene for this package: no secret-shaped strings, neutral wording, determinism across hash seeds, and identical
+results on repeat runs. Patterns are assembled at run time so this file does not match them. The repository-wide list of terms that
+must not appear (held as digests) is checked by ``tests/test_neutral_wording.py``."""
 import os
 import re
 import subprocess
@@ -33,9 +34,6 @@ SECRET_SHAPES = {
 WORDING = {
     "role words": re.compile(j(r"\b(?:ow", "ner|inte", "grator)\b"), re.I),
     "stage labels": re.compile(j(r"\b(?:I[1-5]|H[0-9]|Q[1-9]|B[1-3]|C[1-4]|R[1-5]|G[0-9]|S[1-7]|TK-D[0-9]|RK[0-9]+)\b")),
-    "programme wording": re.compile(j(r"benchmark ", "programme|Track ", "I\\b|Track ", "P\\b|pilot ", "baseline|exploratory ", "infra"), re.I),
-    "internal document names": re.compile(j("REDEVOPS_QA_", "PHASE|REDEVOPS_QA_", "TIER|REDEVOPS_QA_", "SEALED|ADR_", "QA_|_COMPONENT_", "INVENTORY")),
-    "frozen-source wording": re.compile(j("frozen ", "head|frozen ", "PR|sealed ", "mutation|ground ", "truth|held", "-out set|baseline ", "freeze"), re.I),
     "phase wording": re.compile(j("Phase ", "1\\b|workstream ", "[0-9]"), re.I),
 }
 

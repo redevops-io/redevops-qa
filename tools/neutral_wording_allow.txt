@@ -1,0 +1,3 @@
+# Allow-list for tools/check_neutral_wording.py. One entry per line:
+#   <path glob> <first 12 hex digits of the deny-list entry> <reason>
+# The reason is required. An entry that silences nothing fails the check. The list is empty: no tracked file needs an exception.

@@ -9,8 +9,9 @@ The tool exists to produce development variants with a known defect from a devel
 * The output is a new directory the tool creates itself inside a *work root* that the tool created (a directory carrying the
   tool's sentinel, owned by the user, not writable by others, not inside a version-control checkout and not inside the source
   tree). An existing output path is refused; nothing is ever written to a path under a directory the tool did not create.
-* A path (source, work root or output) with a component that names a protected reference corpus (one of the reserved
-  marker words in ``PROTECTED_MARKERS``) is refused, and so is a source tree that contains a marker file.
+* A path (source, work root or output) with a component that names a protected reference corpus (a reserved token, held as a
+  digest in ``PROTECTED_TOKEN_DIGESTS``) is refused, and so is a source tree that contains a marker file: ``.qa-protected``, or one
+  of the earlier marker-file names (held as digests in ``LEGACY_MARKER_FILE_DIGESTS``).
 * The transformation comes from a small library of generic edits (replace a digest with a tag, remove a securityContext field,
   change a port, remove a probe, remove resource limits). Each has a name, a version, a description and a parameter schema,
   runs on YAML text line by line, is deterministic, and fails with ``NO_MATCH`` instead of changing nothing.
@@ -41,11 +42,39 @@ WORK_ROOT_SCHEMA = "qa-checks/seed-work-root/1"
 DEV_MARKER_FILE = ".qa-dev-variant"
 RECORD_SCHEMA = "qa-checks/seed-record/1"
 VCS_NAMES = frozenset({".git", ".hg", ".svn", ".bzr", "_darcs", ".fossil", ".gitmodules", "CVS"})
-#: words that mark a path as a protected reference corpus (matched on whole path-component tokens, case-insensitively)
-PROTECTED_MARKERS: Tuple[str, ...] = ("frozen", "sealed", "heldout", "held-out", "baseline-freeze", "pinned-head")
-MARKER_FILES = frozenset({"FROZEN_HEAD", ".frozen-head", ".frozen", "SEALED", ".sealed"})
+#: Protected trees are recognised without naming them in this source. Two mechanisms, both refusals:
+#:
+#: * a marker file: a file or directory called ``.qa-protected`` anywhere in a source tree (``MARKER_FILES``);
+#: * a path component that carries a reserved token (a whole run of letters and digits, or several runs joined by their own
+#:   separators, bounded by anything else; case-insensitive). The tokens are stored only as SHA-256 digests of their lower-case
+#:   text (``PROTECTED_TOKEN_DIGESTS``) and compared with the digest of every such run of a path component, so adding a token
+#:   means adding a digest. ``PROTECTED_MARKERS`` is the same tuple under its earlier name.
+#:
+#: Tree owners protect a tree today by putting ``.qa-protected`` in it. Earlier marker-file names and the earlier reserved tokens
+#: stay refused through ``LEGACY_MARKER_FILE_DIGESTS`` and the token digests, so nothing that was refused before is accepted now.
+PROTECTED_MARKER_FILE = ".qa-protected"
+MARKER_FILES = frozenset({PROTECTED_MARKER_FILE})
+PROTECTED_TOKEN_DIGESTS: Tuple[str, ...] = (
+    "05bacbb0929cd4b92e3e9062cbc860cb204738c5c6ddcbf6719aa5c40b12a2a5",
+    "c778783227800c8744db2bfac4e9bf570f046edb841cbd6dc7e01ba9b2b8a262",
+    "c9d0036bed6744bcdf692fc980d8717d7e5f5a4f4e8266b4a84982602fb1cd09",
+    "df16c1c51be8437dd9b3608a3acac00ab25f1395a91265780f3793926b9c47fe",
+    "e291dd41cc828cff1bb591fd048aa9120b3457f11d48a23ecb0d1846e200f0c8",
+    "ffb304816a1090313e833215c08dae3d209cfad1ffd1f674f0909a2ae99e1394",
+)
+PROTECTED_MARKERS = PROTECTED_TOKEN_DIGESTS      # the earlier public name; the values are digests, not words
+LEGACY_MARKER_FILE_DIGESTS = frozenset({
+    "11f387770a71fdd0c3947e84e2053a9910a977580ef5334e8eb3d86af4c9ee94",
+    "4b2c9f666fbfc66fbd53743eab6ff4cc712c5da33390a0211803312847fd78a0",
+    "884170781e0536203c0009c801f38b6c3f5494de2a1e8475e87b523dc43976ab",
+    "ad146bff034afeb79112c7362c0008899361ae32486e1d0e9b7f99a3331c4d1f",
+    "c9d0036bed6744bcdf692fc980d8717d7e5f5a4f4e8266b4a84982602fb1cd09",
+})
+MAX_TOKEN_RUNS = 4                                # a token may span at most this many runs of letters and digits
 _NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
-_MARKER_RE = re.compile(r"(?:^|[^a-z0-9])(" + "|".join(re.escape(m) for m in sorted(PROTECTED_MARKERS, key=len, reverse=True)) + r")(?:$|[^a-z0-9])", re.I)
+_RUN = re.compile(r"[a-z0-9]+")
+#: the four non-ASCII letters that a case-insensitive ASCII match treats as ASCII letters
+_FOLD = {"\u0130": "i", "\u0131": "i", "\u017f": "s", "\u212a": "k"}
 MAX_SEED_FILE_BYTES = 4 * 1024 * 1024
 
 
@@ -235,11 +264,40 @@ def _check_params(t: Transformation, raw: Mapping[str, Any]) -> Dict[str, Any]:
 
 # -- paths ---------------------------------------------------------------------------------------------------------------------------------
 
+def _fold(text: str) -> str:
+    """Lower-case ``text`` the way a case-insensitive ASCII match does (one character in, one character out)."""
+    return "".join(_FOLD.get(c, c) for c in text).lower()
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def part_marker(part: str) -> Optional[str]:
+    """The digest of the reserved token that a path component carries, or ``None``. A token is a run of lower-case letters and
+    digits, or up to ``MAX_TOKEN_RUNS`` such runs with their own separators between them, bounded by any other character."""
+    low = _fold(part)
+    runs = list(_RUN.finditer(low))
+    for i in range(len(runs)):
+        for j in range(i, min(i + MAX_TOKEN_RUNS, len(runs))):
+            d = _digest(low[runs[i].start():runs[j].end()])
+            if d in PROTECTED_TOKEN_DIGESTS:
+                return d
+    return None
+
+
+def is_marker_file(name: str) -> bool:
+    """Whether a file or directory name marks the tree that holds it as protected (any letter case)."""
+    low = _fold(name)
+    return low in MARKER_FILES or _digest(low) in LEGACY_MARKER_FILE_DIGESTS
+
+
 def has_marker(path: Path) -> Optional[str]:
+    """The first 16 hex digits of the digest of the reserved token that a component of ``path`` carries, or ``None``."""
     for part in Path(os.path.abspath(path)).parts:
-        m = _MARKER_RE.search(part)
-        if m:
-            return m.group(1).lower()
+        d = part_marker(part)
+        if d:
+            return d[:16]
     return None
 
 
@@ -333,7 +391,7 @@ def read_source(source: Path) -> List[Tuple[str, bytes, int]]:
             full = d / name
             if name in VCS_NAMES:
                 raise SeedRefused("SOURCE_HAS_VCS_METADATA", "the source contains version-control metadata", path=rel)
-            if name in MARKER_FILES:
+            if is_marker_file(name):
                 raise SeedRefused("SOURCE_PROTECTED_MARKER", "the source contains a protected-corpus marker file", path=rel)
             s = os.lstat(full)
             if stat.S_ISLNK(s.st_mode):
@@ -418,7 +476,7 @@ def seed_copy(source: Path, work_root: Path, name: str, transformation: str, par
                        "params": {k: p[k] for k in sorted(p)}, "name": name, "source_tree_sha256": before, "files_changed": changed,
                        "files_total": len(new_files)}
         diff_text = "".join(diffs)
-        marker_doc = {"dev": True, "note": "a development variant made by seed-copy; not part of any sealed or reference set",
+        marker_doc = {"dev": True, "note": "a development variant made by seed-copy; not part of any protected or reference set",
                       "diff_sha256": sha256_ref(diff_text.encode("utf-8"))}
         (out / DEV_MARKER_FILE).write_text(json.dumps(marker_doc, sort_keys=True), encoding="utf-8")
         os.chmod(out / DEV_MARKER_FILE, 0o644)
