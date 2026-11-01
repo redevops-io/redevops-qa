@@ -1,0 +1,863 @@
+{
+  "schema": "redevops-qa/capabilities/1",
+  "manifest_version": 1,
+  "repository": "redevops-io/redevops-qa",
+  "main_branch": "main",
+  "distribution": {
+    "published_packages": false,
+    "install_from": "source-checkout",
+    "licence_wording": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source",
+    "note": "The repository is public and pre-release: no release tag exists and nothing is published to a package registry. Every install path is a checkout of this repository at a named commit, so a package-registry install command does not exist."
+  },
+  "test_levels": {
+    "none": {
+      "title": "No test",
+      "meaning": "No test in this repository exercises the engine through the adapter. An entry may still describe an interface, for example one that reports `unavailable`.",
+      "does_not_mean": "That the engine or the adapter is broken; only that nothing has been shown."
+    },
+    "offline-fake": {
+      "title": "Offline, against fakes",
+      "meaning": "The adapter logic is tested against a fake driver or recorded engine output. The engine itself is not installed and nothing touches a browser or a device.",
+      "does_not_mean": "That the engine works with the adapter; a fake only shows what the adapter does with what the fake returns."
+    },
+    "engine-backed-ci": {
+      "title": "Real engine in a CI job",
+      "meaning": "A CI job installs the pinned engine (and the browser or server it needs) and runs the adapter against it; the job fails, never skips, when a dependency is missing or no test is collected.",
+      "does_not_mean": "Support for other engine versions, browsers, operating systems or architectures than the one named, or that a real device or emulator was driven."
+    },
+    "device-backed-local": {
+      "title": "Real device or emulator, observed locally",
+      "meaning": "A real device or emulator was driven through the adapter by hand on a named machine and the run is recorded in the repository. No CI job repeats it.",
+      "does_not_mean": "That CI re-runs it, that it holds on another machine, API level or device, or that the run is reproducible by anyone without the same setup."
+    },
+    "device-backed-ci": {
+      "title": "Real device or emulator in CI",
+      "meaning": "A CI job drives a real device or emulator through the adapter and fails, never skips, when none is attached.",
+      "does_not_mean": "Coverage beyond the device, operating system version and host named in the evidence."
+    }
+  },
+  "caveats": {
+    "appium_android": [
+      "Android needs a compatible SDK, platform tools, a device or an emulator, the UiAutomator2 driver and host acceleration.",
+      "Starting the Appium server is not a successful real UI session: only an attached device or emulator driven through the adapter shows that.",
+      "The Android SDK, system images and emulator are the operator's, provisioned under Google's terms; they are never bundled or downloaded here."
+    ],
+    "appium_ios": [
+      "iOS needs macOS, Xcode, WebDriverAgent and a supported simulator or device.",
+      "Linux containers are not a complete iOS solution.",
+      "The adapter reports UNAVAILABLE without a real, licensed worker; no iOS session has been run."
+    ],
+    "appium_general": [
+      "A selected Appium adapter may generate client configuration while directing users to external device workers.",
+      "Never imply that a device or emulator is bundled with the runtime."
+    ]
+  },
+  "examples": {
+    "playwright-browser-lane": {
+      "path": "packages/qa-playwright/tests/browser/test_pw_browser_loop.py",
+      "kind": "test-lane",
+      "description": "the real-browser loop test of the Playwright adapter; a test lane, not yet a standalone user example"
+    },
+    "selenium-browser-lane": {
+      "path": "packages/qa-selenium/tests/browser/test_sel_browser.py",
+      "kind": "test-lane",
+      "description": "the real Chrome tests of both Selenium adapters; a test lane, not yet a standalone user example"
+    },
+    "robotframework-real-lane": {
+      "path": "packages/qa-robot/tests/real/test_rb_real.py",
+      "kind": "test-lane",
+      "description": "real Robot Framework suites run through the adapter; a test lane, not yet a standalone user example"
+    },
+    "appium-android-device-lane": {
+      "path": "packages/qa-appium/tests/real/test_ap_android_device.py",
+      "kind": "test-lane",
+      "description": "the Settings-app test run on an attached emulator or device by the manual workflow; a test lane, not yet a standalone user example"
+    }
+  },
+  "engines": [
+    {
+      "engine": "playwright",
+      "display_name": "Playwright (Python)",
+      "adapter_ids": [
+        "qa-playwright"
+      ],
+      "adapter_version": "0.1.0.dev0",
+      "runtime_version": "1.64.1",
+      "os_arch": [
+        {
+          "os_arch": "linux-x86_64",
+          "environment": "GitHub-hosted ubuntu-24.04 runner, Chromium (Chrome for Testing 156.0.8078.4, Playwright chromium v1248)",
+          "test_level": "engine-backed-ci",
+          "scope": "real Chromium driven by the pinned Playwright driver against pages the test serves from loopback",
+          "evidence": [
+            "ev-pw-browser-lane",
+            "ev-pw-tests"
+          ]
+        }
+      ],
+      "install_method": {
+        "method": "source-checkout-pip",
+        "packages": [
+          "packages/qa-playwright"
+        ],
+        "extras": [
+          "browser"
+        ],
+        "published_to_registry": false,
+        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. The browser comes from a separate `python -m playwright install --with-deps chromium` step, and the adapter imports the pinned agent-harness QA module named in pins.toml."
+      },
+      "dependencies": [
+        {
+          "name": "python",
+          "kind": "interpreter",
+          "pin": ">=3.11",
+          "pin_literal": "requires-python = \">=3.11\"",
+          "pin_source": "packages/qa-playwright/pyproject.toml",
+          "provided_by": "operator",
+          "note": "the packages require 3.11 or newer; CI runs 3.12"
+        },
+        {
+          "name": "qa-playwright",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-playwright/pyproject.toml",
+          "provided_by": "install",
+          "note": "the adapter package"
+        },
+        {
+          "name": "playwright",
+          "kind": "pip",
+          "pin": "1.64.1",
+          "pin_literal": "playwright==1.64.1",
+          "pin_source": "packages/qa-playwright/pyproject.toml",
+          "provided_by": "install",
+          "note": "the `browser` extra"
+        },
+        {
+          "name": "chromium",
+          "kind": "browser-binary",
+          "pin": null,
+          "pin_literal": null,
+          "pin_source": null,
+          "provided_by": "operator",
+          "note": "fetched by `playwright install`; the build is chosen by Playwright 1.64.1 (Chrome for Testing 156.0.8078.4 in the CI run recorded below)"
+        },
+        {
+          "name": "agent-harness",
+          "kind": "pinned-source-tree",
+          "pin": "0.2.0",
+          "pin_literal": "tag = \"v0.2.0\"",
+          "pin_source": "pins.toml",
+          "provided_by": "operator",
+          "note": "the harness QA module the adapter imports; pinned by tag and commit in pins.toml and not on a package index"
+        }
+      ],
+      "execution_modes": [
+        "interactive"
+      ],
+      "test_level": "engine-backed-ci",
+      "test_level_scope": "interactive mode, Chromium only, on a GitHub-hosted Linux x86_64 runner",
+      "summary": "A real Chromium session is driven through the adapter in a CI job that fails rather than skips; only Chromium on Linux x86_64 has been exercised.",
+      "last_verified_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+      "last_verified_sha_basis": "ci-head",
+      "last_verified_date": "2026-11-01",
+      "evidence": [
+        {
+          "id": "ev-pw-browser-lane",
+          "kind": "ci-job",
+          "claim": "real Chromium through Playwright 1.64.1; the job runs the browser tests of qa-playwright and of qa-egress and fails on zero tests or any skip",
+          "workflow": "tests.yml",
+          "job_key": "browser",
+          "job_name": "browser lane",
+          "run_id": 41261799543,
+          "job_id": 124716422274,
+          "head_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+          "conclusion": "success",
+          "completed_on": "2026-11-01",
+          "tests": "28 passed, 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716422274"
+        },
+        {
+          "id": "ev-pw-tests",
+          "kind": "repo-path",
+          "path": "packages/qa-playwright/tests/browser",
+          "claim": "the tests the browser lane runs for this adapter"
+        }
+      ],
+      "limitations": [
+        "Chromium only; Firefox and WebKit are not exercised.",
+        "Verified on a Linux x86_64 hosted runner only; macOS, Windows and Linux arm64 have no run.",
+        "The real driver is exercised against pages served from loopback, not against an external site.",
+        "Pre-release adapter (0.1.0.dev0); nothing is published, and the adapter needs the pinned harness tree from pins.toml on its import path.",
+        "The lane is not fully deterministic: the popup test failed once and passed on re-run against the same commit (job 124725855749, run 41264993239, attempt 1; attempt 2 passed), so a green run is evidence, not a guarantee.",
+        "Network isolation is the egress gateway's job (packages/qa-egress); the adapter's request gate is a second layer.",
+        "A native PASS or FAIL from the engine is not the verifier's verdict: the canonical status stays UNVERIFIED until an independent verifier supplies one, and no install profile in this repository installs a verifier yet."
+      ],
+      "license": {
+        "adapter_spdx": "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause",
+        "adapter_wording": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source",
+        "components": [
+          {
+            "matrix_component": "playwright-python",
+            "spdx": "Apache-2.0",
+            "redistribution": "optional_extra"
+          }
+        ]
+      },
+      "docs_url": "packages/qa-playwright/README.md",
+      "example_id": "playwright-browser-lane"
+    },
+    {
+      "engine": "selenium",
+      "display_name": "Selenium (Python)",
+      "adapter_ids": [
+        "selenium-interactive",
+        "selenium-suite"
+      ],
+      "adapter_version": "0.1.0",
+      "runtime_version": "4.52.0",
+      "os_arch": [
+        {
+          "os_arch": "linux-x86_64",
+          "environment": "GitHub-hosted ubuntu-24.04 runner, the runner's Google Chrome and ChromeDriver 156.0.8078.47",
+          "test_level": "engine-backed-ci",
+          "scope": "real Chrome and ChromeDriver through Selenium 4.52.0; the interactive adapter against a loopback page and a real pytest-based Selenium suite imported through the suite adapter",
+          "evidence": [
+            "ev-sel-browser-lane",
+            "ev-sel-offline"
+          ]
+        }
+      ],
+      "install_method": {
+        "method": "source-checkout-pip",
+        "packages": [
+          "packages/qa-adapter-kit",
+          "packages/qa-selenium"
+        ],
+        "extras": [
+          "browser"
+        ],
+        "published_to_registry": false,
+        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. Chrome and ChromeDriver are the host's; the adapter is given their paths and never downloads a browser or a driver."
+      },
+      "dependencies": [
+        {
+          "name": "python",
+          "kind": "interpreter",
+          "pin": ">=3.11",
+          "pin_literal": "requires-python = \">=3.11\"",
+          "pin_source": "packages/qa-selenium/pyproject.toml",
+          "provided_by": "operator",
+          "note": "the packages require 3.11 or newer; CI runs 3.12"
+        },
+        {
+          "name": "qa-adapter-kit",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-adapter-kit/pyproject.toml",
+          "provided_by": "install",
+          "note": "shared protocol, models and supervisor; standard library only"
+        },
+        {
+          "name": "qa-selenium",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-selenium/pyproject.toml",
+          "provided_by": "install",
+          "note": "the adapter package"
+        },
+        {
+          "name": "selenium",
+          "kind": "pip",
+          "pin": "4.52.0",
+          "pin_literal": "selenium==4.52.0",
+          "pin_source": "packages/qa-selenium/pyproject.toml",
+          "provided_by": "install",
+          "note": "the `browser` extra"
+        },
+        {
+          "name": "pytest",
+          "kind": "pip",
+          "pin": ">=8,<10",
+          "pin_literal": "pytest>=8,<10",
+          "pin_source": ".github/workflows/tests.yml",
+          "provided_by": "operator",
+          "note": "needed by the suite mode, which runs a pytest-based suite"
+        },
+        {
+          "name": "google-chrome",
+          "kind": "browser-binary",
+          "pin": null,
+          "pin_literal": null,
+          "pin_source": null,
+          "provided_by": "operator",
+          "note": "the host's own Chrome; the CI run recorded below used 156.0.8078.47"
+        },
+        {
+          "name": "chromedriver",
+          "kind": "driver",
+          "pin": null,
+          "pin_literal": null,
+          "pin_source": null,
+          "provided_by": "operator",
+          "note": "the host's own ChromeDriver matching its Chrome; 156.0.8078.47 in the CI run recorded below"
+        }
+      ],
+      "execution_modes": [
+        "interactive",
+        "suite"
+      ],
+      "test_level": "engine-backed-ci",
+      "test_level_scope": "interactive and suite modes, Chrome only, on a GitHub-hosted Linux x86_64 runner",
+      "summary": "Both modes ran against real Chrome and ChromeDriver in CI; the scope is one browser on one runner image.",
+      "last_verified_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+      "last_verified_sha_basis": "ci-head",
+      "last_verified_date": "2026-11-01",
+      "evidence": [
+        {
+          "id": "ev-sel-browser-lane",
+          "kind": "ci-job",
+          "claim": "real Chrome and ChromeDriver through Selenium 4.52.0: the interactive driver against a loopback page and a real Selenium suite run under the supervisor",
+          "workflow": "tests.yml",
+          "job_key": "selenium-browser",
+          "job_name": "selenium browser lane",
+          "run_id": 41261799543,
+          "job_id": 124716398989,
+          "head_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+          "conclusion": "success",
+          "completed_on": "2026-11-01",
+          "tests": "11 passed, 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398989"
+        },
+        {
+          "id": "ev-sel-offline",
+          "kind": "ci-job",
+          "claim": "the adapter against a fake browser and recorded pytest JUnit reports, with real pytest under the supervisor; no Selenium installed",
+          "workflow": "tests.yml",
+          "job_key": "selenium-offline",
+          "job_name": "selenium adapter (offline",
+          "run_id": 41261799543,
+          "job_id": 124716398886,
+          "head_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+          "conclusion": "success",
+          "completed_on": "2026-11-01",
+          "tests": "135 passed, 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398886"
+        }
+      ],
+      "limitations": [
+        "Chrome and ChromeDriver only; Firefox, Edge and Safari are not exercised.",
+        "Verified on a Linux x86_64 hosted runner only; the browser and driver come from that runner image, so other versions are untested.",
+        "Pages are served from loopback; navigation is default deny and is a check on navigation, not a network filter.",
+        "The suite mode imports JUnit XML from pytest-based Selenium suites only; it does not steer a test.",
+        "Pre-release adapter (0.1.0); nothing is published.",
+        "A native PASS or FAIL from the engine is not the verifier's verdict: the canonical status stays UNVERIFIED until an independent verifier supplies one, and no install profile in this repository installs a verifier yet."
+      ],
+      "license": {
+        "adapter_spdx": "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause",
+        "adapter_wording": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source",
+        "components": [
+          {
+            "matrix_component": "selenium-python",
+            "spdx": "Apache-2.0",
+            "redistribution": "optional_extra"
+          },
+          {
+            "matrix_component": "google-chrome",
+            "spdx": "LicenseRef-Proprietary-Google-Chrome",
+            "redistribution": "excluded_by_default"
+          }
+        ]
+      },
+      "docs_url": "packages/qa-selenium/README.md",
+      "example_id": "selenium-browser-lane"
+    },
+    {
+      "engine": "robotframework",
+      "display_name": "Robot Framework",
+      "adapter_ids": [
+        "robot-suite"
+      ],
+      "adapter_version": "0.1.0",
+      "runtime_version": "7.5",
+      "os_arch": [
+        {
+          "os_arch": "linux-x86_64",
+          "environment": "GitHub-hosted ubuntu-24.04 runner, Robot Framework 7.5 (no browser)",
+          "test_level": "engine-backed-ci",
+          "scope": "real Robot Framework 7.5 started by the supervisor through the suite adapter, output.xml imported",
+          "evidence": [
+            "ev-rb-real-lane",
+            "ev-rb-offline"
+          ]
+        }
+      ],
+      "install_method": {
+        "method": "source-checkout-pip",
+        "packages": [
+          "packages/qa-adapter-kit",
+          "packages/qa-robot"
+        ],
+        "extras": [
+          "robot"
+        ],
+        "published_to_registry": false,
+        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry."
+      },
+      "dependencies": [
+        {
+          "name": "python",
+          "kind": "interpreter",
+          "pin": ">=3.11",
+          "pin_literal": "requires-python = \">=3.11\"",
+          "pin_source": "packages/qa-robot/pyproject.toml",
+          "provided_by": "operator",
+          "note": "the packages require 3.11 or newer; CI runs 3.12"
+        },
+        {
+          "name": "qa-adapter-kit",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-adapter-kit/pyproject.toml",
+          "provided_by": "install",
+          "note": "shared protocol, models and supervisor; standard library only"
+        },
+        {
+          "name": "qa-robot",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-robot/pyproject.toml",
+          "provided_by": "install",
+          "note": "the adapter package"
+        },
+        {
+          "name": "robotframework",
+          "kind": "pip",
+          "pin": "7.5",
+          "pin_literal": "robotframework==7.5",
+          "pin_source": "packages/qa-robot/pyproject.toml",
+          "provided_by": "install",
+          "note": "the `robot` extra"
+        }
+      ],
+      "execution_modes": [
+        "suite"
+      ],
+      "test_level": "engine-backed-ci",
+      "test_level_scope": "suite mode, Robot Framework 7.5 only, on a GitHub-hosted Linux x86_64 runner",
+      "summary": "Real Robot Framework 7.5 suites ran through the adapter in a CI job that fails rather than skips; nothing else about the engine is claimed.",
+      "last_verified_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+      "last_verified_sha_basis": "ci-head",
+      "last_verified_date": "2026-11-01",
+      "evidence": [
+        {
+          "id": "ev-rb-real-lane",
+          "kind": "ci-job",
+          "claim": "real Robot Framework 7.5 run by the supervisor through the suite adapter: native statuses, selectors, library refusals, timeout, scrubbed environment",
+          "workflow": "tests.yml",
+          "job_key": "robot-real",
+          "job_name": "robot real lane",
+          "run_id": 41261799543,
+          "job_id": 124716399117,
+          "head_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+          "conclusion": "success",
+          "completed_on": "2026-11-01",
+          "tests": "10 passed, 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399117"
+        },
+        {
+          "id": "ev-rb-offline",
+          "kind": "ci-job",
+          "claim": "the importer against output.xml files recorded from real runs and against hostile ones, plus the allowlist scan; no Robot Framework installed",
+          "workflow": "tests.yml",
+          "job_key": "robot-offline",
+          "job_name": "robot adapter (offline",
+          "run_id": 41261799543,
+          "job_id": 124716399114,
+          "head_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+          "conclusion": "success",
+          "completed_on": "2026-11-01",
+          "tests": "133 passed, 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399114"
+        }
+      ],
+      "limitations": [
+        "Suite mode only; the adapter does not steer a test.",
+        "Robot Framework 7.5 only, on a Linux x86_64 hosted runner; macOS and Windows have no run.",
+        "Only allowlisted libraries run (BuiltIn, Collections, DateTime, String, XML); browser and process libraries are refused, so this is not a browser lane.",
+        "The library scan is a guard, not a sandbox; a hostile suite is contained by the worker.",
+        "Pre-release adapter (0.1.0); nothing is published.",
+        "A native PASS or FAIL from the engine is not the verifier's verdict: the canonical status stays UNVERIFIED until an independent verifier supplies one, and no install profile in this repository installs a verifier yet."
+      ],
+      "license": {
+        "adapter_spdx": "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause",
+        "adapter_wording": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source",
+        "components": [
+          {
+            "matrix_component": "robotframework",
+            "spdx": "Apache-2.0",
+            "redistribution": "optional_extra"
+          }
+        ]
+      },
+      "docs_url": "packages/qa-robot/README.md",
+      "example_id": "robotframework-real-lane"
+    },
+    {
+      "engine": "appium-android",
+      "display_name": "Appium (Android, UiAutomator2)",
+      "adapter_ids": [
+        "appium-android-interactive"
+      ],
+      "adapter_version": "0.1.0",
+      "runtime_version": "3.9.0",
+      "os_arch": [
+        {
+          "os_arch": "macos-arm64",
+          "environment": "an Apple-silicon Mac with an Android 17 (API 37, arm64-v8a, Google APIs with Play) emulator; macOS version not recorded",
+          "test_level": "device-backed-local",
+          "scope": "one test: the Settings app opens on the attached emulator and a screenshot is a real PNG; three runs in a row, observed by hand and not in CI",
+          "evidence": [
+            "ev-aa-local"
+          ]
+        },
+        {
+          "os_arch": "linux-x86_64",
+          "environment": "GitHub-hosted ubuntu-24.04 runner, Appium 3.9.0 server and client 6.1.1, no Android SDK and no device",
+          "test_level": "engine-backed-ci",
+          "scope": "the client talks to the real server, the UiAutomator2 driver accepts the adapter's capabilities and a worker without a device is reported unavailable; no app is driven",
+          "evidence": [
+            "ev-aa-server-lane",
+            "ev-aa-offline"
+          ]
+        }
+      ],
+      "install_method": {
+        "method": "source-checkout-pip",
+        "packages": [
+          "packages/qa-adapter-kit",
+          "packages/qa-selenium",
+          "packages/qa-appium"
+        ],
+        "extras": [
+          "android"
+        ],
+        "published_to_registry": false,
+        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. The Appium server, the UiAutomator2 driver, the Android SDK and the emulator or device belong to the worker's operator: nothing here installs, downloads or bundles them."
+      },
+      "dependencies": [
+        {
+          "name": "python",
+          "kind": "interpreter",
+          "pin": ">=3.11",
+          "pin_literal": "requires-python = \">=3.11\"",
+          "pin_source": "packages/qa-appium/pyproject.toml",
+          "provided_by": "operator",
+          "note": "the packages require 3.11 or newer; CI runs 3.12"
+        },
+        {
+          "name": "qa-adapter-kit",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-adapter-kit/pyproject.toml",
+          "provided_by": "install",
+          "note": "shared protocol, models and supervisor; standard library only"
+        },
+        {
+          "name": "qa-selenium",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-selenium/pyproject.toml",
+          "provided_by": "install",
+          "note": "imported for the driver fault vocabulary"
+        },
+        {
+          "name": "qa-appium",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-appium/pyproject.toml",
+          "provided_by": "install",
+          "note": "the adapter package"
+        },
+        {
+          "name": "Appium-Python-Client",
+          "kind": "pip",
+          "pin": "6.1.1",
+          "pin_literal": "Appium-Python-Client==6.1.1",
+          "pin_source": "packages/qa-appium/pyproject.toml",
+          "provided_by": "install",
+          "note": "the `android` extra"
+        },
+        {
+          "name": "appium",
+          "kind": "npm",
+          "pin": "3.9.0",
+          "pin_literal": "appium@3.9.0",
+          "pin_source": ".github/workflows/appium-android.yml",
+          "provided_by": "operator",
+          "note": "the server, installed by the operator on the worker"
+        },
+        {
+          "name": "appium-uiautomator2-driver",
+          "kind": "driver",
+          "pin": "8.7.3",
+          "pin_literal": "uiautomator2@8.7.3",
+          "pin_source": ".github/workflows/appium-android.yml",
+          "provided_by": "operator",
+          "note": "installed into the operator's Appium home"
+        },
+        {
+          "name": "nodejs",
+          "kind": "toolchain",
+          "pin": null,
+          "pin_literal": null,
+          "pin_source": null,
+          "provided_by": "operator",
+          "note": "needed for the Appium server; the version is not pinned in this repository"
+        },
+        {
+          "name": "android-sdk-and-emulator",
+          "kind": "toolchain",
+          "pin": null,
+          "pin_literal": null,
+          "pin_source": null,
+          "provided_by": "operator",
+          "note": "Android SDK, platform tools, a system image and host acceleration, provisioned under Google's terms; never bundled"
+        }
+      ],
+      "execution_modes": [
+        "interactive"
+      ],
+      "test_level": "device-backed-local",
+      "test_level_scope": "interactive mode on one Android 17 arm64 emulator on an Apple-silicon Mac, observed locally; CI shows only the server without a device",
+      "summary": "One emulator session passed three times in a row by hand; the manual device workflow has never run in CI, and CI proves only server start-up and client wiring without a device.",
+      "last_verified_sha": "958d906360b03912b91ed98e6abe006f384d6c87",
+      "last_verified_sha_basis": "documented-in",
+      "last_verified_date": "2026-11-01",
+      "evidence": [
+        {
+          "id": "ev-aa-local",
+          "kind": "local-run",
+          "path": "packages/qa-appium/README.md",
+          "observed_on": "2026-11-01",
+          "environment": "Apple-silicon Mac, Android 17 (API 37, arm64-v8a, Google APIs with Play) emulator, Appium 3.9.0, UiAutomator2 8.7.3, client 6.1.1",
+          "recorded_in_sha": "958d906360b03912b91ed98e6abe006f384d6c87",
+          "runs": 3,
+          "result": "one test (the Settings app opens on the attached device and the screenshot is a real PNG): 0 skipped, 0 failed in each of three runs; a full adapter session on the same emulator also passed open_app, read, check, tap, type and back but is not part of the suite",
+          "claim": "a real Android emulator session through the adapter, recorded in the package README; the tested tree is not recorded, so the commit that records it is used"
+        },
+        {
+          "id": "ev-aa-server-lane",
+          "kind": "ci-job",
+          "claim": "real Appium 3.9.0 server and client 6.1.1 on loopback with no Android SDK and no device; drives no app",
+          "workflow": "tests.yml",
+          "job_key": "appium-server",
+          "job_name": "appium server lane",
+          "run_id": 41261799543,
+          "job_id": 124716399113,
+          "head_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+          "conclusion": "success",
+          "completed_on": "2026-11-01",
+          "tests": "5 passed, 1 deselected (the device test), 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399113"
+        },
+        {
+          "id": "ev-aa-offline",
+          "kind": "ci-job",
+          "claim": "the adapter against a fake device, capabilities and server policy; no Appium installed",
+          "workflow": "tests.yml",
+          "job_key": "appium-offline",
+          "job_name": "appium adapters (offline",
+          "run_id": 41261799543,
+          "job_id": 124716399045,
+          "head_sha": "938eb486b508b7a7ca7be55661a3f937d1de4bea",
+          "conclusion": "success",
+          "completed_on": "2026-11-01",
+          "tests": "69 passed, 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399045"
+        },
+        {
+          "id": "ev-aa-manual-workflow",
+          "kind": "repo-path",
+          "path": ".github/workflows/appium-android.yml",
+          "claim": "the manual device workflow (Run workflow, naming a worker with an emulator or device); it has no run in Actions"
+        }
+      ],
+      "limitations": [
+        "Device-backed validation is local and manual: a single test on one emulator, observed three times in a row; the manual workflow has never run in CI and hosted runners have no emulator.",
+        "Not verified: other API levels, x86_64 or non-Play images, physical devices, Linux or Windows hosts with a device, and any CI runner with a device.",
+        "A running Appium server is not a real UI session: the CI lane proves server start-up and client wiring only.",
+        "Needs a compatible Android SDK, platform tools, a device or emulator, the UiAutomator2 driver and host acceleration, all provided by the operator; no device is bundled.",
+        "Drives an app that is already installed: no APK install, no permission grant, no adb commands, XPath not supported.",
+        "A native PASS or FAIL from the engine is not the verifier's verdict: the canonical status stays UNVERIFIED until an independent verifier supplies one, and no install profile in this repository installs a verifier yet."
+      ],
+      "license": {
+        "adapter_spdx": "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause",
+        "adapter_wording": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source",
+        "components": [
+          {
+            "matrix_component": "appium-server",
+            "spdx": "Apache-2.0",
+            "redistribution": "optional_extra"
+          },
+          {
+            "matrix_component": "appium-python-client",
+            "spdx": "Apache-2.0",
+            "redistribution": "optional_extra"
+          },
+          {
+            "matrix_component": "appium-uiautomator2-driver",
+            "spdx": "Apache-2.0",
+            "redistribution": "optional_extra"
+          },
+          {
+            "matrix_component": "android-sdk-and-emulator",
+            "spdx": "LicenseRef-Proprietary-Android-SDK-License",
+            "redistribution": "excluded_by_default"
+          }
+        ]
+      },
+      "docs_url": "packages/qa-appium/README.md",
+      "example_id": "appium-android-device-lane"
+    },
+    {
+      "engine": "appium-ios",
+      "display_name": "Appium (iOS, XCUITest)",
+      "adapter_ids": [
+        "appium-ios-interactive"
+      ],
+      "adapter_version": "0.1.0",
+      "runtime_version": "3.9.0",
+      "os_arch": [],
+      "install_method": {
+        "method": "source-checkout-pip",
+        "packages": [
+          "packages/qa-adapter-kit",
+          "packages/qa-selenium",
+          "packages/qa-appium"
+        ],
+        "extras": [],
+        "published_to_registry": false,
+        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. Installing the package gives an interface that reports unavailable; it does not install or drive any iOS tooling."
+      },
+      "dependencies": [
+        {
+          "name": "python",
+          "kind": "interpreter",
+          "pin": ">=3.11",
+          "pin_literal": "requires-python = \">=3.11\"",
+          "pin_source": "packages/qa-appium/pyproject.toml",
+          "provided_by": "operator",
+          "note": "the packages require 3.11 or newer; CI runs 3.12"
+        },
+        {
+          "name": "qa-adapter-kit",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-adapter-kit/pyproject.toml",
+          "provided_by": "install",
+          "note": "shared protocol, models and supervisor; standard library only"
+        },
+        {
+          "name": "qa-selenium",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-selenium/pyproject.toml",
+          "provided_by": "install",
+          "note": "imported for the driver fault vocabulary"
+        },
+        {
+          "name": "qa-appium",
+          "kind": "source-package",
+          "pin": "0.1.0.dev0",
+          "pin_literal": "version = \"0.1.0.dev0\"",
+          "pin_source": "packages/qa-appium/pyproject.toml",
+          "provided_by": "install",
+          "note": "the adapter package"
+        },
+        {
+          "name": "appium-xcuitest-driver",
+          "kind": "driver",
+          "pin": "12.22.8",
+          "pin_literal": "12.22.8",
+          "pin_source": "third_party/adapter-license-matrix.yaml",
+          "provided_by": "operator",
+          "note": "listed in the licence matrix; no workflow installs or runs it"
+        },
+        {
+          "name": "apple-toolchain",
+          "kind": "toolchain",
+          "pin": null,
+          "pin_literal": null,
+          "pin_source": null,
+          "provided_by": "operator",
+          "note": "macOS, Xcode, WebDriverAgent and a supported simulator or device on a licensed worker; never bundled"
+        }
+      ],
+      "execution_modes": [
+        "interactive"
+      ],
+      "test_level": "none",
+      "test_level_scope": "no test drives iOS; the adapter is an interface that reports UNAVAILABLE for every action unless an operator supplies a driver for their own licensed worker",
+      "summary": "No iOS session has ever been run. The adapter reports UNAVAILABLE; it is not a pass and not a skip.",
+      "last_verified_sha": null,
+      "last_verified_sha_basis": "none",
+      "last_verified_date": null,
+      "evidence": [
+        {
+          "id": "ev-ai-interface",
+          "kind": "repo-path",
+          "path": "packages/qa-appium/tests/test_ap_android_ios.py",
+          "claim": "the offline test that the iOS interface reports UNAVAILABLE; it is not an iOS session and is not evidence that iOS works"
+        }
+      ],
+      "limitations": [
+        "No evidence of any kind that iOS automation works with this adapter.",
+        "Needs macOS, Xcode, WebDriverAgent and a supported simulator or device; Linux containers are not an iOS solution.",
+        "Every action reports UNAVAILABLE unless an operator supplies a driver factory for their own licensed worker from outside this repository.",
+        "The Apple toolchain is excluded by default and is never bundled or downloaded.",
+        "A native PASS or FAIL from the engine is not the verifier's verdict: the canonical status stays UNVERIFIED until an independent verifier supplies one, and no install profile in this repository installs a verifier yet."
+      ],
+      "license": {
+        "adapter_spdx": "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause",
+        "adapter_wording": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source",
+        "components": [
+          {
+            "matrix_component": "appium-server",
+            "spdx": "Apache-2.0",
+            "redistribution": "optional_extra"
+          },
+          {
+            "matrix_component": "appium-xcuitest-driver",
+            "spdx": "Apache-2.0",
+            "redistribution": "excluded_by_default"
+          },
+          {
+            "matrix_component": "apple-toolchain",
+            "spdx": "LicenseRef-Proprietary-Apple-Xcode-SLA",
+            "redistribution": "excluded_by_default"
+          }
+        ]
+      },
+      "docs_url": "packages/qa-appium/README.md",
+      "example_id": null
+    }
+  ]
+}
