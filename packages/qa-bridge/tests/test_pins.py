@@ -56,8 +56,8 @@ def test_the_repository_pins_file_has_both_sets_and_c4_is_the_default():
     c3 = pins_mod.load_pins(pin_set="c3")
     c4 = pins_mod.load_pins(pin_set="c4")
     assert c3.available_sets == c4.available_sets == ("c3", "c4")
-    assert c3.contracts.commit == "13e00f23da74782af091aec607c47358e9814fc6"
-    assert c4.contracts.commit == "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"
+    assert c3.contracts.commit == "5f1e713762d93c866218ded2de7b9c129ce0cf06"
+    assert c4.contracts.commit == "d739c1941fd0f03aad9b5c75c6f9b2a0df67cc26"
     assert c3.harness_qa.commit == c4.harness_qa.commit
     assert "golden/qa_canon_vectors_addendum.json" in c4.contracts.vector_files
     assert "golden/qa_canon_vectors_addendum.json" not in c3.contracts.vector_files
@@ -82,9 +82,10 @@ def test_an_unknown_pin_set_is_refused():
 
 
 def test_the_repository_pins_file_loads(pins):
-    assert pins.contracts.commit in {"13e00f23da74782af091aec607c47358e9814fc6", "15a6f6cf79f22d27a920f59969dfeb2732a2d1cb"}
+    assert pins.contracts.commit in {"5f1e713762d93c866218ded2de7b9c129ce0cf06", "d739c1941fd0f03aad9b5c75c6f9b2a0df67cc26"}
     assert pins.harness_qa.base_pin == "6b8ba3a596a5e2caf0fdf009f2af013517591662"
-    assert pins.contracts.temp_pin and pins.harness_qa.temp_pin
+    assert not pins.contracts.temp_pin and not pins.harness_qa.temp_pin
+    assert pins.contracts.tag in {"v0.3.15", "v0.3.16"} and pins.harness_qa.tag == "v0.2.0"
     assert "golden/qa.json" in pins.contracts.vector_files
 
 
