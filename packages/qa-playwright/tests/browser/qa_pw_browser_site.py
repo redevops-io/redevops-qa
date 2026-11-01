@@ -29,7 +29,7 @@ page("/overlay", """<!doctype html><title>Overlay</title><button>Under</button>
 <div role="dialog" aria-modal="true" style="position:fixed;left:0;top:0;right:0;bottom:0;background:#fff">Consent required</div>""")
 page("/storage", """<!doctype html><title>Storage</title><p id="o"></p>
 <script>var n = (parseInt(localStorage.getItem('visits') || '0', 10)) + 1; localStorage.setItem('visits', String(n));
-document.cookie = 'v=' + n; document.getElementById('o').textContent = 'visits=' + n + ' cookie=' + document.cookie;</script>""")
+document.cookie = 'v=' + n; document.getElementById('o').textContent = 'visits=' + n + ' jar=' + document.cookie;</script>""")
 page("/popup", """<!doctype html><title>Popup</title><a href="/home" target="_blank">Open</a>""")
 page("/download", """<!doctype html><title>Download</title><a href="/file.bin" download>Get</a>""")
 page("/file.bin", "binary-ish", "application/octet-stream")

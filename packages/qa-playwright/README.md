@@ -24,7 +24,7 @@ pinned extra and is imported only by the real driver.
 | Every action carries a policy decision reference | `ActionBlockedByPolicy` before the driver is touched otherwise; an optional hook can reject a reference the runner does not recognise |
 | `assert_` reads, it does not judge | It takes a subject only. No expected value exists anywhere in the module, and `ObservedValue` has no verdict |
 | Deterministic time | Every wait is a bounded poll against the injected `Clock`; the driver only sleeps. A clock that never advances cannot make a loop run forever |
-| Network defence in depth | Every request the browser makes passes a request gate built from the operator's allow-list (default deny), and a navigation is checked before it is attempted. The egress gateway (`qa-egress`) is the enforcement point; this is a second layer |
+| Network defence in depth | Every request the browser makes, and every redirect hop before it is requested (a DevTools response-stage interception, since a route only sees the first URL), passes a request gate built from the operator's allow-list (default deny), and a navigation is checked before it is attempted. The egress gateway (`qa-egress`) is the enforcement point; this is a second layer |
 
 ## What each operation does
 
