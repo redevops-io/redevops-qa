@@ -31,9 +31,12 @@ from .errors import PlanError
 PLAN_KEYS = {"schema", "schema_version", "plan_id", "target", "lanes"}
 COMMON_LANE_KEYS = {"lane_id", "engine", "spec", "egress", "deadline_s", "requests", "probes"}
 LANE_KEYS = {K.ENGINE_PLAYWRIGHT: set(COMMON_LANE_KEYS), K.ENGINE_ROBOT: COMMON_LANE_KEYS | {"suite", "suite_sha256"}}
-OPTIONAL_LANE_KEYS = {"deadline_s", "probes"}
+OPTIONAL_LANE_KEYS = {"deadline_s"}
 REQUEST_RE = re.compile(r"^(GET|POST) (/[A-Za-z0-9._~/-]{0,100})$")
-PROBE_FACTS = ("discount-rule", "settings-persistence")
+#: what an assertion's verdict is checked against besides the engine's own record: a fact of the independent reference check of the target, or ``ui-only`` (the assertion is about what the browser shows;
+#: no server-side fact applies and nothing independent backs it). EVERY assertion of a lane names one: a lane cannot reach VERIFIED on a fixture-app assertion nobody said anything about.
+UI_ONLY = "ui-only"
+PROBE_FACTS = ("discount-rule", "settings-persistence", UI_ONLY)
 #: what traffic of an engine is controlled by: only the browser's traffic passes the egress gateway; a Robot library opens its own sockets, so a Robot lane says so
 EGRESS_PROFILES = {K.ENGINE_PLAYWRIGHT: ("origin-only",), K.ENGINE_ROBOT: ("not-enforced",)}
 TARGET_KINDS = ("fixture-app",)
@@ -139,7 +142,7 @@ def _parse_structure(doc: Any) -> List[Mapping[str, Any]]:
             raise PlanError("UNSUPPORTED_ENGINE", f"lane engine must be one of {list(K.ENGINES)} (R0 scope: Playwright Chromium and Robot Framework)")
         _only(lane, LANE_KEYS[lane["engine"]], f"lane {str(lane.get('lane_id'))[:20]!r}", OPTIONAL_LANE_KEYS)
         _check_requests(lane["requests"], str(lane.get("lane_id")))
-        _check_probes(lane.get("probes", {}), str(lane.get("lane_id")))
+        _check_probes(lane["probes"], str(lane.get("lane_id")))
         lid = lane["lane_id"]
         if not isinstance(lid, str) or not K.LANE_ID_RE.fullmatch(lid):
             raise PlanError("BAD_LANE_ID", "a lane id is 1 to 20 characters: a lower-case letter, then lower-case letters, digits and '-'")
@@ -197,6 +200,8 @@ def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict
     if not isinstance(given_hashes, dict) or given_hashes != hashes:
         raise PlanError("SUITE_MISMATCH", f"lane {lid}: the plan pins the files of suite {suite!r} as {json.dumps(given_hashes, sort_keys=True)[:300]}, "
                         f"the files this runner ships hash as {json.dumps(hashes, sort_keys=True)}: a suite or library that is not the reviewed one is refused before anything runs")
+    if any(v == UI_ONLY for v in lane["probes"].values()):
+        raise PlanError("BAD_PROBES", f"lane {lid}: a Robot lane's assertions are about what the target's API says: each needs a fact of the reference check, not {UI_ONLY!r}")
     if spec.steps:
         raise PlanError("ROBOT_LANE_HAS_STEPS", f"lane {lid}: a Robot lane's spec carries assertions only; the suite is the engine's work")
     ref = evidence_program_ref()
@@ -242,20 +247,25 @@ def freeze_plan(up: Upstreams, plan_doc: Any) -> FrozenPlan:
                                 "every frozen assertion is accounted exactly once")
             seen_ids[key] = (a["assertion_id"], lid)
         suite_name, suite_hashes = _lane_engine_rules(lane, spec, assertions)
-        unknown_probe = sorted(set(lane.get("probes", {})) - {a["assertion_id"] for a in assertions})
+        ids = {a["assertion_id"] for a in assertions}
+        unknown_probe = sorted(set(lane["probes"]) - ids)
         if unknown_probe:
             raise PlanError("BAD_PROBES", f"lane {lid}: probes name assertions that are not in this lane: {[u[:40] for u in unknown_probe]}")
+        unprobed = sorted(ids - set(lane["probes"]))
+        if unprobed:
+            raise PlanError("BAD_PROBES", f"lane {lid}: assertion(s) {[u[:40] for u in unprobed]} name no probe: give each a fact of the reference check ({', '.join(f for f in PROBE_FACTS if f != UI_ONLY)}) "
+                            f"or {UI_ONLY!r} (what the browser shows, with nothing independent behind it)")
         # Everything the plan fixes about a lane besides the assertion itself is bound into the digest of every assertion of that lane, so the plan digest covers it:
         # what the target's request log must show, which independent facts may not contradict a verdict, the egress profile, the whole spec (steps included), the deadline,
         # the reviewed suite and the digests of its files (a Robot lane), and the plan's id and target.
-        binding = {"engine": lane["engine"], "egress": lane["egress"], "requests": lane["requests"], "probes": lane.get("probes", {}),
+        binding = {"engine": lane["engine"], "egress": lane["egress"], "requests": lane["requests"], "probes": lane["probes"],
                    "deadline_s": lane.get("deadline_s", int(K.DEFAULT_LANE_DEADLINE_S)), "spec_sha256": digest_of(lane["spec"]),
                    "plan": {"plan_id": plan_doc["plan_id"], "target": plan_doc["target"]}}
         if suite_name:
             binding.update(suite=suite_name, suite_files=suite_hashes)
         digests = {a["assertion_id"]: digest_of({"assertion": a, "binding": binding}) for a in assertions}
         frozen.append(FrozenLane(lane_id=lid, engine=lane["engine"], deadline_s=lane.get("deadline_s", int(K.DEFAULT_LANE_DEADLINE_S)), egress=lane["egress"],
-                                 requests=copy.deepcopy(lane["requests"]), probes=dict(lane.get("probes", {})), spec_template=copy.deepcopy(lane["spec"]),
+                                 requests=copy.deepcopy(lane["requests"]), probes=dict(lane["probes"]), spec_template=copy.deepcopy(lane["spec"]),
                                  spec_digest=digest_of(lane["spec"]), spec_contract_hash=spec.spec_hash, suite=suite_name, suite_files=suite_hashes,
                                  assertions=tuple(assertions), assertion_digests=digests, harness_pin=pin))
     return FrozenPlan(plan=copy.deepcopy(plan_doc), plan_id=plan_doc["plan_id"], lanes=tuple(frozen), pins=pin_summary(up), runner_version=K.RUNNER_VERSION)

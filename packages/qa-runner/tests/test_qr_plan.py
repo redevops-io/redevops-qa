@@ -12,7 +12,7 @@ from qa_runner.errors import PlanError
 from qa_runner.golden import golden_plan, robot_lane, robot_plan
 from qa_runner.plan import freeze_plan, load_plan_or_lock, materialise_spec, thaw_lock
 
-GOLDEN_PLAN_DIGEST = "sha256:3a2d7bde21fabf805ea2bb6b580219e97faa6f45ba8a3bbde1b6f0f54df6d6e8"
+GOLDEN_PLAN_DIGEST = "sha256:68eb81be87ebd060c66008f50e801ca408a2a408e67bc413d719b68cdb95e993"
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "golden-plan.json"
 
 
@@ -101,12 +101,12 @@ def test_an_assertion_id_in_two_lanes_is_refused_so_every_assertion_is_accounted
     plan = golden_plan()
     other = copy.deepcopy(plan["lanes"][0])
     other["lane_id"] = "second"
-    other["probes"] = {}
     plan["lanes"].append(other)
     refused(up, plan, "DUPLICATE_ASSERTION")
     other["spec"]["id"] = "second-spec"
     for a in other["spec"]["assertions"]:
         a["assertion_id"] = "B-" + a["assertion_id"]
+    other["probes"] = {"B-" + k: v for k, v in other["probes"].items()}
     frozen = freeze_plan(up, plan)
     assert len(frozen.rows) == 6 and {r["lane_id"] for r in frozen.rows} == {"browser", "second"}
 
@@ -274,10 +274,10 @@ def test_assertion_ids_that_differ_only_in_case_are_refused_at_freeze_not_after_
     plan = golden_plan()
     other = copy.deepcopy(plan["lanes"][0])
     other["lane_id"] = "second"
-    other["probes"] = {}
     other["spec"]["id"] = "second-spec"
     for a in other["spec"]["assertions"]:
         a["assertion_id"] = a["assertion_id"].lower()
+    other["probes"] = {k.lower(): v for k, v in other["probes"].items()}
     plan["lanes"].append(other)
     err = refused(up, plan, "DUPLICATE_ASSERTION")
     assert "without case" in str(err)
@@ -291,7 +291,10 @@ def test_assertion_ids_that_differ_only_in_case_are_refused_at_freeze_not_after_
     ("a duplicate request", lambda l: l["requests"].update(required=["GET /login", "GET /login"]), "BAD_REQUESTS"),
     ("an unknown key", lambda l: l["requests"].update(forbidden=[]), "BAD_REQUESTS"),
     ("a probe of an unknown fact", lambda l: l.update(probes={"A-SAVED": "everything"}), "BAD_PROBES"),
-    ("a probe of an assertion that is not in the lane", lambda l: l.update(probes={"A-NOPE": "settings-persistence"}), "BAD_PROBES"),
+    ("a probe of an assertion that is not in the lane", lambda l: l.update(probes={"A-NOPE": "settings-persistence", **l["probes"]}), "BAD_PROBES"),
+    ("no probes at all", lambda l: l.pop("probes"), "MISSING_FIELD"),
+    ("an empty set of probes", lambda l: l.update(probes={}), "BAD_PROBES"),
+    ("one assertion that names no probe", lambda l: l["probes"].pop("A-SAVED"), "BAD_PROBES"),
 ])
 def test_the_requests_and_probes_of_a_lane_are_validated(up, name, edit, code):
     plan = golden_plan()
@@ -305,7 +308,7 @@ def test_the_requests_and_probes_of_a_lane_are_validated(up, name, edit, code):
     ("the plan id", lambda p: p.update(plan_id="renamed")),
     ("the deadline of a lane", lambda p: p["lanes"][0].update(deadline_s=3600)),
     ("a required request", lambda p: p["lanes"][0]["requests"]["required"].pop()),
-    ("a probe", lambda p: p["lanes"][0].update(probes={})),
+    ("a probe", lambda p: p["lanes"][0]["probes"].update({"A-NOTIF-ON": "ui-only"})),
 ])
 def test_everything_that_defines_the_run_is_in_the_plan_digest(up, golden_frozen, name, edit):
     """Review findings B1 and H2 (one design): the digest `freeze` prints and `--plan-digest` checks covers the whole plan, not only the assertions."""
@@ -342,10 +345,20 @@ def test_a_library_that_is_not_the_pinned_one_is_refused_at_freeze(up, tmp_path,
 
 @pytest.mark.parametrize("name,edit", [
     ("a required request of the Robot lane", lambda p: p["lanes"][0]["requests"]["required"].pop()),
-    ("the probe of the Robot lane", lambda p: p["lanes"][0].update(probes={})),
+    ("the probe of the Robot lane", lambda p: p["lanes"][0].update(probes={"A-ORDER-RULE": "settings-persistence"})),
     ("the deadline of the Robot lane", lambda p: p["lanes"][0].update(deadline_s=3600)),
 ])
 def test_everything_that_defines_the_robot_run_is_in_the_plan_digest(up, name, edit):
     plan = robot_plan()
     edit(plan)
     assert freeze_plan(up, plan).plan_digest != ROBOT_PLAN_DIGEST, name
+
+
+@pytest.mark.parametrize("name,edit,code", [
+    ("no probes on a Robot lane", lambda l: l.pop("probes"), "MISSING_FIELD"),
+    ("an empty set of probes on a Robot lane", lambda l: l.update(probes={}), "BAD_PROBES"),
+    ("ui-only on a Robot lane", lambda l: l.update(probes={"A-ORDER-RULE": "ui-only"}), "BAD_PROBES"),
+])
+def test_a_robot_lane_needs_a_real_fact_of_the_reference_check_for_its_assertion(up, name, edit, code):
+    """Retest R2: a library that calls the API but ignores the answers was VERIFIED against a discount-defective target once the plan's probes were removed."""
+    robot_refused(up, edit, code)

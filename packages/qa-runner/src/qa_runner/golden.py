@@ -100,7 +100,7 @@ def robot_lane() -> Dict[str, Any]:
 def browser_lane() -> Dict[str, Any]:
     return {"lane_id": "browser", "engine": K.ENGINE_PLAYWRIGHT, "egress": "origin-only", "deadline_s": 120, "spec": browser_spec(),
             "requests": {"required": ["POST /login", "POST /settings", "GET /settings"], "allowed": ["GET /login", "GET /account", "GET /settings", "POST /login", "POST /settings"]},
-            "probes": {"A-NOTIF-ON": "settings-persistence"}}
+            "probes": {"A-NOTIF-ON": "settings-persistence", "A-SAVED": "ui-only", "A-URL": "ui-only"}}
 
 
 def robot_plan() -> Dict[str, Any]:

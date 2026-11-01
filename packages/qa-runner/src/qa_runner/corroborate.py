@@ -108,17 +108,20 @@ def corroborate_requests(lane: FrozenLane, files: Mapping[str, bytes]) -> Option
 
 
 def probe_verdicts(lane: FrozenLane, files: Mapping[str, bytes]) -> Dict[str, str]:
-    """For each assertion the plan ties to a fact of the reference check: ``missing`` (no reference check in the bundle) or ``contradicted`` (the check found that fact deviating)."""
-    if not lane.probes:
+    """For each assertion the plan ties to a fact of the reference check: ``missing`` (no reference check in the bundle) or ``contradicted`` (the check found that fact deviating). An assertion the plan
+    declares ``ui-only`` has no such fact and is not in the result."""
+    facts = {aid: fact for aid, fact in lane.probes.items() if fact != "ui-only"}
+    if not facts:
         return {}
     data = files.get(REFERENCE_CHECK_PATH)
     if data is None:
-        return {aid: "missing" for aid in lane.probes}
+        return {aid: "missing" for aid in facts}
     try:
         deviating = {d["check"] for d in loads_strict(data)["deviations"]}
     except (CanonError, KeyError, TypeError):
-        return {aid: "missing" for aid in lane.probes}
-    return {aid: "contradicted" for aid, fact in lane.probes.items() if fact in deviating}
+        return {aid: "missing" for aid in facts}
+    return {aid: "contradicted" for aid, fact in facts.items() if fact in deviating}
+
 
 
 def _plain_json(data: bytes) -> Any:

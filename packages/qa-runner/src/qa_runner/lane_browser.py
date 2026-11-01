@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from qa_evidence.canon import CanonError, dumps_canonical, loads_strict
 
 from . import constants as K
+from .safe_read import UnsafeRead, read_regular
 from .deps import bootstrap
 
 
@@ -168,8 +169,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("usage: python -m qa_runner.lane_browser INPUT.json", file=sys.stderr)
         return 2
     try:
-        cfg = loads_strict(Path(argv[0]).read_bytes())
-    except (OSError, CanonError) as exc:
+        cfg = loads_strict(read_regular(argv[0], max_bytes=K.MAX_CHILD_JSON_BYTES, deadline_s=10.0, follow_symlinks=False))
+    except (UnsafeRead, CanonError) as exc:
         print(f"lane input unreadable: {type(exc).__name__}", file=sys.stderr)
         return 2
     try:

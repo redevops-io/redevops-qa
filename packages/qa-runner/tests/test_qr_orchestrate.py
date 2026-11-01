@@ -252,3 +252,37 @@ def test_a_generated_run_id_has_64_random_bits_and_fits_the_lane_ids_and_is_not_
     from agent_harness.qa.blobs import find_truncated_digests
     assert not find_truncated_digests({"run_id": next(iter(ids)) + ".browser"})
     assert len(ids) == 200 and all(K.RUN_ID_RE.fullmatch(i) and len(i.rsplit("-", 1)[1]) == 13 for i in ids)
+
+
+def test_the_reference_check_of_a_stalled_target_ends_when_the_run_is_cancelled(up):
+    """Review finding R3: the call sits outside every lane deadline and the signal handler only sets a flag; a target that stalls at that point could be ended only with SIGKILL."""
+    import socket
+    from qa_runner.orchestrate import _reference_check
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(2)
+    srv.settimeout(30)
+
+    def stall():                                          # a capped server: it answers the headers and then stays silent for 15 seconds at most
+        try:
+            conn, _ = srv.accept()
+            conn.settimeout(5)
+            conn.recv(4096)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n")
+            time.sleep(15)
+        except OSError:
+            pass
+    threading.Thread(target=stall, daemon=True).start()
+    cancel = CancelToken()
+    threading.Timer(1.0, cancel.cancel).start()
+    log = []
+    t0 = time.monotonic()
+    assert _reference_check(f"http://127.0.0.1:{srv.getsockname()[1]}", log, cancel) is None
+    assert time.monotonic() - t0 < 8 and "could not run (CheckAborted)" in log[0]
+    srv.close()
+
+
+def test_the_report_and_the_summary_name_the_assertions_that_have_no_independent_probe(up, golden_frozen):
+    """Retest R2: the plan declares A-SAVED and A-URL ui-only; the run says so in the report (extension) instead of leaving it to the plan file."""
+    s = run(up, golden_frozen, "pass")
+    assert report(s)["extensions"]["no_independent_probe"] == "browser:A-SAVED,browser:A-URL"

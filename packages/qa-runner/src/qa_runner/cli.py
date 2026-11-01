@@ -24,6 +24,7 @@ from .deps import verified_bootstrap
 from .doctor import render, run_doctor
 from .errors import EnvironmentFault, PlanError, RunnerError
 from .orchestrate import RunOptions, new_run_id, run_plan
+from .safe_read import UnsafeRead, read_regular
 from .plan import MAX_PLAN_BYTES, load_plan_or_lock
 
 
@@ -53,14 +54,18 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
+PLAN_READ_SECONDS = 10.0
+
+
 def _read_plan(path: str) -> bytes:
-    p = Path(path)
+    """The bytes of a plan or lock: a regular file only, at most ``MAX_PLAN_BYTES``, read within ``PLAN_READ_SECONDS`` (see ``safe_read``: a FIFO, a device or a file that keeps growing cannot hold the
+    process or its memory)."""
     try:
-        if p.stat().st_size > MAX_PLAN_BYTES:
-            raise PlanError("PLAN_TOO_LARGE", f"a plan is at most {MAX_PLAN_BYTES} bytes")
-        return p.read_bytes()
-    except OSError as exc:
-        raise PlanError("PLAN_UNREADABLE", f"cannot read {safe_text(path)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+        return read_regular(path, max_bytes=MAX_PLAN_BYTES, deadline_s=PLAN_READ_SECONDS)
+    except UnsafeRead as exc:
+        code = {"NOT_A_REGULAR_FILE": "PLAN_NOT_A_FILE", "TOO_LARGE": "PLAN_TOO_LARGE", "TIMEOUT": "PLAN_READ_TIMEOUT"}.get(exc.code, "PLAN_UNREADABLE")
+        detail = f"a plan is at most {MAX_PLAN_BYTES} bytes" if exc.code == "TOO_LARGE" else f"cannot read {safe_text(path)}: {safe_text(str(exc), 80)}"
+        raise PlanError(code, detail) from None
 
 
 def _doctor(args, out: TextIO, err: TextIO) -> int:
@@ -133,6 +138,8 @@ def _run(args, out: TextIO, err: TextIO) -> int:
     ext = report.get("extensions") or {}
     if "egress_gateway_denied" in ext or "egress_gate_denied" in ext:
         print(f"  egress: the gateway denied {ext.get('egress_gateway_denied', 0)} request(s), the in-browser request gate denied {ext.get('egress_gate_denied', 0)} (details in the lane's logs)", file=out)
+    if ext.get("no_independent_probe"):
+        print(f"  no independent probe (declared ui-only in the plan; the verdict rests on the engine's record and the target's request log): {safe_text(ext['no_independent_probe'], 200)}", file=out)
     if ext.get("test_double"):
         print("  TEST DOUBLE: a lane of this run was produced by a test double; no assertion of it can be verified", file=out)
     print(f"  assertions: frozen {acc['frozen']} = verified {acc['verified']} + failed {acc['failed']} + inconclusive {acc['inconclusive']} + unaccounted {acc['unaccounted']}", file=out)

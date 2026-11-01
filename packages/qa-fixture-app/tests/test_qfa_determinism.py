@@ -83,7 +83,13 @@ def _imports(path: Path):
 def test_no_module_imports_a_clock_randomness_or_a_third_party_package(path):
     stdlib = set(__import__("sys").stdlib_module_names)
     imports = {n.split(".")[0] for n in _imports(path)}
-    assert not imports & {"time", "datetime", "random", "secrets", "uuid", "tempfile", "sched", "calendar"}, path
+    banned = {"time", "datetime", "random", "secrets", "uuid", "tempfile", "sched", "calendar"}
+    if path.name == "reference_check.py":
+        # the reference check, a client, bounds its own run with a monotonic deadline (nothing it prints depends on the clock); it may import ``time`` and use nothing but ``time.monotonic``
+        banned -= {"time"}
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assert {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "time"} == {"monotonic"}
+    assert not imports & banned, path
     assert all(n in stdlib or n == "qa_fixture_app" for n in imports), (path, imports)
 
 

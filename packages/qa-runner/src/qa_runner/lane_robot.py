@@ -24,6 +24,7 @@ from . import suites
 from .bundle import LaneOutcome
 from .judge import observation_path
 from .plan import FrozenLane
+from .safe_read import UnsafeRead, read_regular
 
 GUARD = str(Path(__file__).resolve().with_name("robot_guard.py"))        # what the adapter starts instead of ``-m robot``: Robot's command line plus a watch on the parent
 
@@ -75,8 +76,10 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
     native: Dict[str, bytes] = {}
     for name in ("output.xml", "robot-summary.json"):
         p = out / name
-        if p.is_file() and not p.is_symlink() and p.stat().st_size <= 32 * 1024 * 1024:
-            native[name] = p.read_bytes()
+        try:
+            native[name] = read_regular(str(p), max_bytes=32 * 1024 * 1024, deadline_s=10.0, follow_symlinks=False)      # one descriptor, regular files only, byte and time caps
+        except UnsafeRead:
+            pass
     native["adapter-result.json"] = (json.dumps(result.to_dict(), sort_keys=True, indent=2) + "\n").encode("utf-8")
     files: Dict[str, Tuple[bytes, str]] = {egress_file[0]: egress_file[1]}
     for rel, data in sorted(copies.items()):

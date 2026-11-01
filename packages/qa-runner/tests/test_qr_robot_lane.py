@@ -179,3 +179,15 @@ def test_the_engine_is_started_under_the_guard_that_watches_the_parent(up, froze
     with pytest.raises(Stop):
         lr.run_robot_lane(frozen.lane("robot"), run_id="r0-x", origin="http://127.0.0.1:9", workdir=str(tmp_path), cancel=None, deadline_s=5, log=[])
     assert seen["launcher"] == (lr.GUARD,) and Path(lr.GUARD).name == "robot_guard.py" and Path(lr.GUARD).is_file()
+
+
+def test_the_native_files_of_the_engine_are_read_through_the_bounded_read(up, frozen, tmp_path, monkeypatch):
+    """Retest R1 for the Robot lane: a report that is a FIFO or a symlink is not read (and not waited for); the lane ends as an error with no record."""
+    import os
+    import qa_runner.lane_robot as lr
+    seen = []
+    real = lr.read_regular
+    monkeypatch.setattr(lr, "read_regular", lambda path, **kw: seen.append((os.path.basename(path), kw)) or real(path, **kw))
+    s = run(up, frozen, "live")
+    assert {n for n, _ in seen} == {"output.xml", "robot-summary.json"}
+    assert all(kw["follow_symlinks"] is False and kw["max_bytes"] == 32 * 1024 * 1024 for _, kw in seen)

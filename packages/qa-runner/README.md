@@ -48,8 +48,10 @@ expected values. Freezing:
 * gives every assertion a digest (sha256 of its canonical JSON, expected value included) together with a binding to everything else that defines the lane: the
   whole spec (steps included), the egress profile, the deadline, the request expectations and probes below, the plan id and the target. The assertion lock and
   the plan digest follow the conventions of `qa-evidence`, so the plan digest covers all of it, and the contracts and the harness must agree on the assertion-set pin;
-* needs, per lane, the `requests` the target must have seen (`required`) and may see (`allowed`) as `METHOD /path` strings, and may name `probes`: assertions tied
-  to a fact of the independent reference check (`settings-persistence`, `discount-math`);
+* needs, per lane, the `requests` the target must have seen (`required`) and may see (`allowed`) as `METHOD /path` strings, and names, for EVERY assertion, a probe: a fact of the independent reference
+  check (`settings-persistence`, `discount-rule`) that must not contradict a verified verdict, or `ui-only` (the assertion is about what the browser shows; nothing independent backs it). A lane with an
+  assertion that names no probe is refused at freeze, so a plan cannot reach VERIFIED on a fixture-app assertion nobody said anything about; the assertions declared `ui-only` are listed in the report
+  (`extensions.no_independent_probe`) and in the summary `run` prints;
 * refuses an assertion id that appears in two lanes (every assertion is accounted exactly once).
 
 A step value may start with `{origin}`; the origin of this start of the target is substituted when the lane runs, so one frozen plan serves every start of
@@ -108,6 +110,14 @@ Every lane and every frozen assertion is accounted for whatever happens. A lane 
 native status that says so; its assertions are `INCONCLUSIVE`; the run is never `VERIFIED`. The engine's own status (`lanes[].native`) and the verdict
 (`accounting.results[].verdict`) are separate fields with disjoint vocabularies. For the browser lane the native status is the harness executor's outcome
 (`PASS` becomes `NATIVE_PASS`, `PRODUCT_FAIL` becomes `NATIVE_FAIL`, anything else `NATIVE_ERROR` or `NATIVE_TIMEOUT`); it is never converted into a verdict.
+
+## Bounded reads
+
+Every file this package reads that it did not write itself (a plan or lock, what a lane or the target wrote, the lane input) goes through `safe_read.read_regular`: one descriptor opened without blocking,
+`fstat`-ed, refused unless it is a regular file (a FIFO, a device, a directory and a symbolic link in a lane's output are refused unread), refused above the byte cap before any read, read with a running
+total that stops at the cap (a file that grows while it is read), and read within a deadline. The reference check of the target has the same shape for network reads: no answer above 1 MiB, a total deadline
+of 30 seconds for the whole check (a watcher ends the connection; a server that sends one byte every few seconds does not stretch it) and the run's cancel ends it. The tests that probe this run in a child with
+a hard timeout, FIFOs with no writer or with a capped one, a sparse file and a growing file; none opens an unbounded source.
 
 ## Bundle contents
 
