@@ -247,23 +247,6 @@ jobs:
         run: python -c "import importlib.metadata as m, playwright.sync_api; assert m.version('playwright') == '1.64.1', m.version('playwright')"
       - name: Fail if the working tree is dirty
         run: test -z "$(git status --porcelain)"
-      - name: Diagnose the driver start (same scrubbed environment; prints the real error)
-        run: |
-          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" python - <<'PY'
-          import traceback
-          from playwright.sync_api import sync_playwright
-          try:
-              manager = sync_playwright()
-              pw = manager.start()
-              print("driver started")
-              browser = pw.chromium.launch(headless=True, chromium_sandbox=False)
-              print("chromium launched", browser.version)
-              browser.close()
-              pw.stop()
-          except Exception:
-              traceback.print_exc()
-              raise
-          PY
       - name: Run the browser lane (scrubbed environment; only tests marked browser)
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
