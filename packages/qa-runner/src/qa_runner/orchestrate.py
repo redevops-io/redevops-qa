@@ -1,0 +1,254 @@
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
+"""Running a frozen plan: start the target, run each lane as a supervised child process, collect what each wrote, build the bundle.
+
+Lanes run one after the other (R0). Every lane is accounted for whatever happens to it: a lane that cannot start, times out, is cancelled or crashes is recorded
+with a native status that says so and its assertions are INCONCLUSIVE, so the run can never be VERIFIED. The target and every child are stopped in ``finally``
+blocks and as process groups; nothing a run started outlives it."""
+from __future__ import annotations
+
+import datetime
+import importlib.metadata
+import json
+import os
+import platform
+import re
+import shutil
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+
+from qa_adapter_kit.status import ErrorCode
+from qa_adapter_kit.supervisor import CancelToken
+from qa_evidence.build import BuiltBundle
+from qa_evidence.canon import CanonError, dumps_canonical, loads_strict
+
+from . import constants as K
+from .bundle import LaneOutcome, RunInputs, build_run_bundle
+from .deps import Upstreams
+from .egress import policy_config
+from .errors import EnvironmentFault, PlanError
+from .judge import observation_document, observation_path
+from .plan import FrozenLane, FrozenPlan, materialise_spec
+from .procs import FixtureApp, child_env, make_workdir, run_child
+
+MAX_BLOBS = 400
+MAX_BLOB_BYTES = 4 * 1024 * 1024
+_SAFE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def utc_now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def new_run_id() -> str:
+    return "r0-" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + os.urandom(2).hex()
+
+
+def describe_environment() -> Dict[str, str]:
+    env = {"os": platform.system().lower() or "unknown", "arch": platform.machine().lower() or "unknown", "python": platform.python_version()}
+    try:
+        env["playwright"] = importlib.metadata.version("playwright")
+    except importlib.metadata.PackageNotFoundError:
+        pass
+    return env
+
+
+@dataclass(frozen=True)
+class RunOptions:
+    defect: str = "none"
+    run_id: Optional[str] = None
+    lane_deadline_s: Optional[float] = None            # overrides the plan's deadlines (a ceiling; never raises one)
+    cancel: Optional[CancelToken] = None
+    clock: Callable[[], str] = utc_now
+    lane_command: Optional[Callable[[FrozenLane, str], List[str]]] = None       # test seam: the argv of a lane child (default: the real lane module)
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    run_id: str
+    bundle: BuiltBundle
+    outcome: str
+    reason_code: str
+    exit_code: int
+    plan_digest: str
+    manifest_digest: str
+    lanes: Tuple[Tuple[str, str], ...]                 # (lane id, native status)
+    cancelled: bool
+
+
+def exit_code_for(report: Mapping[str, Any], cancelled: bool = False) -> int:
+    outcome = report["verdict"]["outcome"]
+    if outcome == "VERIFIED":
+        return K.EXIT_VERIFIED
+    if outcome == "FAILED":
+        return K.EXIT_FAILED
+    if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]):
+        return K.EXIT_ENVIRONMENT
+    return K.EXIT_INCONCLUSIVE
+
+
+def _read_bounded(path: Path, limit: int) -> Optional[bytes]:
+    try:
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > limit:
+            return None
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _native_from_harness(outcome: str, reason: Optional[str]) -> Tuple[str, str]:
+    """The engine-side status of a browser lane from the harness executor's own outcome. PASS maps to NATIVE_PASS only: it is never a verdict."""
+    if outcome == "PASS":
+        return "NATIVE_PASS", "PASS"
+    if outcome == "PRODUCT_FAIL":
+        return "NATIVE_FAIL", "PRODUCT_FAIL"
+    if reason and "DEADLINE" in reason.upper():
+        return "NATIVE_TIMEOUT", outcome
+    return "NATIVE_ERROR", outcome
+
+
+def lane_input(fl: FrozenLane, *, run_id: str, origin: str, out_dir: str) -> Dict[str, Any]:
+    return {"schema": K.LANE_INPUT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "run_id": f"{run_id}.{fl.lane_id}", "lane_id": fl.lane_id, "origin": origin,
+            "spec": materialise_spec(fl.spec_template, origin), "assertions": [dict(a) for a in fl.assertions], "harness_pin": fl.harness_pin,
+            "egress_policy": policy_config(fl.egress, origin), "out_dir": out_dir}
+
+
+def _unavailable(fl: FrozenLane, engine_version: str, raw: str, status: str = "NATIVE_UNAVAILABLE") -> LaneOutcome:
+    return LaneOutcome(lane_id=fl.lane_id, engine_name=fl.engine, engine_version=engine_version, native_status=status, raw_status=raw, exit_code=None)
+
+
+def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdir: str, opts: RunOptions, log: List[str]) -> LaneOutcome:
+    try:
+        version = importlib.metadata.version("playwright")
+    except importlib.metadata.PackageNotFoundError:
+        version = "not-installed"
+    if origin is None:
+        log.append(f"lane {fl.lane_id}: not started: the target did not start")
+        return _unavailable(fl, version, "target-not-started")
+    if opts.cancel is not None and opts.cancel.cancelled:
+        log.append(f"lane {fl.lane_id}: not started: the run was cancelled")
+        return _unavailable(fl, version, "cancelled-before-start", "NATIVE_SKIPPED")
+    lane_dir = Path(workdir) / "lanes" / fl.lane_id
+    out_dir = lane_dir / "out"
+    home = lane_dir / "home"
+    home.mkdir(parents=True)
+    spec_in = lane_dir / "input.json"
+    cfg = lane_input(fl, run_id=run_id, origin=origin, out_dir=str(out_dir))
+    spec_in.write_bytes(dumps_canonical(cfg))
+    argv = opts.lane_command(fl, str(spec_in)) if opts.lane_command else [sys.executable, "-s", "-m", "qa_runner.lane_browser", str(spec_in)]
+    deadline = float(fl.deadline_s if opts.lane_deadline_s is None else min(opts.lane_deadline_s, fl.deadline_s))
+    proc = run_child(argv, cwd=str(lane_dir), env=child_env(str(home)), deadline_s=deadline, cancel=opts.cancel)
+    stdout_tail, stderr_tail = proc.stdout[-K.MAX_LOG_TAIL_BYTES:], proc.stderr[-K.MAX_LOG_TAIL_BYTES:]
+    files: Dict[str, Tuple[bytes, str]] = {f"logs/{fl.lane_id}.stdout.txt": (stdout_tail, "log"), f"logs/{fl.lane_id}.stderr.txt": (stderr_tail, "log"),
+                                           f"lanes/{fl.lane_id}/egress-profile.json": (dumps_canonical(cfg["egress_policy"]), "record")}
+    native: Dict[str, bytes] = {}
+    result: Optional[Dict[str, Any]] = None
+    raw = _read_bounded(out_dir / "lane-result.json", K.MAX_CHILD_JSON_BYTES)
+    if raw is not None:
+        try:
+            parsed = loads_strict(raw)
+            if isinstance(parsed, dict) and parsed.get("schema") == K.LANE_RESULT_SCHEMA:
+                result = parsed
+                native["lane-result.json"] = raw
+        except CanonError:
+            result = None
+    for name in ("run-record.json",):
+        data = _read_bounded(out_dir / name, 64 * 1024 * 1024)
+        if data is not None:
+            native[name] = data
+    blob_dir = out_dir / "blobs"
+    too_many = False
+    if blob_dir.is_dir():
+        names = sorted(p.name for p in blob_dir.iterdir() if re.fullmatch(r"[0-9a-f]{64}", p.name))
+        if len(names) > MAX_BLOBS:
+            too_many = True
+        for n in names[:MAX_BLOBS]:
+            data = _read_bounded(blob_dir / n, MAX_BLOB_BYTES)
+            if data is not None:
+                native[f"blobs/{n}"] = data
+    for name in ("gateway-log.jsonl", "browser-guard-log.jsonl"):
+        data = _read_bounded(out_dir / name, 16 * 1024 * 1024)
+        if data is not None:
+            files[f"lanes/{fl.lane_id}/{name}"] = (data, "log")
+    status, raw_status, exit_code, counts = "NATIVE_ERROR", "error", proc.exit_code, None
+    harness_verdicts: Dict[str, str] = {}
+    if proc.error_code == ErrorCode.TIMEOUT:
+        status, raw_status = "NATIVE_TIMEOUT", "timeout"
+    elif proc.error_code == ErrorCode.CANCELLED:
+        status, raw_status = "NATIVE_ERROR", "cancelled"
+    elif proc.error_code == ErrorCode.OUTPUT_LIMIT:
+        status, raw_status = "NATIVE_ERROR", "output-limit"
+    elif proc.error_code == ErrorCode.SPAWN_FAILED:
+        status, raw_status = "NATIVE_UNAVAILABLE", "spawn-failed"
+    elif result is not None and result.get("status") == "COMPLETED" and proc.exit_code == 0 and not too_many:
+        status, raw_status = _native_from_harness(str(result.get("outcome")), result.get("reason"))
+        exit_code = result.get("exit_code") if isinstance(result.get("exit_code"), int) else None
+        rows = result.get("observations") if isinstance(result.get("observations"), list) else []
+        if rows and all(isinstance(r, dict) and isinstance(r.get("assertion_id"), str) for r in rows):
+            # recorded exactly as the lane returned them: a row with a field it should not have (a verdict, an expected value) is not repaired or dropped here,
+            # the judge refuses the whole file as unusable evidence
+            doc = observation_document(fl.lane_id, f"{run_id}.{fl.lane_id}", fl.engine, rows)
+            files[observation_path(fl.lane_id)] = (dumps_canonical(doc), "observation")
+        for v in result.get("harness_verdicts") or []:
+            if isinstance(v, dict) and isinstance(v.get("assertion_id"), str) and v.get("verdict") in ("PASS", "FAIL", "INDETERMINATE"):
+                harness_verdicts[v["assertion_id"]] = v["verdict"]
+        if status == "NATIVE_FAIL" and not exit_code:
+            exit_code = 1
+        if status == "NATIVE_PASS":
+            exit_code = 0
+    elif too_many:
+        raw_status = "too-many-artifacts"
+    elif result is not None and result.get("status") == "ERROR":
+        raw_status = "lane-error"
+    else:
+        raw_status = f"child-exit-{proc.exit_code}" if proc.exit_code is not None else f"child-signal-{proc.signal}"
+    if status in ("NATIVE_ERROR", "NATIVE_TIMEOUT", "NATIVE_UNAVAILABLE") and exit_code == 0:
+        exit_code = None
+    if status == "NATIVE_ERROR" and exit_code is None and proc.exit_code not in (None, 0):
+        exit_code = proc.exit_code
+    log.append(f"lane {fl.lane_id}: native {status} ({_SAFE.sub('_', raw_status)[:40]}), exit {exit_code}")
+    return LaneOutcome(lane_id=fl.lane_id, engine_name=fl.engine, engine_version=version, native_status=status, raw_status=raw_status, exit_code=exit_code,
+                       native_files=native, files=files, counts=counts, harness_verdicts=harness_verdicts)
+
+
+def run_plan(up: Upstreams, frozen: FrozenPlan, opts: RunOptions = RunOptions()) -> RunSummary:
+    run_id = new_run_id() if opts.run_id is None else opts.run_id
+    if not K.RUN_ID_RE.fullmatch(run_id):
+        raise PlanError("BAD_RUN_ID", "a run id is 1 to 40 characters: letters, digits, '.', '_' and '-', starting with a letter or digit")
+    if opts.defect not in K.DEFECTS:
+        raise PlanError("BAD_DEFECT", f"defect must be one of {list(K.DEFECTS)}")
+    workdir = make_workdir()
+    log: List[str] = [f"run {run_id}", f"plan {frozen.plan_id} digest {frozen.plan_digest}", f"target fixture-app defect {opts.defect}"]
+    started = opts.clock()
+    app = FixtureApp(opts.defect, str(Path(workdir) / "requests.jsonl"), home=workdir)
+    origin: Optional[str] = None
+    outcomes: List[LaneOutcome] = []
+    try:
+        try:
+            origin = app.start()
+            log.append("target started on loopback")
+        except EnvironmentFault as exc:
+            log.append(f"target not started: {exc.code}")
+        for fl in frozen.lanes:
+            if fl.engine != K.ENGINE_PLAYWRIGHT:
+                raise PlanError("UNSUPPORTED_ENGINE", f"no runner for engine {fl.engine!r}")
+            outcomes.append(run_browser_lane(fl, run_id=run_id, origin=origin, workdir=workdir, opts=opts, log=log))
+    finally:
+        app.stop()
+    request_log = _read_bounded(Path(workdir) / "requests.jsonl", 16 * 1024 * 1024) or b""
+    cancelled = bool(opts.cancel is not None and opts.cancel.cancelled)
+    if cancelled:
+        log.append("the run was cancelled")
+    finished = opts.clock()
+    env = describe_environment()
+    logs = {"logs/orchestrator.log": ("\n".join(log) + "\n").encode("utf-8"), "logs/target-requests.jsonl": request_log}
+    inputs = RunInputs(frozen=frozen, run_id=run_id, started_at=started, finished_at=finished, environment=env, lanes=tuple(outcomes), logs=logs,
+                       extensions={"target_defect": opts.defect, "target": "fixture-app"})
+    built = build_run_bundle(up, inputs)
+    report = json.loads(built.files["report.json"])
+    code = exit_code_for(report, cancelled)
+    shutil.rmtree(workdir, ignore_errors=True)
+    return RunSummary(run_id=run_id, bundle=built, outcome=report["verdict"]["outcome"], reason_code=report["verdict"]["reason_code"], exit_code=code,
+                      plan_digest=frozen.plan_digest, manifest_digest=built.manifest_digest,
+                      lanes=tuple((l["lane_id"], l["native"]["status"]) for l in report["lanes"]), cancelled=cancelled)

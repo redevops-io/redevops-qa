@@ -208,3 +208,32 @@ def test_the_evidence_job_is_offline_pin_free_scrubbed_and_fails_on_skips():
     assert not any("repository" in s.get("with", {}) for s in job["steps"]) and "needs" not in job and "continue-on-error" not in job
     assert "playwright" not in steps.lower() and "upload-artifact" not in str(job)
     assert any('test -z "$(git status --porcelain)"' in str(s.get("run", "")) for s in job["steps"])
+
+
+def test_the_runner_job_is_offline_scrubbed_pinned_and_fails_on_skips():
+    job = WF["jobs"]["runner"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert "packages/qa-runner/tests" in steps and "env -i HOME=" in steps and "tools/check_junit.py" in steps and "--junitxml" in steps
+    assert job["strategy"]["matrix"]["python"] == ["3.11", "3.12"] and job["strategy"]["fail-fast"] is False and "pins" in job["needs"]
+    fetches = [s for s in job["steps"] if "repository" in s.get("with", {})]
+    assert len(fetches) == 2 and all(s["with"]["ref"].startswith("${{ steps.pins.outputs.") and s["with"]["persist-credentials"] is False for s in fetches)
+    assert "--verify-trees --require-git" in steps and "playwright" not in steps.lower() and "continue-on-error" not in job and "upload-artifact" not in str(job)
+    assert "-m browser" not in steps
+
+
+def test_the_runner_browser_job_runs_only_the_browser_tests_in_a_scrubbed_environment_and_fails_on_skips():
+    job = WF["jobs"]["runner-browser"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert "-m browser packages/qa-runner/tests/browser" in steps and "env -i HOME=" in steps and "tools/check_junit.py" in steps and "--junitxml" in steps
+    assert "playwright==1.64.1" in steps and "playwright install --with-deps chromium" in steps and "PLAYWRIGHT_BROWSERS_PATH" in steps
+    assert "pins" in job["needs"] and "continue-on-error" not in job and "upload-artifact" not in str(job)
+    fetches = [s for s in job["steps"] if "repository" in s.get("with", {})]
+    assert len(fetches) == 2 and "--verify-trees --require-git" in steps
+    assert steps.count('test -z "$(git status --porcelain)"') == 2
+
+
+def test_the_runner_documentation_states_what_it_does_not_show():
+    text = (ROOT / "packages" / "qa-runner" / "README.md").read_text(encoding="utf-8")
+    for needle in ("unkeyed", "does not say the application is correct", "Linux x86_64", "never installs", "source-available, not open source"):
+        assert needle in text
+    assert "open source" not in text.replace("not open source", "")

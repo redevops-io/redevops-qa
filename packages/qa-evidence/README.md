@@ -42,8 +42,11 @@ runner and the independent verifier, in other packages) hands it a report and th
     observation file depends on the importer that wrote it and on the external anchor and CI provenance of the bundle.
   * not enforced, and not claimed: that the verifier is independent. `verifier` is a name and a version the producer wrote; the
     manifest must list the same verifier version under `tools`, and that is all that is checked.
-* **Run outcome.** `VERIFIED` needs every frozen assertion verified, every lane to have run to completion (`NATIVE_PASS` or `NATIVE_FAIL`;
-  an error, timeout, unavailable or skipped lane makes the run `INCONCLUSIVE`) and every lane to have at least one frozen assertion.
+* **Run outcome.** `VERIFIED` needs every frozen assertion verified, every lane to be `NATIVE_PASS` and every lane to have at least one frozen
+  assertion. An error, timeout, unavailable or skipped lane makes the run `INCONCLUSIVE` (`ENGINE_DID_NOT_COMPLETE`). A lane whose engine said
+  `NATIVE_FAIL` while every assertion is `VERIFIED` is an engine/verifier disagreement that nothing in the bundle can settle: the run is
+  `INCONCLUSIVE` with the reason `NATIVE_FAIL_VERIFIED_ASSERTIONS`, never `VERIFIED`, and `verify` (text and JSON) lists the disagreement.
+  A `FAILED` assertion always fails the run.
 * **Not correctness.** A verified verdict says the frozen assertions were evaluated over the recorded observations. It does not say the
   application under test is correct.
 
@@ -129,9 +132,13 @@ non-canonical bytes are refused.
   `VERIFIED` verdict must name its evidence.
 * `verdict`: the run outcome, which must equal what the accounting and the lanes give (any `FAILED` fails; anything not `VERIFIED`, nothing
   frozen, or a lane that did not run to completion is `INCONCLUSIVE`) with the one reason code for that outcome
-  (`ALL_ASSERTIONS_VERIFIED`, `ASSERTION_FAILED`, `NOT_ALL_ASSERTIONS_VERIFIED`, `ENGINE_DID_NOT_COMPLETE`), bound to the plan digest, the
+  (`ALL_ASSERTIONS_VERIFIED`, `ASSERTION_FAILED`, `NOT_ALL_ASSERTIONS_VERIFIED`, `ENGINE_DID_NOT_COMPLETE`, `NATIVE_FAIL_VERIFIED_ASSERTIONS`), bound to the plan digest, the
   assertion-set digest and an evidence-set digest.
 * `redaction` (rules and notes; rules need `applied: true`) and `limitations` (the three required statements, unchanged, plus any of your own).
+
+The `NATIVE_FAIL_VERIFIED_ASSERTIONS` reason needs no schema change (the reason code is an open code pattern and the outcome set is unchanged), so the
+schema version stays 1.0. A reader that predates the rule recomputes `VERIFIED` for such a report, finds the stored `INCONCLUSIVE` and refuses the
+bundle: it fails closed. `verify --json` carries `run_outcome` and `engine_verifier_disagreements` (additive keys).
 
 The format is not released; changes made after review of the first version (non-null plan digest, assertion lock, lane run id relation,
 native directory, closed reason codes, ASCII paths) are made in schema version 1.0 and the three required limitation texts are unchanged.
