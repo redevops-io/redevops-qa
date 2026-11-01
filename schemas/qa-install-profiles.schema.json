@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "redevops-qa/install-profiles/1",
+  "title": "ReDevOps QA install profiles",
+  "description": "The install profiles a configurator may offer, as data: exact pins, prerequisites per host, the commands as argument vectors, where evidence is written, how to uninstall, and a status that is `verified` only when a CI job runs that exact profile end to end on the stated host. Checked by tools/check_install_profiles.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "profiles_version", "source", "verifier", "targets", "profiles"],
+  "properties": {
+    "schema": {"const": "redevops-qa/install-profiles/1"},
+    "profiles_version": {"type": "integer", "minimum": 1},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "url", "install_method", "pinned_commit", "dependency_release_tags", "note"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"},
+        "url": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\\.git$"},
+        "install_method": {"const": "checkout-at-commit"},
+        "pinned_commit": {"$ref": "#/$defs/sha"},
+        "dependency_release_tags": {
+          "type": "object",
+          "additionalProperties": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"}}
+        },
+        "note": {"type": "string", "minLength": 1}
+      }
+    },
+    "verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported", "reason"],
+      "properties": {"supported": {"const": false}, "reason": {"type": "string", "minLength": 1}}
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local-python", "docker-compose", "kubernetes-helm"],
+      "properties": {
+        "local-python": {"$ref": "#/$defs/target"},
+        "docker-compose": {"$ref": "#/$defs/target"},
+        "kubernetes-helm": {"$ref": "#/$defs/target"}
+      }
+    },
+    "profiles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/profile"}}
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "date": {"type": "string", "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"},
+    "slug": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$"},
+    "os_arch": {"enum": ["linux-x86_64", "linux-arm64", "macos-arm64", "macos-x86_64", "windows-x86_64", "windows-wsl-x86_64"]},
+    "status": {"enum": ["verified", "experimental", "planned"]},
+    "text_list": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "disabled_reason"],
+      "properties": {"status": {"enum": ["available", "planned"]}, "disabled_reason": {"type": ["string", "null"]}},
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "planned"}}, "required": ["status"]}, "then": {"properties": {"disabled_reason": {"type": "string", "minLength": 1}}}},
+        {"if": {"properties": {"status": {"const": "available"}}, "required": ["status"]}, "then": {"properties": {"disabled_reason": {"type": "null"}}}}
+      ]
+    },
+    "param": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "default", "required", "description"],
+      "properties": {
+        "kind": {"enum": ["dir-path", "abs-path"]},
+        "default": {"type": ["string", "null"]},
+        "required": {"type": "boolean"},
+        "description": {"type": "string", "minLength": 1}
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "argv"],
+      "properties": {
+        "id": {"$ref": "#/$defs/slug"},
+        "title": {"type": "string", "minLength": 1},
+        "argv": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "env": {"type": "object", "additionalProperties": {"type": "string"}},
+        "manual": {"type": "boolean"}
+      }
+    },
+    "step_list": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+    "verified_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workflow", "job_key", "job_name", "run_id", "job_id", "head_sha", "run_url", "url", "completed_on", "summary"],
+      "properties": {
+        "workflow": {"const": "tests.yml"},
+        "job_key": {"$ref": "#/$defs/slug"},
+        "job_name": {"type": "string", "minLength": 1},
+        "run_id": {"type": "integer", "minimum": 1},
+        "job_id": {"type": "integer", "minimum": 1},
+        "head_sha": {"$ref": "#/$defs/sha"},
+        "run_url": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+$"},
+        "url": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/runs/[0-9]+/job/[0-9]+$"},
+        "completed_on": {"$ref": "#/$defs/date"},
+        "summary": {"type": "string", "minLength": 1}
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os_arch", "status", "prerequisites", "verified_by", "disabled_reason", "note"],
+      "properties": {
+        "os_arch": {"$ref": "#/$defs/os_arch"},
+        "status": {"$ref": "#/$defs/status"},
+        "prerequisites": {"$ref": "#/$defs/text_list"},
+        "verified_by": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/verified_by"}]},
+        "disabled_reason": {"type": ["string", "null"]},
+        "note": {"type": "string"}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "verified"}}, "required": ["status"]}, "then": {"properties": {"verified_by": {"type": "object"}, "disabled_reason": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"const": "experimental"}}, "required": ["status"]}, "then": {"properties": {"verified_by": {"type": "null"}, "disabled_reason": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"const": "planned"}}, "required": ["status"]}, "then": {"properties": {"verified_by": {"type": "null"}, "disabled_reason": {"type": "string", "minLength": 1}}}}
+      ]
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "target", "engines", "status", "disabled_reason", "python", "pip_pins", "packages", "prerequisites", "params", "hosts", "steps",
+                   "evidence", "uninstall_note", "limitations"],
+      "properties": {
+        "id": {"$ref": "#/$defs/slug"},
+        "title": {"type": "string", "minLength": 1},
+        "target": {"enum": ["local-python"]},
+        "engines": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/slug"}},
+        "status": {"$ref": "#/$defs/status"},
+        "disabled_reason": {"type": ["string", "null"]},
+        "python": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "executable", "requires"],
+          "properties": {
+            "version": {"type": "string", "pattern": "^3\\.[0-9]+$"},
+            "executable": {"type": "string", "pattern": "^python3\\.[0-9]+$"},
+            "requires": {"type": "string", "minLength": 1}
+          }
+        },
+        "pip_pins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version"],
+            "properties": {"name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"}, "version": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)*$"}}
+          }
+        },
+        "packages": {"type": "array", "items": {"type": "string", "pattern": "^packages/[a-z0-9-]+$"}},
+        "prerequisites": {"$ref": "#/$defs/text_list"},
+        "params": {"type": "object", "additionalProperties": {"$ref": "#/$defs/param"}},
+        "hosts": {"type": "array", "items": {"$ref": "#/$defs/host"}},
+        "steps": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "install", "smoke", "check", "uninstall"],
+          "properties": {
+            "source": {"$ref": "#/$defs/step_list"},
+            "install": {"$ref": "#/$defs/step_list"},
+            "smoke": {"$ref": "#/$defs/step_list"},
+            "check": {"$ref": "#/$defs/step_list"},
+            "uninstall": {"$ref": "#/$defs/step_list"}
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["files", "manual_files", "description"],
+          "properties": {
+            "files": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+\\.xml$"}},
+            "manual_files": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+\\.xml$"}},
+            "description": {"type": "string", "minLength": 1}
+          }
+        },
+        "uninstall_note": {"type": "string", "minLength": 1},
+        "limitations": {"$ref": "#/$defs/text_list"}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "planned"}}, "required": ["status"]},
+         "then": {"properties": {"disabled_reason": {"type": "string", "minLength": 1}}},
+         "else": {"properties": {"disabled_reason": {"type": "null"}, "hosts": {"minItems": 1}, "python": {"type": "object"}}}},
+        {"if": {"properties": {"status": {"const": "verified"}}, "required": ["status"]},
+         "then": {"properties": {"steps": {"properties": {"install": {"minItems": 1}, "smoke": {"minItems": 1}, "check": {"minItems": 1}, "uninstall": {"minItems": 1}}}}}}
+      ]
+    }
+  }
+}

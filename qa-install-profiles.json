@@ -1,0 +1,1007 @@
+{
+  "schema": "redevops-qa/install-profiles/1",
+  "profiles_version": 1,
+  "source": {
+    "repository": "redevops-io/redevops-qa",
+    "url": "https://github.com/redevops-io/redevops-qa.git",
+    "install_method": "checkout-at-commit",
+    "pinned_commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8",
+    "dependency_release_tags": {
+      "runtime-contracts": [
+        "v0.3.15",
+        "v0.3.16"
+      ],
+      "agent-harness": [
+        "v0.2.0"
+      ]
+    },
+    "note": "The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them."
+  },
+  "verifier": {
+    "supported": false,
+    "reason": "No profile installs or runs an independent verifier: the verifier belongs to the agent harness, which no tested step installs. A native engine pass or fail is not a verdict."
+  },
+  "targets": {
+    "local-python": {
+      "status": "available",
+      "disabled_reason": null
+    },
+    "docker-compose": {
+      "status": "planned",
+      "disabled_reason": "The main branch of this repository ships no Compose file, no Dockerfile and no runner service. A Compose packaging exists only as unmerged work and its files have been validated statically, never started; a Compose profile will be offered only when one is merged and run in CI."
+    },
+    "kubernetes-helm": {
+      "status": "planned",
+      "disabled_reason": "This repository ships no Helm chart and no Kubernetes manifests for the runner, so there is nothing to test; the cluster checks in qa-checks inspect other people's manifests and are not a deployment of this runtime."
+    }
+  },
+  "profiles": [
+    {
+      "id": "local-python-robot",
+      "title": "Robot Framework suites in a local Python environment",
+      "target": "local-python",
+      "engines": [
+        "robotframework"
+      ],
+      "status": "verified",
+      "disabled_reason": null,
+      "python": {
+        "version": "3.12",
+        "executable": "python3.12",
+        "requires": ">=3.11"
+      },
+      "pip_pins": [
+        {
+          "name": "pytest",
+          "version": "9.2.0"
+        },
+        {
+          "name": "pyyaml",
+          "version": "6.0.3"
+        },
+        {
+          "name": "robotframework",
+          "version": "7.5"
+        }
+      ],
+      "packages": [
+        "packages/qa-adapter-kit",
+        "packages/qa-robot"
+      ],
+      "prerequisites": [
+        "Python 3.12 available as `python3.12` (the packages require 3.11 or newer; 3.12 is the version the steps were run with).",
+        "git, and network access to https://github.com/redevops-io/redevops-qa (a public repository).",
+        "Network access to a Python package index for the pinned packages and for the build backend (setuptools 68 or newer, not pinned here).",
+        "All commands are run from one working directory, the one that contains the checkout, using a POSIX shell."
+      ],
+      "params": {
+        "venv_dir": {
+          "kind": "dir-path",
+          "default": ".venv-qa",
+          "required": false,
+          "description": "where the virtual environment is created"
+        },
+        "evidence_dir": {
+          "kind": "dir-path",
+          "default": "qa-evidence",
+          "required": false,
+          "description": "where the smoke steps write their JUnit evidence"
+        },
+        "checkout_dir": {
+          "kind": "dir-path",
+          "default": "redevops-qa",
+          "required": false,
+          "description": "where the repository is cloned"
+        }
+      },
+      "hosts": [
+        {
+          "os_arch": "linux-x86_64",
+          "status": "verified",
+          "prerequisites": [
+            "Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner."
+          ],
+          "verified_by": {
+            "workflow": "tests.yml",
+            "job_key": "profile-local-python-robot",
+            "job_name": "install profile local-python-robot",
+            "run_id": 41264392648,
+            "job_id": 124724056968,
+            "head_sha": "66b792d05fcf4ff2e5ccc44742a256d686c2cc9b",
+            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648",
+            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056968",
+            "completed_on": "2026-11-01",
+            "summary": "install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, from the pinned commit in a clean virtual environment"
+          },
+          "disabled_reason": null,
+          "note": ""
+        },
+        {
+          "os_arch": "linux-arm64",
+          "status": "experimental",
+          "prerequisites": [
+            "Linux arm64 with a POSIX shell."
+          ],
+          "verified_by": null,
+          "disabled_reason": null,
+          "note": "The same steps are written for this host but no CI job runs them here."
+        },
+        {
+          "os_arch": "macos-arm64",
+          "status": "experimental",
+          "prerequisites": [
+            "macOS on Apple silicon with Python 3.12 as `python3.12`."
+          ],
+          "verified_by": null,
+          "disabled_reason": null,
+          "note": "The same steps are written for this host but no CI job runs them here."
+        }
+      ],
+      "steps": {
+        "source": [
+          {
+            "id": "clone",
+            "title": "Clone the repository",
+            "argv": [
+              "git",
+              "clone",
+              "https://github.com/redevops-io/redevops-qa.git",
+              "{checkout_dir}"
+            ]
+          },
+          {
+            "id": "pin",
+            "title": "Check out the pinned commit",
+            "argv": [
+              "git",
+              "-C",
+              "{checkout_dir}",
+              "checkout",
+              "--detach",
+              "{source_commit}"
+            ]
+          }
+        ],
+        "install": [
+          {
+            "id": "venv",
+            "title": "Create a clean virtual environment",
+            "argv": [
+              "python3.12",
+              "-m",
+              "venv",
+              "{venv_dir}"
+            ]
+          },
+          {
+            "id": "pip-pins",
+            "title": "Install the pinned Python packages",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pip",
+              "install",
+              "--disable-pip-version-check",
+              "pytest==9.2.0",
+              "pyyaml==6.0.3",
+              "robotframework==7.5"
+            ]
+          },
+          {
+            "id": "packages",
+            "title": "Install the adapter packages from the checkout (not editable, no dependency resolution)",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pip",
+              "install",
+              "--disable-pip-version-check",
+              "--no-deps",
+              "{checkout_dir}/packages/qa-adapter-kit",
+              "{checkout_dir}/packages/qa-robot"
+            ]
+          },
+          {
+            "id": "installed-from-venv",
+            "title": "Check that the packages are imported from the virtual environment, not from the checkout",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-I",
+              "-c",
+              "import importlib,os,sys; root=os.path.realpath(sys.argv[1]); bad=[m for m in sys.argv[2:] if not os.path.realpath(importlib.import_module(m).__file__).startswith(root+os.sep)]; sys.exit(('not imported from the virtual environment: '+', '.join(bad)) if bad else 0)",
+              "{venv_dir}",
+              "qa_adapter_kit",
+              "qa_robot",
+              "robot"
+            ]
+          }
+        ],
+        "smoke": [
+          {
+            "id": "kit-offline",
+            "title": "Run the shared adapter kit tests (fake adapters, offline)",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-p",
+              "no:cacheprovider",
+              "-c",
+              "{checkout_dir}/pyproject.toml",
+              "-o",
+              "pythonpath=",
+              "--junitxml={evidence_dir}/junit-adapter-kit.xml",
+              "{checkout_dir}/packages/qa-adapter-kit/tests"
+            ]
+          },
+          {
+            "id": "robot-offline",
+            "title": "Run the Robot adapter tests (recorded output.xml files, offline)",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-p",
+              "no:cacheprovider",
+              "-c",
+              "{checkout_dir}/pyproject.toml",
+              "-o",
+              "pythonpath=",
+              "--junitxml={evidence_dir}/junit-robot-offline.xml",
+              "{checkout_dir}/packages/qa-robot/tests"
+            ]
+          },
+          {
+            "id": "robot-real",
+            "title": "Run the Robot adapter against real Robot Framework 7.5",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-p",
+              "no:cacheprovider",
+              "-c",
+              "{checkout_dir}/pyproject.toml",
+              "-o",
+              "pythonpath=",
+              "--junitxml={evidence_dir}/junit-robot-real.xml",
+              "-m",
+              "robot_real",
+              "{checkout_dir}/packages/qa-robot/tests/real"
+            ]
+          }
+        ],
+        "check": [
+          {
+            "id": "check-adapter-kit",
+            "title": "Fail on zero tests, any skip or any failure in junit-adapter-kit.xml",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "{checkout_dir}/tools/check_junit.py",
+              "{evidence_dir}/junit-adapter-kit.xml"
+            ]
+          },
+          {
+            "id": "check-robot-offline",
+            "title": "Fail on zero tests, any skip or any failure in junit-robot-offline.xml",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "{checkout_dir}/tools/check_junit.py",
+              "{evidence_dir}/junit-robot-offline.xml"
+            ]
+          },
+          {
+            "id": "check-robot-real",
+            "title": "Fail on zero tests, any skip or any failure in junit-robot-real.xml",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "{checkout_dir}/tools/check_junit.py",
+              "{evidence_dir}/junit-robot-real.xml"
+            ]
+          }
+        ],
+        "uninstall": [
+          {
+            "id": "remove-venv",
+            "title": "Remove the virtual environment (refuses a directory that is not one)",
+            "argv": [
+              "python3.12",
+              "-c",
+              "import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'pyvenv.cfg')); ok or sys.exit('refusing to remove a directory that is not a virtual environment: '+p); shutil.rmtree(p)",
+              "{venv_dir}"
+            ]
+          }
+        ]
+      },
+      "evidence": {
+        "files": [
+          "junit-adapter-kit.xml",
+          "junit-robot-offline.xml",
+          "junit-robot-real.xml"
+        ],
+        "manual_files": [],
+        "description": "One JUnit XML report per smoke step, written to the evidence directory; the check steps fail on zero tests, any skip or any failure. The reports show the adapter and the real engine passing their own tests; they are not an independent verdict."
+      },
+      "uninstall_note": "The steps leave two directories: the virtual environment (removed by the step above) and the evidence directory, which is yours to keep or delete. The checkout is an ordinary clone; delete it when you no longer need it. Nothing is installed outside these directories.",
+      "limitations": [
+        "There is no release tag and no package-registry package: the install is a checkout at the pinned commit.",
+        "Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.",
+        "A native engine pass or fail is not an independent verdict; no verifier is installed.",
+        "Robot Framework 7.5 only; only allowlisted libraries run, so this is not a browser profile."
+      ]
+    },
+    {
+      "id": "local-python-selenium",
+      "title": "Selenium (interactive and suite) with the host's Chrome",
+      "target": "local-python",
+      "engines": [
+        "selenium"
+      ],
+      "status": "verified",
+      "disabled_reason": null,
+      "python": {
+        "version": "3.12",
+        "executable": "python3.12",
+        "requires": ">=3.11"
+      },
+      "pip_pins": [
+        {
+          "name": "pytest",
+          "version": "9.2.0"
+        },
+        {
+          "name": "pyyaml",
+          "version": "6.0.3"
+        },
+        {
+          "name": "selenium",
+          "version": "4.52.0"
+        }
+      ],
+      "packages": [
+        "packages/qa-adapter-kit",
+        "packages/qa-selenium"
+      ],
+      "prerequisites": [
+        "Python 3.12 available as `python3.12` (the packages require 3.11 or newer; 3.12 is the version the steps were run with).",
+        "git, and network access to https://github.com/redevops-io/redevops-qa (a public repository).",
+        "Network access to a Python package index for the pinned packages and for the build backend (setuptools 68 or newer, not pinned here).",
+        "All commands are run from one working directory, the one that contains the checkout, using a POSIX shell.",
+        "Google Chrome and a matching ChromeDriver installed on the host, with their absolute paths given as chrome_binary and chromedriver_path; the steps never download a browser or a driver."
+      ],
+      "params": {
+        "venv_dir": {
+          "kind": "dir-path",
+          "default": ".venv-qa",
+          "required": false,
+          "description": "where the virtual environment is created"
+        },
+        "evidence_dir": {
+          "kind": "dir-path",
+          "default": "qa-evidence",
+          "required": false,
+          "description": "where the smoke steps write their JUnit evidence"
+        },
+        "checkout_dir": {
+          "kind": "dir-path",
+          "default": "redevops-qa",
+          "required": false,
+          "description": "where the repository is cloned"
+        },
+        "chrome_binary": {
+          "kind": "abs-path",
+          "default": null,
+          "required": true,
+          "description": "absolute path of the host's Chrome executable"
+        },
+        "chromedriver_path": {
+          "kind": "abs-path",
+          "default": null,
+          "required": true,
+          "description": "absolute path of the ChromeDriver executable that matches it"
+        }
+      },
+      "hosts": [
+        {
+          "os_arch": "linux-x86_64",
+          "status": "verified",
+          "prerequisites": [
+            "Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner.",
+            "Chrome and ChromeDriver 156 were present on that runner image."
+          ],
+          "verified_by": {
+            "workflow": "tests.yml",
+            "job_key": "profile-local-python-selenium",
+            "job_name": "install profile local-python-selenium",
+            "run_id": 41264392648,
+            "job_id": 124724056825,
+            "head_sha": "66b792d05fcf4ff2e5ccc44742a256d686c2cc9b",
+            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648",
+            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41264392648/job/124724056825",
+            "completed_on": "2026-11-01",
+            "summary": "install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, from the pinned commit in a clean virtual environment"
+          },
+          "disabled_reason": null,
+          "note": ""
+        },
+        {
+          "os_arch": "macos-arm64",
+          "status": "experimental",
+          "prerequisites": [
+            "macOS on Apple silicon with Python 3.12 as `python3.12`, Chrome and its ChromeDriver."
+          ],
+          "verified_by": null,
+          "disabled_reason": null,
+          "note": "The same steps are written for this host but no CI job runs them here."
+        }
+      ],
+      "steps": {
+        "source": [
+          {
+            "id": "clone",
+            "title": "Clone the repository",
+            "argv": [
+              "git",
+              "clone",
+              "https://github.com/redevops-io/redevops-qa.git",
+              "{checkout_dir}"
+            ]
+          },
+          {
+            "id": "pin",
+            "title": "Check out the pinned commit",
+            "argv": [
+              "git",
+              "-C",
+              "{checkout_dir}",
+              "checkout",
+              "--detach",
+              "{source_commit}"
+            ]
+          }
+        ],
+        "install": [
+          {
+            "id": "venv",
+            "title": "Create a clean virtual environment",
+            "argv": [
+              "python3.12",
+              "-m",
+              "venv",
+              "{venv_dir}"
+            ]
+          },
+          {
+            "id": "pip-pins",
+            "title": "Install the pinned Python packages",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pip",
+              "install",
+              "--disable-pip-version-check",
+              "pytest==9.2.0",
+              "pyyaml==6.0.3",
+              "selenium==4.52.0"
+            ]
+          },
+          {
+            "id": "packages",
+            "title": "Install the adapter packages from the checkout (not editable, no dependency resolution)",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pip",
+              "install",
+              "--disable-pip-version-check",
+              "--no-deps",
+              "{checkout_dir}/packages/qa-adapter-kit",
+              "{checkout_dir}/packages/qa-selenium"
+            ]
+          },
+          {
+            "id": "installed-from-venv",
+            "title": "Check that the packages are imported from the virtual environment, not from the checkout",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-I",
+              "-c",
+              "import importlib,os,sys; root=os.path.realpath(sys.argv[1]); bad=[m for m in sys.argv[2:] if not os.path.realpath(importlib.import_module(m).__file__).startswith(root+os.sep)]; sys.exit(('not imported from the virtual environment: '+', '.join(bad)) if bad else 0)",
+              "{venv_dir}",
+              "qa_adapter_kit",
+              "qa_selenium",
+              "selenium"
+            ]
+          }
+        ],
+        "smoke": [
+          {
+            "id": "kit-offline",
+            "title": "Run the shared adapter kit tests (fake adapters, offline)",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-p",
+              "no:cacheprovider",
+              "-c",
+              "{checkout_dir}/pyproject.toml",
+              "-o",
+              "pythonpath=",
+              "--junitxml={evidence_dir}/junit-adapter-kit.xml",
+              "{checkout_dir}/packages/qa-adapter-kit/tests"
+            ]
+          },
+          {
+            "id": "selenium-offline",
+            "title": "Run the Selenium adapter tests (fake browser, recorded reports, offline)",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-p",
+              "no:cacheprovider",
+              "-c",
+              "{checkout_dir}/pyproject.toml",
+              "-o",
+              "pythonpath=",
+              "--junitxml={evidence_dir}/junit-selenium-offline.xml",
+              "{checkout_dir}/packages/qa-selenium/tests"
+            ]
+          },
+          {
+            "id": "selenium-browser",
+            "title": "Run both Selenium adapters against the real Chrome and ChromeDriver",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-p",
+              "no:cacheprovider",
+              "-c",
+              "{checkout_dir}/pyproject.toml",
+              "-o",
+              "pythonpath=",
+              "--junitxml={evidence_dir}/junit-selenium-browser.xml",
+              "-m",
+              "browser",
+              "{checkout_dir}/packages/qa-selenium/tests/browser"
+            ],
+            "env": {
+              "QA_CHROME_BINARY": "{chrome_binary}",
+              "QA_CHROMEDRIVER_PATH": "{chromedriver_path}"
+            }
+          }
+        ],
+        "check": [
+          {
+            "id": "check-adapter-kit",
+            "title": "Fail on zero tests, any skip or any failure in junit-adapter-kit.xml",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "{checkout_dir}/tools/check_junit.py",
+              "{evidence_dir}/junit-adapter-kit.xml"
+            ]
+          },
+          {
+            "id": "check-selenium-offline",
+            "title": "Fail on zero tests, any skip or any failure in junit-selenium-offline.xml",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "{checkout_dir}/tools/check_junit.py",
+              "{evidence_dir}/junit-selenium-offline.xml"
+            ]
+          },
+          {
+            "id": "check-selenium-browser",
+            "title": "Fail on zero tests, any skip or any failure in junit-selenium-browser.xml",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "{checkout_dir}/tools/check_junit.py",
+              "{evidence_dir}/junit-selenium-browser.xml"
+            ]
+          }
+        ],
+        "uninstall": [
+          {
+            "id": "remove-venv",
+            "title": "Remove the virtual environment (refuses a directory that is not one)",
+            "argv": [
+              "python3.12",
+              "-c",
+              "import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'pyvenv.cfg')); ok or sys.exit('refusing to remove a directory that is not a virtual environment: '+p); shutil.rmtree(p)",
+              "{venv_dir}"
+            ]
+          }
+        ]
+      },
+      "evidence": {
+        "files": [
+          "junit-adapter-kit.xml",
+          "junit-selenium-offline.xml",
+          "junit-selenium-browser.xml"
+        ],
+        "manual_files": [],
+        "description": "One JUnit XML report per smoke step, written to the evidence directory; the check steps fail on zero tests, any skip or any failure. The browser report shows the adapters driving the real Chrome against a page the test serves from loopback."
+      },
+      "uninstall_note": "The steps leave two directories: the virtual environment (removed by the step above) and the evidence directory, which is yours to keep or delete. The checkout is an ordinary clone; delete it when you no longer need it. Nothing is installed outside these directories.",
+      "limitations": [
+        "There is no release tag and no package-registry package: the install is a checkout at the pinned commit.",
+        "Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.",
+        "A native engine pass or fail is not an independent verdict; no verifier is installed.",
+        "Chrome and ChromeDriver only; their versions are the host's and only the versions on the CI runner image were exercised."
+      ]
+    },
+    {
+      "id": "local-python-appium-android",
+      "title": "Appium Android adapter: Python side only, with a manual device step",
+      "target": "local-python",
+      "engines": [
+        "appium-android"
+      ],
+      "status": "experimental",
+      "disabled_reason": null,
+      "python": {
+        "version": "3.12",
+        "executable": "python3.12",
+        "requires": ">=3.11"
+      },
+      "pip_pins": [
+        {
+          "name": "pytest",
+          "version": "9.2.0"
+        },
+        {
+          "name": "pyyaml",
+          "version": "6.0.3"
+        },
+        {
+          "name": "selenium",
+          "version": "4.52.0"
+        },
+        {
+          "name": "Appium-Python-Client",
+          "version": "6.1.1"
+        }
+      ],
+      "packages": [
+        "packages/qa-adapter-kit",
+        "packages/qa-selenium",
+        "packages/qa-appium"
+      ],
+      "prerequisites": [
+        "Python 3.12 available as `python3.12` (the packages require 3.11 or newer; 3.12 is the version the steps were run with).",
+        "git, and network access to https://github.com/redevops-io/redevops-qa (a public repository).",
+        "Network access to a Python package index for the pinned packages and for the build backend (setuptools 68 or newer, not pinned here).",
+        "All commands are run from one working directory, the one that contains the checkout, using a POSIX shell.",
+        "For the manual device step only: an Appium 3.9.0 server with the UiAutomator2 8.7.3 driver listening on 127.0.0.1:4723, an Android SDK with platform tools, and an emulator or device attached, all provided by you. None of these is bundled, downloaded or installed by these steps, and a running server is not a UI session."
+      ],
+      "params": {
+        "venv_dir": {
+          "kind": "dir-path",
+          "default": ".venv-qa",
+          "required": false,
+          "description": "where the virtual environment is created"
+        },
+        "evidence_dir": {
+          "kind": "dir-path",
+          "default": "qa-evidence",
+          "required": false,
+          "description": "where the smoke steps write their JUnit evidence"
+        },
+        "checkout_dir": {
+          "kind": "dir-path",
+          "default": "redevops-qa",
+          "required": false,
+          "description": "where the repository is cloned"
+        }
+      },
+      "hosts": [
+        {
+          "os_arch": "macos-arm64",
+          "status": "experimental",
+          "prerequisites": [
+            "macOS on Apple silicon; the one local emulator run was observed on this host type."
+          ],
+          "verified_by": null,
+          "disabled_reason": null,
+          "note": "A local emulator run is recorded in the capability manifest; the steps here were not run as a profile."
+        },
+        {
+          "os_arch": "linux-x86_64",
+          "status": "experimental",
+          "prerequisites": [
+            "Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner.",
+            "Hosted runners have no emulator, so the manual device step cannot run there."
+          ],
+          "verified_by": null,
+          "disabled_reason": null,
+          "note": "The Python-side steps are run by a CI job; the manual step is not."
+        }
+      ],
+      "steps": {
+        "source": [
+          {
+            "id": "clone",
+            "title": "Clone the repository",
+            "argv": [
+              "git",
+              "clone",
+              "https://github.com/redevops-io/redevops-qa.git",
+              "{checkout_dir}"
+            ]
+          },
+          {
+            "id": "pin",
+            "title": "Check out the pinned commit",
+            "argv": [
+              "git",
+              "-C",
+              "{checkout_dir}",
+              "checkout",
+              "--detach",
+              "{source_commit}"
+            ]
+          }
+        ],
+        "install": [
+          {
+            "id": "venv",
+            "title": "Create a clean virtual environment",
+            "argv": [
+              "python3.12",
+              "-m",
+              "venv",
+              "{venv_dir}"
+            ]
+          },
+          {
+            "id": "pip-pins",
+            "title": "Install the pinned Python packages",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pip",
+              "install",
+              "--disable-pip-version-check",
+              "pytest==9.2.0",
+              "pyyaml==6.0.3",
+              "selenium==4.52.0",
+              "Appium-Python-Client==6.1.1"
+            ]
+          },
+          {
+            "id": "packages",
+            "title": "Install the adapter packages from the checkout (not editable, no dependency resolution)",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pip",
+              "install",
+              "--disable-pip-version-check",
+              "--no-deps",
+              "{checkout_dir}/packages/qa-adapter-kit",
+              "{checkout_dir}/packages/qa-selenium",
+              "{checkout_dir}/packages/qa-appium"
+            ]
+          },
+          {
+            "id": "installed-from-venv",
+            "title": "Check that the packages are imported from the virtual environment, not from the checkout",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-I",
+              "-c",
+              "import importlib,os,sys; root=os.path.realpath(sys.argv[1]); bad=[m for m in sys.argv[2:] if not os.path.realpath(importlib.import_module(m).__file__).startswith(root+os.sep)]; sys.exit(('not imported from the virtual environment: '+', '.join(bad)) if bad else 0)",
+              "{venv_dir}",
+              "qa_adapter_kit",
+              "qa_selenium",
+              "qa_appium",
+              "appium"
+            ]
+          }
+        ],
+        "smoke": [
+          {
+            "id": "kit-offline",
+            "title": "Run the shared adapter kit tests (fake adapters, offline)",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-p",
+              "no:cacheprovider",
+              "-c",
+              "{checkout_dir}/pyproject.toml",
+              "-o",
+              "pythonpath=",
+              "--junitxml={evidence_dir}/junit-adapter-kit.xml",
+              "{checkout_dir}/packages/qa-adapter-kit/tests"
+            ]
+          },
+          {
+            "id": "appium-offline",
+            "title": "Run the Appium adapter tests (fake device, offline; the iOS interface reports unavailable)",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-p",
+              "no:cacheprovider",
+              "-c",
+              "{checkout_dir}/pyproject.toml",
+              "-o",
+              "pythonpath=",
+              "--junitxml={evidence_dir}/junit-appium-offline.xml",
+              "{checkout_dir}/packages/qa-appium/tests"
+            ]
+          },
+          {
+            "id": "appium-android-device",
+            "title": "MANUAL: run the Android device test against your own server and attached emulator or device",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-p",
+              "no:cacheprovider",
+              "-c",
+              "{checkout_dir}/pyproject.toml",
+              "-o",
+              "pythonpath=",
+              "--junitxml={evidence_dir}/junit-appium-android.xml",
+              "-m",
+              "appium_android",
+              "{checkout_dir}/packages/qa-appium/tests/real"
+            ],
+            "env": {
+              "QA_APPIUM_URL": "http://127.0.0.1:4723"
+            },
+            "manual": true
+          }
+        ],
+        "check": [
+          {
+            "id": "check-adapter-kit",
+            "title": "Fail on zero tests, any skip or any failure in junit-adapter-kit.xml",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "{checkout_dir}/tools/check_junit.py",
+              "{evidence_dir}/junit-adapter-kit.xml"
+            ]
+          },
+          {
+            "id": "check-appium-offline",
+            "title": "Fail on zero tests, any skip or any failure in junit-appium-offline.xml",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "{checkout_dir}/tools/check_junit.py",
+              "{evidence_dir}/junit-appium-offline.xml"
+            ]
+          },
+          {
+            "id": "check-appium-android",
+            "title": "Fail on zero tests, any skip or any failure in junit-appium-android.xml",
+            "argv": [
+              "{venv_dir}/bin/python",
+              "{checkout_dir}/tools/check_junit.py",
+              "{evidence_dir}/junit-appium-android.xml"
+            ],
+            "manual": true
+          }
+        ],
+        "uninstall": [
+          {
+            "id": "remove-venv",
+            "title": "Remove the virtual environment (refuses a directory that is not one)",
+            "argv": [
+              "python3.12",
+              "-c",
+              "import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'pyvenv.cfg')); ok or sys.exit('refusing to remove a directory that is not a virtual environment: '+p); shutil.rmtree(p)",
+              "{venv_dir}"
+            ]
+          }
+        ]
+      },
+      "evidence": {
+        "files": [
+          "junit-adapter-kit.xml",
+          "junit-appium-offline.xml"
+        ],
+        "manual_files": [
+          "junit-appium-android.xml"
+        ],
+        "description": "The two offline reports come from the steps a CI job runs. The device report exists only if you run the manual step against your own device worker."
+      },
+      "uninstall_note": "The steps leave two directories: the virtual environment (removed by the step above) and the evidence directory, which is yours to keep or delete. The checkout is an ordinary clone; delete it when you no longer need it. Nothing is installed outside these directories.",
+      "limitations": [
+        "There is no release tag and no package-registry package: the install is a checkout at the pinned commit.",
+        "Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.",
+        "A native engine pass or fail is not an independent verdict; no verifier is installed.",
+        "Experimental: the device step is manual and has never run in CI; the one recorded emulator run is local (see the capability manifest).",
+        "No device, emulator, Android SDK or Appium server is bundled or installed."
+      ]
+    },
+    {
+      "id": "local-python-playwright",
+      "title": "Playwright with Chromium in a local Python environment",
+      "target": "local-python",
+      "engines": [
+        "playwright"
+      ],
+      "status": "planned",
+      "disabled_reason": "The adapter imports the pinned agent-harness tree (pins.toml names its tag and commit), which no tested step fetches or puts on the import path, and the browser comes from a separate download step; a tested path for both has not been written, so none is offered.",
+      "python": {
+        "version": "3.12",
+        "executable": "python3.12",
+        "requires": ">=3.11"
+      },
+      "pip_pins": [],
+      "packages": [],
+      "prerequisites": [],
+      "params": {},
+      "hosts": [],
+      "steps": {
+        "source": [],
+        "install": [],
+        "smoke": [],
+        "check": [],
+        "uninstall": []
+      },
+      "evidence": {
+        "files": [],
+        "manual_files": [],
+        "description": "none"
+      },
+      "uninstall_note": "none",
+      "limitations": [
+        "The adapter imports the pinned agent-harness tree (pins.toml names its tag and commit), which no tested step fetches or puts on the import path, and the browser comes from a separate download step; a tested path for both has not been written, so none is offered."
+      ]
+    },
+    {
+      "id": "local-python-appium-ios",
+      "title": "Appium iOS",
+      "target": "local-python",
+      "engines": [
+        "appium-ios"
+      ],
+      "status": "planned",
+      "disabled_reason": "No iOS session has ever been run: the adapter reports UNAVAILABLE for every action. iOS needs macOS with Xcode, WebDriverAgent and a supported simulator or device, which are never bundled.",
+      "python": {
+        "version": "3.12",
+        "executable": "python3.12",
+        "requires": ">=3.11"
+      },
+      "pip_pins": [],
+      "packages": [],
+      "prerequisites": [],
+      "params": {},
+      "hosts": [],
+      "steps": {
+        "source": [],
+        "install": [],
+        "smoke": [],
+        "check": [],
+        "uninstall": []
+      },
+      "evidence": {
+        "files": [],
+        "manual_files": [],
+        "description": "none"
+      },
+      "uninstall_note": "none",
+      "limitations": [
+        "No iOS session has ever been run: the adapter reports UNAVAILABLE for every action. iOS needs macOS with Xcode, WebDriverAgent and a supported simulator or device, which are never bundled."
+      ]
+    }
+  ]
+}

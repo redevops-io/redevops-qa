@@ -473,3 +473,154 @@ jobs:
       - name: Server log (diagnostics)
         if: always()
         run: tail -n 50 "$RUNNER_TEMP/appium-server.log" || true
+
+  profile-local-python-robot:
+    name: "install profile local-python-robot (clean venv from the pinned commit; linux-x86_64; NOT a required check until proven; a failed step fails, nothing is skipped)"
+    # Runs the profile's own documented steps (tools/run_install_profile.py reads qa-install-profiles.json and runs what the configurator would print) in a
+    # clean virtual environment, from the repository checked out at the pinned commit named in the profile. Read-only, no secret. Never a dependency of
+    # another job and never conditional; a failed step fails the job, nothing is skipped.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read the pinned commit
+        id: profile
+        run: python3 -c "import json; print('commit=' + json.load(open('qa-install-profiles.json'))['source']['pinned_commit'])" >> "$GITHUB_OUTPUT"
+      - name: Fetch the repository at the pinned commit (the source phase of the profile)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ steps.profile.outputs.commit }}
+          path: .profile-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the profile - install, smoke, check
+        run: |
+          python tools/run_install_profile.py --profile local-python-robot --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
+            --checkout "$GITHUB_WORKSPACE/.profile-src" --phases install,smoke,check
+      - name: Keep the evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-local-python-robot
+          path: ${{ runner.temp }}/profile-work/evidence
+          if-no-files-found: error
+      - name: Uninstall (the profile's uninstall phase; the virtual environment must be gone)
+        run: |
+          python tools/run_install_profile.py --profile local-python-robot --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
+            --checkout "$GITHUB_WORKSPACE/.profile-src" --phases uninstall
+
+  profile-local-python-selenium:
+    name: "install profile local-python-selenium (clean venv from the pinned commit; real Chrome; linux-x86_64; NOT a required check until proven; a failed step fails, nothing is skipped)"
+    # Runs the profile's own documented steps (tools/run_install_profile.py reads qa-install-profiles.json and runs what the configurator would print) in a
+    # clean virtual environment, from the repository checked out at the pinned commit named in the profile. Read-only, no secret. Never a dependency of
+    # another job and never conditional; a failed step fails the job, nothing is skipped.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read the pinned commit
+        id: profile
+        run: python3 -c "import json; print('commit=' + json.load(open('qa-install-profiles.json'))['source']['pinned_commit'])" >> "$GITHUB_OUTPUT"
+      - name: Fetch the repository at the pinned commit (the source phase of the profile)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ steps.profile.outputs.commit }}
+          path: .profile-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Locate the runner's Chrome and ChromeDriver (fail when either is missing)
+        run: |
+          chrome="$(command -v google-chrome || true)"
+          driver=""
+          if [ -n "${CHROMEWEBDRIVER:-}" ] && [ -x "$CHROMEWEBDRIVER/chromedriver" ]; then driver="$CHROMEWEBDRIVER/chromedriver"; fi
+          if [ -z "$driver" ]; then driver="$(command -v chromedriver || true)"; fi
+          if [ ! -x "$chrome" ] || [ ! -x "$driver" ]; then echo "FAIL: Chrome ($chrome) or ChromeDriver ($driver) is missing on this runner"; exit 1; fi
+          "$chrome" --version
+          "$driver" --version
+          echo "QA_CHROME_BINARY=$chrome" >> "$GITHUB_ENV"
+          echo "QA_CHROMEDRIVER_PATH=$driver" >> "$GITHUB_ENV"
+      - name: Run the profile - install, smoke, check
+        run: |
+          python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
+            --checkout "$GITHUB_WORKSPACE/.profile-src" --phases install,smoke,check \
+            --param chrome_binary="$QA_CHROME_BINARY" --param chromedriver_path="$QA_CHROMEDRIVER_PATH"
+      - name: Keep the evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-local-python-selenium
+          path: ${{ runner.temp }}/profile-work/evidence
+          if-no-files-found: error
+      - name: Uninstall (the profile's uninstall phase; the virtual environment must be gone)
+        run: |
+          python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
+            --checkout "$GITHUB_WORKSPACE/.profile-src" --phases uninstall \
+            --param chrome_binary="$QA_CHROME_BINARY" --param chromedriver_path="$QA_CHROMEDRIVER_PATH"
+
+  profile-local-python-appium-android:
+    name: "install profile local-python-appium-android (experimental; the Python side and the offline smoke only, the device step is manual and is not run; NOT a required check)"
+    # Runs the profile's own documented steps (tools/run_install_profile.py reads qa-install-profiles.json and runs what the configurator would print) in a
+    # clean virtual environment, from the repository checked out at the pinned commit named in the profile. Read-only, no secret. Never a dependency of
+    # another job and never conditional; a failed step fails the job, nothing is skipped.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read the pinned commit
+        id: profile
+        run: python3 -c "import json; print('commit=' + json.load(open('qa-install-profiles.json'))['source']['pinned_commit'])" >> "$GITHUB_OUTPUT"
+      - name: Fetch the repository at the pinned commit (the source phase of the profile)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ steps.profile.outputs.commit }}
+          path: .profile-src
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run the profile - install, smoke, check
+        run: |
+          python tools/run_install_profile.py --profile local-python-appium-android --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
+            --checkout "$GITHUB_WORKSPACE/.profile-src" --phases install,smoke,check
+      - name: Keep the evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-local-python-appium-android
+          path: ${{ runner.temp }}/profile-work/evidence
+          if-no-files-found: error
+      - name: Uninstall (the profile's uninstall phase; the virtual environment must be gone)
+        run: |
+          python tools/run_install_profile.py --profile local-python-appium-android --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
+            --checkout "$GITHUB_WORKSPACE/.profile-src" --phases uninstall
+
+  install-profiles:
+    name: "install profiles (data, steps, pins, status, generator vectors, generated document; offline; never skipped)"
+    # Runs on every push and pull request, with no path filter, no condition and no dependency on another job. Offline, read-only, no secret. It needs the
+    # full history (every pinned or recorded commit must be an ancestor of main). The full jsonschema package only cross-checks the strict validator.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools and the cross-check validator
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "jsonschema==4.26.0"
+      - name: Check the profiles (schema, steps, pins, status, document, freshness against main) and cross-check the validator
+        run: env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 python tools/check_install_profiles.py --cross-check
+      - name: Run the profile, generator and vector tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q tests/test_install_profiles.py tests/test_install_config.py --junitxml="$RUNNER_TEMP/junit-install-profiles.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-install-profiles.xml"
