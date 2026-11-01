@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
-"""``redevops-qa``: one command for the whole path. This part provides ``doctor`` and ``run``; ``freeze``, ``verify``, ``report``, ``inspect`` and ``demo`` follow.
+"""``redevops-qa``: one command for the whole path: ``doctor``, ``freeze``, ``run``, ``report``, ``inspect`` and the one-shot ``demo`` (``verify`` follows).
 
-Exit status of ``run``: 0 the run is VERIFIED; 1 an assertion FAILED; 2 the plan, the lock or an option was refused before anything ran; 3 a lane did not run
-to completion (error, timeout, cancelled, unavailable) or the environment could not provide what the run needs; 4 inconclusive (every lane completed but not
-every assertion is verified, or an engine and the verifier disagree); 6 an internal error of the runner. A crash is never reported as a product failure."""
+Exit status of ``run`` and ``demo``: 0 the run is VERIFIED; 1 an assertion FAILED; 2 the plan, the lock or an option was refused before anything ran; 3 a lane did not run
+to completion (error, timeout, cancelled, unavailable) or the environment could not provide what the run needs; 4 inconclusive (every lane completed but not every
+assertion is verified, or an engine and the verifier disagree); 6 an internal error of the runner. A crash is never reported as a product failure. ``freeze``: 0 or 2.
+``report`` and ``inspect``: 0 the bundle verified as internally consistent, 1 it did not, 2 it cannot be opened. They never recompute a verdict."""
 from __future__ import annotations
 
 import argparse
@@ -15,29 +16,57 @@ from typing import List, Optional, TextIO
 
 from qa_adapter_kit.supervisor import CancelToken
 from qa_evidence.canon import safe_text
+from qa_evidence.inspector import inspect_bundle
+from qa_evidence.render import render_html, render_text
+from qa_evidence.sources import SourceError
 
 from . import __version__
 from . import constants as K
 from .deps import verified_bootstrap
 from .doctor import render, run_doctor
 from .errors import EnvironmentFault, PlanError, RunnerError
-from .orchestrate import RunOptions, run_plan
-from .plan import MAX_PLAN_BYTES, load_plan_or_lock
+from .golden import demo_plan
+from .inspect_cmd import inspect_text
+from .orchestrate import RunOptions, RunSummary, run_plan
+from .plan import MAX_PLAN_BYTES, FrozenPlan, freeze_plan, load_plan_or_lock
 
 
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="redevops-qa", description="Run a frozen test plan, keep the evidence, report what was and was not shown.")
     p.add_argument("--version", action="version", version=f"redevops-qa {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
+
     sp = sub.add_parser("doctor", help="check this machine (Python, pins, Playwright and Chromium, Robot, the fixture app, the egress gateway); installs nothing")
     sp.add_argument("--plan", metavar="PLAN", help="check only what this plan needs")
     sp.add_argument("--json", action="store_true", help="print the checks as JSON")
+
+    sp = sub.add_parser("freeze", help="validate a plan with the runtime-contracts parser and write its lock (the frozen assertions, their digests and the plan digest)")
+    sp.add_argument("plan", help="a redevops-qa/plan file")
+    sp.add_argument("--out", required=True, metavar="FILE", help="the lock file to create (an existing file is never overwritten)")
+
+    def run_options(sp):
+        sp.add_argument("--defect", choices=K.DEFECTS, default="none", help="the seeded defect of the fixture app to start the target with (default: none)")
+        sp.add_argument("--run-id", metavar="ID", help="run id (default: generated); lane run ids are <run id>.<lane id>")
+        sp.add_argument("--lane-deadline", type=int, metavar="SECONDS", help="lower every lane's deadline to this many seconds")
+
     sp = sub.add_parser("run", help="run a plan (or a lock) and write the evidence bundle")
     sp.add_argument("plan", help="a redevops-qa/plan or redevops-qa/plan-lock file")
     sp.add_argument("--out", required=True, metavar="DIR", help="directory to create the bundle in: DIR/<run id> (must not exist)")
-    sp.add_argument("--defect", choices=K.DEFECTS, default="none", help="the seeded defect of the fixture app to start the target with (default: none)")
-    sp.add_argument("--run-id", metavar="ID", help="run id (default: generated)")
-    sp.add_argument("--lane-deadline", type=int, metavar="SECONDS", help="lower every lane's deadline to this many seconds")
+    run_options(sp)
+
+    sp = sub.add_parser("demo", help="freeze and run the built-in two-lane plan (Playwright Chromium, then Robot Framework) against the fixture app and print the report")
+    sp.add_argument("--out", default="qa-evidence", metavar="DIR", help="directory to create the bundle in: DIR/<run id> (default: ./qa-evidence)")
+    run_options(sp)
+
+    for name, text in (("report", "print the report of a bundle for people (text, JSON or one HTML file); it verifies the bundle first and never recomputes a verdict"),
+                       ("inspect", "list what is in a bundle: files, digests, tool versions, lanes and the heads of the chains inside it")):
+        sp = sub.add_parser(name, help=text)
+        sp.add_argument("bundle", help="a bundle directory or archive")
+        sp.add_argument("--anchor", metavar="sha256:HEX", help="external anchor value: the manifest digest published outside the bundle")
+        sp.add_argument("--plan-digest", metavar="sha256:HEX", help="the plan digest printed by `freeze`, obtained from outside the bundle")
+        if name == "report":
+            sp.add_argument("--format", choices=("text", "json", "html"), default="text")
+            sp.add_argument("-o", "--output", metavar="FILE", help="write to FILE (never overwritten) instead of standard output")
     return p
 
 
@@ -62,13 +91,33 @@ def _doctor(args, out: TextIO, err: TextIO) -> int:
     return K.EXIT_ENVIRONMENT if any(c.status == "FAIL" for c in checks) else 0
 
 
-def _run(args, out: TextIO, err: TextIO) -> int:
+def _freeze(args, out: TextIO, err: TextIO) -> int:
     data = _read_plan(args.plan)
+    up = verified_bootstrap()
+    frozen, kind = load_plan_or_lock(up, data)
+    if kind != "plan":
+        raise PlanError("ALREADY_A_LOCK", "this file is already a lock; freeze takes a plan")
+    target = Path(args.out)
+    try:
+        with open(target, "xb") as fh:
+            fh.write(frozen.lock_bytes())
+    except FileExistsError:
+        raise PlanError("OUTPUT_EXISTS", f"{safe_text(args.out)} already exists: a lock is never overwritten") from None
+    except OSError as exc:
+        raise PlanError("OUTPUT_UNWRITABLE", f"cannot write {safe_text(args.out)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+    print(f"frozen plan {frozen.plan_id}: {len(frozen.lanes)} lane(s), {len(frozen.rows)} assertion(s), validated by the runtime-contracts parser", file=out)
+    print(f"  lock file: {target}   sha256 {frozen.lock_digest}", file=out)
+    print(f"  plan digest: {frozen.plan_digest}", file=out)
+    print("  record the plan digest where whoever runs the plan cannot rewrite it: `verify --plan-digest` compares a bundle with it, and without it a removed assertion "
+          "would not be noticed", file=err)
+    return 0
+
+
+def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text: bool = False) -> int:
     target = Path(args.out)
     if args.run_id is not None and (target / args.run_id).exists():
         raise PlanError("OUTPUT_EXISTS", f"{safe_text(str(target / args.run_id))} already exists: a bundle is never overwritten")
     up = verified_bootstrap()
-    frozen, kind = load_plan_or_lock(up, data)
     cancel = CancelToken()
     previous = {}
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -81,6 +130,14 @@ def _run(args, out: TextIO, err: TextIO) -> int:
     bundle_dir = target / summary.run_id
     target.mkdir(parents=True, exist_ok=True)
     summary.bundle.write_directory(str(bundle_dir))
+    _print_summary(summary, bundle_dir, out)
+    if report_text:
+        print("", file=out)
+        out.write(render_text(inspect_bundle(str(bundle_dir))))          # no plan digest supplied: the one this process computed would only match itself
+    return summary.exit_code
+
+
+def _print_summary(summary: RunSummary, bundle_dir: Path, out: TextIO) -> None:
     report = json.loads(summary.bundle.files["report.json"])
     print(f"run {summary.run_id}: {report['verdict']['outcome']} ({report['verdict']['reason_code']})" + ("  [cancelled]" if summary.cancelled else ""), file=out)
     acc = report["accounting"]
@@ -89,13 +146,69 @@ def _run(args, out: TextIO, err: TextIO) -> int:
         tally = {s: sum(1 for r in mine if r["verdict"]["state"] == s) for s in ("VERIFIED", "FAILED", "INCONCLUSIVE", "UNACCOUNTED")}
         print(f"  lane {lane['lane_id']}: engine reported {lane['native']['status']} ({safe_text(lane['native']['raw_status'], 40)}); independent verdicts: "
               f"{tally['VERIFIED']} verified, {tally['FAILED']} failed, {tally['INCONCLUSIVE']} inconclusive, {tally['UNACCOUNTED']} unaccounted", file=out)
+    for d in _disagreements(report):
+        print(f"  ENGINE_VERIFIER_DISAGREE lane {d['lane_id']}: native {d['native_status']}, verdicts {', '.join(d['verdict_states']) or 'none'}", file=out)
     print(f"  assertions: frozen {acc['frozen']} = verified {acc['verified']} + failed {acc['failed']} + inconclusive {acc['inconclusive']} + unaccounted {acc['unaccounted']}", file=out)
     print(f"  plan digest: {summary.plan_digest}   (the value to give `verify --plan-digest`)", file=out)
     print(f"  bundle: {bundle_dir}", file=out)
     print(f"  manifest digest: {summary.manifest_digest}   (an anchor only if published where this machine cannot rewrite it)", file=out)
+
+
+def _disagreements(report):
+    from qa_evidence.report import engine_verifier_disagreements
+    return engine_verifier_disagreements(report)
+
+
+def _run(args, out: TextIO, err: TextIO) -> int:
+    data = _read_plan(args.plan)
+    up = verified_bootstrap()
+    frozen, kind = load_plan_or_lock(up, data)
     if kind == "plan":
         print("  note: the plan was frozen by this run; keep the plan digest from a separate `freeze` step to detect a changed plan", file=err)
-    return summary.exit_code
+    return _execute(frozen, args, out, err)
+
+
+def _demo(args, out: TextIO, err: TextIO) -> int:
+    up = verified_bootstrap()
+    return _execute(freeze_plan(up, demo_plan()), args, out, err, report_text=True)
+
+
+def _inspection(args):
+    try:
+        return inspect_bundle(args.bundle, anchor=args.anchor, plan_digest=args.plan_digest)
+    except SourceError as exc:
+        raise PlanError("BUNDLE_UNREADABLE", safe_text(str(exc))) from None
+
+
+def _report(args, out: TextIO, err: TextIO) -> int:
+    ins = _inspection(args)
+    ok = ins.verification.ok
+    if args.format == "json":
+        text = json.dumps(ins.to_json(), sort_keys=True, indent=2) + "\n"
+    elif args.format == "html":
+        text = render_html(ins)
+    else:
+        text = render_text(ins)
+    if args.output:
+        try:
+            with open(args.output, "x", encoding="utf-8", newline="\n") as fh:
+                fh.write(text)
+        except OSError as exc:
+            raise PlanError("OUTPUT_UNWRITABLE", f"cannot write {safe_text(args.output)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+    else:
+        out.write(text)
+    if not ok:
+        print(f"the bundle did not verify: {len(ins.verification.findings)} finding(s); what is shown must not be relied on", file=err)
+    return 0 if ok else 1
+
+
+def _inspect(args, out: TextIO, err: TextIO) -> int:
+    try:
+        text = inspect_text(args.bundle, anchor=args.anchor, plan_digest=args.plan_digest)
+    except SourceError as exc:
+        raise PlanError("BUNDLE_UNREADABLE", safe_text(str(exc))) from None
+    out.write(text)
+    return 0 if text.splitlines()[1].startswith("verification: OK") else 1
 
 
 def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Optional[TextIO] = None) -> int:
@@ -106,7 +219,7 @@ def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Op
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else K.EXIT_USAGE
     try:
-        return {"doctor": _doctor, "run": _run}[args.command](args, out, err)
+        return {"doctor": _doctor, "freeze": _freeze, "run": _run, "demo": _demo, "report": _report, "inspect": _inspect}[args.command](args, out, err)
     except PlanError as exc:
         print(f"error: {safe_text(str(exc))}", file=err)
         return K.EXIT_USAGE

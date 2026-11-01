@@ -1,8 +1,9 @@
 # qa-runner
 
-The `redevops-qa` command: it checks a machine (`doctor`), runs a frozen test plan against the fixture app and writes an evidence bundle (`run`). The
-remaining subcommands (`freeze`, `verify`, `report`, `inspect`, `demo`) and the two-lane plan come in the following parts of this work; this part runs ONE lane per plan:
-a Playwright Chromium lane (`examples/golden-plan.json`) or a Robot Framework lane (`examples/robot-plan.json`), which a plan may also combine (the offline tests do).
+The `redevops-qa` command: it checks a machine (`doctor`), freezes a test plan (`freeze`), runs a frozen plan against the fixture app and writes an evidence bundle (`run`),
+reports and inspects a bundle (`report`, `inspect`) and does all of that in one step for the built-in two-lane plan (`demo`). `verify`, the separate-process re-verification, follows in
+the next part of this work. A plan holds a Playwright Chromium lane (`examples/golden-plan.json`), a Robot Framework lane (`examples/robot-plan.json`) or both, run one after the other
+(`examples/demo-plan.json`).
 
 Licence: the family licence of this repository (source-available, not open source; see `LICENSE.md`). Standard library and the repository's own packages
 only; the two pinned upstreams (`runtime-contracts`, `agent-harness`) are found through `pins.toml`, as the bridge does it, and are neither installed nor
@@ -15,7 +16,11 @@ Appium are not part of this workflow. Nothing here has been run on any other pla
 
 ```text
 redevops-qa doctor [--plan PLAN] [--json]
+redevops-qa freeze PLAN --out LOCK
 redevops-qa run PLAN_OR_LOCK --out DIR [--defect none|discount|settings] [--run-id ID] [--lane-deadline SECONDS]
+redevops-qa demo [--out DIR] [--defect none|discount|settings] [--run-id ID] [--lane-deadline SECONDS]
+redevops-qa report BUNDLE [--format text|json|html] [-o FILE] [--anchor sha256:HEX] [--plan-digest sha256:HEX]
+redevops-qa inspect BUNDLE [--anchor sha256:HEX] [--plan-digest sha256:HEX]
 ```
 
 `python -m qa_runner ...` is the same command from a checkout (`PYTHONPATH` set to the `src` directories of the packages; the tests and the CI job show how).
@@ -24,6 +29,19 @@ redevops-qa run PLAN_OR_LOCK --out DIR [--defect none|discount|settings] [--run-
 Playwright 1.64.1 and a real headless Chromium launch, Robot Framework 7.5, the fixture app and the egress gateway. Each check is `OK`, `WARN` (works, outside
 what this release claims: any platform but Linux x86_64) or `FAIL`, with the command that fixes it. It never installs, downloads or changes anything. A
 protection that cannot be provided is a `FAIL`: the egress gateway that every browser lane depends on must start. Exit status 0, or 3 if a check failed.
+
+**`freeze`** validates a plan (the strict runtime-contracts parser first, then the harness mirror; unknown fields refused at every level), computes every assertion's digest, the
+assertion lock and the plan digest, and writes the lock (`redevops-qa/plan-lock` 1.0: the plan, the digests, the pins, the suite file hashes). A lock is never overwritten. The plan
+digest it prints is what `verify --plan-digest` will compare a bundle with; record it where whoever runs the plan cannot rewrite it (without it a removed assertion would not be
+noticed). `run` accepts a plan (frozen on the spot, with a note on standard error) or a lock; a lock is re-frozen from the plan it carries and refused if any digest, pin, tool version,
+suite hash or expected value differs.
+
+**`demo`** is `freeze` and `run` on the built-in plan (browser lane, then Robot lane, one target, one run id) followed by the full report. It prints no plan digest comparison: a digest
+computed by the process that ran the plan would only match itself.
+
+**`report`** and **`inspect`** read a bundle (directory or archive) through `qa-evidence`: they verify it first, never recompute a verdict, escape every string that came from the
+bundle, and exit 0 only if the bundle verified as internally consistent (1 if not, 2 if it cannot be opened). `report` renders text, JSON or one HTML file with no script and a
+content-security policy; `inspect` lists the files with roles and digests, the tool versions, the lanes and the heads of the chains inside each harness run record.
 
 **`run`** freezes the plan (or reads a lock), starts the fixture app on loopback with the defect you name, runs each lane as a supervised child process, stops
 the app, and writes the bundle to `DIR/<run id>` (a directory that must not exist). It prints the outcome, what each engine reported, what the independent
@@ -40,7 +58,7 @@ verdicts are, the plan digest (the value to give `verify --plan-digest`) and the
 
 ## The plan
 
-A plan (`redevops-qa/plan` 1.0, see `examples/golden-plan.json`) names lanes; a lane carries a runtime-contracts `qa/v1` `TestSpec` whose assertions hold the
+A plan (`redevops-qa/plan` 1.0, see `examples/`) names lanes; a lane carries a runtime-contracts `qa/v1` `TestSpec` whose assertions hold the
 expected values. Freezing:
 
 * refuses a plan or lane field it does not know, and a spec field the **runtime-contracts parser** does not know. The parser runs before the harness
@@ -70,22 +88,30 @@ loads code at run time). The suite runs under the kit supervisor with `QA_BASE_U
   hand-written record, one from another run or one that does not belong to the report next to it is unusable evidence (`EVIDENCE_UNUSABLE`).
 * **Egress is not enforced for a Robot lane.** A Robot library opens its own sockets. The lane's egress profile says `not-enforced` and the plan must say so (`"egress": "not-enforced"`;
   a browser lane must use `origin-only`).
+* **Same supervision as the browser lane:** the Robot lane runs in a child process too (the same deadline, cancel, process-group kill, and a parent-death watchdog), and the engine runs
+  under its own supervisor inside it.
 * **Not detectable from the record:** a suite that records a value it did not observe. What protects against that is the review of the suite and library (their hashes are frozen and
   checked before the run, and the copies are in the bundle) and the target's request log (`logs/target-requests.jsonl`), not the record.
 
 ## What a run does
 
-1. The fixture app starts as a child process (`--shutdown-on-stdin-eof`, its own process group) and is stopped in a `finally` block.
-2. Each lane runs as a child process under the kit supervisor: a deadline, an output limit and cancellation end the whole process group, the browser
-   included. The environment of a child is built from nothing (fixed `PATH` and `HOME`; the import path, the pins and the browser location are passed
+1. The fixture app starts as a child process (`--shutdown-on-stdin-eof`, its own process group) and is stopped in a `finally` block. One target serves every lane.
+2. Lanes run one after the other, in plan order, under one run id (lane run ids are `<run id>.<lane id>`). A lane that fails, times out or crashes does not stop the next one: its
+   result is recorded and the next lane still runs, so a run always accounts for every frozen assertion of every lane exactly once. After a cancel the remaining lanes are
+   recorded as `NATIVE_SKIPPED`.
+3. Each lane runs as a child process under the kit supervisor: a deadline, an output limit and cancellation end the whole process group, the browser (or the Robot process)
+   included. SIGINT and SIGTERM to `redevops-qa` cancel the run: the lane is ended, the remaining lanes are skipped, the target is stopped, a bundle with outcome `INCONCLUSIVE` is
+   still written and the exit status is 3. If the orchestrator is killed without warning (SIGKILL), each lane child notices that its parent is gone within a fraction of a second
+   and ends its own process group (and, for the Robot lane, the engine it started); the target ends when its standard input closes. The end-to-end tests check, with a process
+   table, that no process survives a cancel and a SIGKILL of the parent, and fail when the watchdog is removed. The environment of a child is built from nothing (fixed `PATH` and `HOME`; the import path, the pins and the browser location are passed
    explicitly; no other variable of the parent).
-3. The browser lane wires the harness executor (`QARunner`) to the real `PlaywrightAdapter` over real Chromium, with the egress gateway in front of the
+4. The browser lane wires the harness executor (`QARunner`) to the real `PlaywrightAdapter` over real Chromium, with the egress gateway in front of the
    browser and the adapter's request gate behind it, an action policy that allows only the plan's origin, and attestations answered from facts (the
    target's `/health`; declared preconditions or fixtures that nothing can attest are *unknown*, which blocks a pass).
-4. Everything the lane wrote is collected as native artifacts. The observed values the harness verifier read are recorded in an observation file.
-5. The verdicts are computed by `judge_lane` over the observation file and the frozen assertions, using the harness `DeterministicVerifier`. The in-run
+5. Everything the lane wrote is collected as native artifacts. The observed values the harness verifier read are recorded in an observation file.
+6. The verdicts are computed by `judge_lane` over the observation file and the frozen assertions, using the harness `DeterministicVerifier`. The in-run
    verifier's verdicts are a cross-check: a disagreement certifies nothing.
-6. The bundle is built by a pure function (`bundle.build_run_bundle`, no clock, no environment, no file system) with `qa-evidence`, which checks its own output.
+7. The bundle is built by a pure function (`bundle.build_run_bundle`, no clock, no environment, no file system) with `qa-evidence`, which checks its own output.
 
 Every lane and every frozen assertion is accounted for whatever happens. A lane that cannot start, times out, is cancelled or crashes is recorded with a
 native status that says so; its assertions are `INCONCLUSIVE`; the run is never `VERIFIED`. The engine's own status (`lanes[].native`) and the verdict
@@ -130,6 +156,7 @@ Plus the files `qa-evidence` writes: `report.json`, `bundle-manifest.json`, `ass
 python -m pytest -q packages/qa-runner/tests                                   # offline: no browser; the lane child is a test double in fake_lane.py
 python -m pytest -q -m browser packages/qa-runner/tests/browser                # real Chromium (Playwright 1.64.1 and a browser installed)
 python -m pytest -q -m robot_real packages/qa-runner/tests/real                # real Robot Framework 7.5 (no browser needed)
+python -m pytest -q -m e2e packages/qa-runner/tests/e2e                        # both real engines in one run, cancellation and a killed parent
 ```
 
 The offline tests include a mutation suite (`test_qr_mutations.py`): each removes one guard from a copy of the source and requires a named test to fail. The

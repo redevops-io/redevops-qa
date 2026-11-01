@@ -112,7 +112,7 @@ def _native_from_harness(outcome: str, reason: Optional[str]) -> Tuple[str, str]
 def lane_input(fl: FrozenLane, *, run_id: str, origin: str, out_dir: str) -> Dict[str, Any]:
     return {"schema": K.LANE_INPUT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "run_id": f"{run_id}.{fl.lane_id}", "lane_id": fl.lane_id, "origin": origin,
             "spec": materialise_spec(fl.spec_template, origin), "assertions": [dict(a) for a in fl.assertions], "harness_pin": fl.harness_pin,
-            "egress_policy": policy_config(fl.egress, origin), "out_dir": out_dir}
+            "egress_policy": policy_config(fl.egress, origin), "out_dir": out_dir, "parent_pid": os.getpid()}
 
 
 def _unavailable(fl: FrozenLane, engine_version: str, raw: str, status: str = "NATIVE_UNAVAILABLE") -> LaneOutcome:

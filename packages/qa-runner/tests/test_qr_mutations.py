@@ -12,6 +12,8 @@ BUNDLE = "test_qr_bundle.py"
 ORCH = "test_qr_orchestrate.py"
 CLI = "test_qr_cli.py"
 PARTS = "test_qr_lane_parts.py"
+FREEZE = "test_qr_freeze_cli.py"
+CHILD = "test_qr_lane_child.py"
 SCRIPT = "test_qr_judge_script.py"
 ROBOT = "test_qr_robot_lane.py"
 
@@ -104,6 +106,21 @@ CASES = [
     ("a target that did not start leaves the lane unavailable", "lane_robot.py", "    if origin is None:\n", "    if False:\n", [t(ROBOT, "test_a_target_that_does_not_start_leaves_the_robot_lane_unavailable")]),
     ("a cancelled run skips the lane", "lane_robot.py", "    if cancel is not None and cancel.cancelled:", "    if False:", [t(ROBOT, "test_a_run_cancelled_before_the_lane_starts_skips_it")]),
     ("the egress profile of a Robot lane says not enforced", "lane_robot.py", '"profile": "not-enforced"', '"profile": "gateway"', [t(ROBOT, "test_the_egress_profile_of_a_robot_lane_says_it_is_not_enforced")]),
+    # ---- freeze, report, inspect and the child plumbing ---------------------------------------------------------------------------------
+    ("freeze never overwrites a lock", "cli.py", '        with open(target, "xb") as fh:', '        with open(target, "wb") as fh:', [t(FREEZE, "test_freeze_never_overwrites_a_lock")]),
+    ("freeze takes a plan, not a lock", "cli.py", '    if kind != "plan":', "    if False:", [t(FREEZE, "test_freeze_refuses_a_lock_and_a_missing_file")]),
+    ("report exits non-zero for a bundle that does not verify", "cli.py", "    return 0 if ok else 1\n", "    return 0\n", [t(FREEZE, "test_report_of_a_tampered_bundle_exits_one_and_warns")]),
+    ("inspect exits non-zero for a bundle that does not verify", "cli.py", '    return 0 if text.splitlines()[1].startswith("verification: OK") else 1', "    return 0",
+     [t(FREEZE, "test_inspect_exits_one_for_a_bundle_that_does_not_verify")]),
+    ("report writes nothing over an existing file", "cli.py", '            with open(args.output, "x", encoding="utf-8", newline="\\n") as fh:', '            with open(args.output, "w", encoding="utf-8", newline="\\n") as fh:',
+     [t(FREEZE, "test_report_html_is_one_file_with_no_script_and_a_content_security_policy")]),
+    ("chain heads read the seal of the run record", "inspect_cmd.py", '            sealed = events[-1] if events and events[-1].get("kind") == "RunSealed" else None', "            sealed = None",
+     [t(FREEZE, "test_chain_heads_are_read_from_the_run_record_as_stored")]),
+    ("the watchdog notices a parent that is gone", "watchdog.py", "            if os.getppid() != parent_pid:", "            if False:", [t(CHILD, "test_the_watchdog_calls_back_when_the_parent_is_not_the_one_it_was_told_about")]),
+    ("a file named outside the lane's output directory is refused", "lane_robot.py", "            if out.resolve() not in p.parents or not p.is_file() or p.stat().st_size > limit:",
+     "            if not p.is_file() or p.stat().st_size > limit:", [t(CHILD, "test_a_file_the_child_names_outside_its_output_directory_is_refused")]),
+    ("an outcome file must be the lane's own", "lane_robot.py", '        if not isinstance(doc, dict) or doc.get("schema") != K.LANE_RESULT_SCHEMA or doc.get("status") != "COMPLETED":',
+     "        if not isinstance(doc, dict):", [t(CHILD, "test_no_outcome_file_or_one_that_is_not_ours_is_no_outcome")]),
     # ---- lane_browser.py -------------------------------------------------------------------------------------------------------------
     ("declared preconditions cannot be attested", "lane_browser.py", "        return True if not spec.preconditions else None", "        return True",
      [t(PARTS, "test_preconditions_and_fixtures_nothing_here_can_attest_are_unknown_never_true")]),

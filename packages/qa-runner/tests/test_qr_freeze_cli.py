@@ -1,0 +1,278 @@
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
+"""``freeze``, ``report``, ``inspect`` and the demo plan: the commands that need no engine."""
+import copy
+import io
+import json
+from pathlib import Path
+
+import pytest
+
+from qa_evidence.canon import dumps_canonical
+from qa_runner import constants as K
+from qa_runner.cli import main
+from qa_runner.golden import demo_plan, golden_plan
+from qa_runner.inspect_cmd import chain_heads
+from qa_runner.orchestrate import RunOptions, run_plan
+from qa_runner.plan import freeze_plan, load_plan_or_lock
+from qr_support import fake, fake_robot
+
+DEMO_PLAN_DIGEST = "sha256:b267f8dda8d9cfa87704e4ce33f969f6b9f3743c2438523732e21f89d2c909fd"
+DEMO_EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "demo-plan.json"
+
+
+def cli(*argv):
+    out, err = io.StringIO(), io.StringIO()
+    return main(list(argv), out, err), out.getvalue(), err.getvalue()
+
+
+def write_plan(tmp_path, plan, name="plan.json"):
+    p = tmp_path / name
+    p.write_text(json.dumps(plan))
+    return str(p)
+
+
+# ---- the demo plan -----------------------------------------------------------------------------------------------------------------------
+def test_the_demo_plan_has_the_browser_lane_then_the_robot_lane_with_every_assertion_once(up):
+    frozen = freeze_plan(up, demo_plan())
+    assert [l.lane_id for l in frozen.lanes] == ["browser", "robot"] and frozen.plan_digest == DEMO_PLAN_DIGEST
+    ids = [r["assertion_id"] for r in frozen.rows]
+    assert sorted(ids) == ["A-NOTIF-ON", "A-ORDER-RULE", "A-SAVED", "A-URL"] and len(set(ids)) == 4
+
+
+def test_the_demo_example_file_is_the_demo_plan():
+    assert DEMO_EXAMPLE.read_bytes() == (json.dumps(demo_plan(), indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def test_doctor_with_the_demo_plan_checks_both_engines(monkeypatch):
+    import qa_runner.doctor as doctor
+    monkeypatch.setattr(doctor, "check_playwright", lambda run=None: doctor.Check("playwright", "OK", "stub"))
+    monkeypatch.setattr(doctor, "check_robot", lambda: doctor.Check("robot framework", "OK", "stub"))
+    code, out, err = cli("doctor", "--plan", str(DEMO_EXAMPLE), "--json")
+    assert code == 0 and {"playwright", "robot framework"} <= {r["check"] for r in json.loads(out)}
+
+
+# ---- freeze ------------------------------------------------------------------------------------------------------------------------------
+def test_freeze_writes_the_lock_and_prints_the_plan_digest(tmp_path, up):
+    lock = tmp_path / "plan.lock.json"
+    code, out, err = cli("freeze", str(DEMO_EXAMPLE), "--out", str(lock))
+    frozen = freeze_plan(up, demo_plan())
+    assert code == 0 and lock.read_bytes() == frozen.lock_bytes()
+    assert f"plan digest: {DEMO_PLAN_DIGEST}" in out and f"sha256 {frozen.lock_digest}" in out and "2 lane(s), 4 assertion(s)" in out
+    assert "where whoever runs the plan cannot rewrite it" in err
+
+
+def test_freezing_twice_gives_the_same_bytes(tmp_path):
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    assert cli("freeze", str(DEMO_EXAMPLE), "--out", str(a))[0] == 0 and cli("freeze", str(DEMO_EXAMPLE), "--out", str(b))[0] == 0
+    assert a.read_bytes() == b.read_bytes()
+
+
+def test_freeze_never_overwrites_a_lock(tmp_path):
+    lock = tmp_path / "plan.lock.json"
+    lock.write_text("keep me")
+    code, out, err = cli("freeze", str(DEMO_EXAMPLE), "--out", str(lock))
+    assert code == K.EXIT_USAGE and "OUTPUT_EXISTS" in err and lock.read_text() == "keep me"
+
+
+def test_freeze_refuses_a_plan_with_an_unknown_field_and_writes_nothing(tmp_path):
+    plan = demo_plan()
+    plan["lanes"][0]["spec"]["assertions"][0]["verdict"] = "PASS"
+    lock = tmp_path / "plan.lock.json"
+    code, out, err = cli("freeze", write_plan(tmp_path, plan), "--out", str(lock))
+    assert code == K.EXIT_USAGE and "SPEC_REJECTED" in err and not lock.exists()
+
+
+def test_freeze_refuses_a_lock_and_a_missing_file(tmp_path, up):
+    lock = tmp_path / "plan.lock.json"
+    cli("freeze", str(DEMO_EXAMPLE), "--out", str(lock))
+    code, out, err = cli("freeze", str(lock), "--out", str(tmp_path / "again.json"))
+    assert code == K.EXIT_USAGE and "ALREADY_A_LOCK" in err
+    assert cli("freeze", str(tmp_path / "nope.json"), "--out", str(tmp_path / "x.json"))[0] == K.EXIT_USAGE
+
+
+def test_run_refuses_an_edited_lock_before_anything_starts(tmp_path):
+    lock = tmp_path / "plan.lock.json"
+    cli("freeze", str(DEMO_EXAMPLE), "--out", str(lock))
+    doc = json.loads(lock.read_text())
+    doc["lanes"][0]["assertions"][0]["predicate"]["expected"] = "forged"                     # an expected value edited after freezing
+    lock.write_bytes(dumps_canonical(doc))
+    code, out, err = cli("run", str(lock), "--out", str(tmp_path / "o"))
+    assert code == K.EXIT_USAGE and ("LOCK_MISMATCH" in err or "SPEC_REJECTED" in err) and not (tmp_path / "o").exists()
+
+
+def test_run_accepts_the_lock_freeze_wrote(tmp_path, up):
+    lock = tmp_path / "plan.lock.json"
+    cli("freeze", str(DEMO_EXAMPLE), "--out", str(lock))
+    frozen, kind = load_plan_or_lock(up, lock.read_bytes())
+    assert kind == "lock" and frozen.plan_digest == DEMO_PLAN_DIGEST
+
+
+# ---- two lanes in one run -----------------------------------------------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def demo_frozen(up):
+    return freeze_plan(up, demo_plan())
+
+
+def two(up, frozen, browser="pass", robot="live", defect="none", **kw):
+    return run_plan(up, frozen, RunOptions(defect=defect, lane_command=fake(browser), robot_launcher=fake_robot(robot), lane_deadline_s=60, run_id="r0-test", **kw))
+
+
+def rep(s):
+    return json.loads(s.bundle.files["report.json"])
+
+
+def test_both_lanes_pass_and_all_four_assertions_are_verified(up, demo_frozen):
+    s = two(up, demo_frozen)
+    assert (s.outcome, s.exit_code, s.lanes) == ("VERIFIED", 0, (("browser", "NATIVE_PASS"), ("robot", "NATIVE_PASS")))
+    r = rep(s)
+    assert r["accounting"]["frozen"] == r["accounting"]["verified"] == 4 and r["accounting"]["unaccounted"] == 0
+
+
+def test_the_lanes_share_one_run_id_and_their_run_ids_are_run_dot_lane(up, demo_frozen):
+    r = rep(two(up, demo_frozen))
+    assert r["run_id"] == "r0-test" and [(l["lane_id"], l["run_id"]) for l in r["lanes"]] == [("browser", "r0-test.browser"), ("robot", "r0-test.robot")]
+
+
+def test_the_lanes_run_serially_in_plan_order_against_one_target(up, demo_frozen):
+    s = two(up, demo_frozen)
+    log = s.bundle.files["logs/orchestrator.log"].decode().splitlines()
+    assert [i for i, l in enumerate(log) if l.startswith("lane ")] == sorted(i for i, l in enumerate(log) if l.startswith("lane "))
+    assert log.index("target started on loopback") < next(i for i, l in enumerate(log) if l.startswith("lane browser")) < next(i for i, l in enumerate(log) if l.startswith("lane robot"))
+    assert sum(1 for l in log if l == "target started on loopback") == 1
+    requests = [json.loads(l)["target"] for l in s.bundle.files["logs/target-requests.jsonl"].decode().splitlines()]
+    assert "/api/orders/101" in requests                          # the Robot lane's requests reached the same target
+
+
+def test_the_discount_defect_fails_exactly_the_robot_lane_and_the_browser_lane_is_still_recorded(up, demo_frozen):
+    s = two(up, demo_frozen, defect="discount")
+    r = rep(s)
+    states = {x["assertion_id"]: x["verdict"]["state"] for x in r["accounting"]["results"]}
+    assert (s.outcome, s.exit_code) == ("FAILED", 1) and states == {"A-NOTIF-ON": "VERIFIED", "A-SAVED": "VERIFIED", "A-URL": "VERIFIED", "A-ORDER-RULE": "FAILED"}
+    assert s.lanes == (("browser", "NATIVE_PASS"), ("robot", "NATIVE_FAIL"))
+
+
+def test_a_failing_browser_lane_fails_exactly_its_assertion_and_the_robot_lane_is_still_recorded(up, demo_frozen):
+    s = two(up, demo_frozen, browser="settings-bug")
+    states = {x["assertion_id"]: x["verdict"]["state"] for x in rep(s)["accounting"]["results"]}
+    assert (s.outcome, s.exit_code) == ("FAILED", 1) and states["A-NOTIF-ON"] == "FAILED" and states["A-ORDER-RULE"] == "VERIFIED"
+    assert s.lanes == (("browser", "NATIVE_FAIL"), ("robot", "NATIVE_PASS"))
+
+
+def test_partial_success_a_lane_that_times_out_leaves_the_other_lanes_result_and_the_run_inconclusive(up):
+    plan = demo_plan()
+    plan["lanes"][0]["deadline_s"] = 1                        # the browser lane gets one second, and its double hangs
+    s = run_plan(up, freeze_plan(up, plan), RunOptions(lane_command=fake("hang"), robot_launcher=fake_robot("live"), run_id="r0-test"))
+    r = rep(s)
+    states = {x["assertion_id"]: x["verdict"]["state"] for x in r["accounting"]["results"]}
+    assert s.lanes == (("browser", "NATIVE_TIMEOUT"), ("robot", "NATIVE_PASS")) and (s.outcome, s.exit_code) == ("INCONCLUSIVE", K.EXIT_ENVIRONMENT)
+    assert states == {"A-NOTIF-ON": "INCONCLUSIVE", "A-SAVED": "INCONCLUSIVE", "A-URL": "INCONCLUSIVE", "A-ORDER-RULE": "VERIFIED"}
+    assert r["accounting"]["frozen"] == 4 and r["verdict"]["reason_code"] != "ALL_ASSERTIONS_VERIFIED"
+
+
+def test_a_timeout_never_gives_verified_whatever_the_other_lane_says(up):
+    plan = demo_plan()
+    plan["lanes"][1]["deadline_s"] = 2
+    s = run_plan(up, freeze_plan(up, plan), RunOptions(lane_command=fake("pass"), robot_launcher=fake_robot("hang"), run_id="r0-test"))
+    assert s.outcome == "INCONCLUSIVE" and s.lanes == (("browser", "NATIVE_PASS"), ("robot", "NATIVE_TIMEOUT"))
+
+
+def test_a_failed_assertion_in_one_lane_outranks_a_timeout_in_the_other(up):
+    plan = demo_plan()
+    plan["lanes"][1]["deadline_s"] = 2
+    s = run_plan(up, freeze_plan(up, plan), RunOptions(lane_command=fake("settings-bug"), robot_launcher=fake_robot("hang"), run_id="r0-test"))
+    assert s.outcome == "FAILED" and s.exit_code == K.EXIT_FAILED          # a demonstrated failure is reported as one; the timeout is still visible per lane
+    assert dict(s.lanes) == {"browser": "NATIVE_FAIL", "robot": "NATIVE_TIMEOUT"}
+
+
+def test_cancelling_during_the_first_lane_skips_the_second_and_still_accounts_for_all_four(up, demo_frozen):
+    import threading
+    from qa_adapter_kit.supervisor import CancelToken
+    cancel = CancelToken()
+    threading.Timer(1.0, cancel.cancel).start()
+    s = run_plan(up, demo_frozen, RunOptions(lane_command=fake("hang"), robot_launcher=fake_robot("live"), run_id="r0-test", cancel=cancel))
+    r = rep(s)
+    assert s.cancelled and s.exit_code == K.EXIT_ENVIRONMENT and s.outcome == "INCONCLUSIVE"
+    assert dict(s.lanes) == {"browser": "NATIVE_ERROR", "robot": "NATIVE_SKIPPED"} and r["accounting"]["frozen"] == 4 and r["accounting"]["inconclusive"] == 4
+
+
+# ---- report and inspect ------------------------------------------------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def bundle_dir(up, demo_frozen, tmp_path_factory):
+    s = two(up, demo_frozen, defect="discount")
+    target = tmp_path_factory.mktemp("bundle") / "b"
+    s.bundle.write_directory(str(target))
+    return target
+
+
+def test_report_text_is_the_evidence_report_and_exits_zero_for_a_bundle_that_verifies(bundle_dir):
+    code, out, err = cli("report", str(bundle_dir))
+    assert code == 0 and "INDEPENDENT VERDICT" in out and "A-ORDER-RULE [robot] native=NATIVE_FAIL verdict=FAILED" in out and "does not mean the" in out and err == ""
+
+
+def test_report_json_carries_the_verification_and_the_summary(bundle_dir):
+    code, out, err = cli("report", str(bundle_dir), "--format", "json")
+    doc = json.loads(out)
+    assert code == 0 and doc["verification"]["ok"] is True and doc["summary"]["independent_verdict"]["outcome"] == "FAILED"
+
+
+def test_report_html_is_one_file_with_no_script_and_a_content_security_policy(bundle_dir, tmp_path):
+    out_file = tmp_path / "r.html"
+    code, out, err = cli("report", str(bundle_dir), "--format", "html", "-o", str(out_file))
+    html = out_file.read_text()
+    assert code == 0 and "Content-Security-Policy" in html and "<script" not in html.lower() and out == ""
+    assert cli("report", str(bundle_dir), "--format", "html", "-o", str(out_file))[0] == K.EXIT_USAGE            # never overwritten
+
+
+def test_report_with_a_plan_digest_says_whether_it_matches(bundle_dir):
+    good = cli("report", str(bundle_dir), "--plan-digest", DEMO_PLAN_DIGEST)
+    bad = cli("report", str(bundle_dir), "--plan-digest", "sha256:" + "0" * 64)
+    assert good[0] == 0 and "matches the supplied value" in good[1]
+    assert bad[0] == 1 and "does NOT match" in bad[1] and "must not be relied on" in bad[2]
+
+
+def test_report_of_a_tampered_bundle_exits_one_and_warns(bundle_dir, tmp_path):
+    import shutil
+    copy = tmp_path / "t"
+    shutil.copytree(bundle_dir, copy)
+    (copy / "lanes" / "robot" / "observations.json").write_bytes(b"{}\n")
+    code, out, err = cli("report", str(copy))
+    assert code == 1 and "FAILED" in out and "WARNING: this bundle FAILED verification" in out and "must not be relied on" in err
+
+
+def test_report_and_inspect_of_something_that_is_not_a_bundle_are_usage_errors(tmp_path):
+    assert cli("report", str(tmp_path / "nope"))[0] == K.EXIT_USAGE and cli("inspect", str(tmp_path / "nope"))[0] == K.EXIT_USAGE
+
+
+def test_inspect_lists_the_files_the_tools_the_lanes_and_the_verdict_and_never_recomputes(bundle_dir):
+    code, out, err = cli("inspect", str(bundle_dir))
+    assert code == 0 and "verification: OK, internally consistent" in out
+    assert "tools: " in out and "redevops-qa-verify" in out and "lane browser:" in out and "lane robot:" in out and "verdict: FAILED (ASSERTION_FAILED)" in out
+    assert "native-artifact" in out and "lanes/robot/native/output.xml" in out and "plan.lock.json" in out and "files:" in out
+
+
+def test_inspect_exits_one_for_a_bundle_that_does_not_verify(bundle_dir, tmp_path):
+    import shutil
+    copy = tmp_path / "t"
+    shutil.copytree(bundle_dir, copy)
+    (copy / "plan.lock.json").write_bytes(b"{}\n")
+    code, out, err = cli("inspect", str(copy))
+    assert code == 1 and "verification: FAILED" in out
+
+
+def test_chain_heads_are_read_from_the_run_record_as_stored():
+    record = {"events": [{"kind": "RunStarted", "event_hash": "canon-v1:" + "a" * 64}, {"kind": "RunSealed", "event_hash": "canon-v1:" + "b" * 64,
+                                                                                     "payload": {"classification": {"outcome": "PASS"}}}],
+              "receipt_links": [{"link_hash": "canon-v1:" + "c" * 64}]}
+    heads = chain_heads({"lanes/browser/native/run-record.json": dumps_canonical(record), "lanes/robot/native/output.xml": b"<robot/>"})
+    assert heads == [{"lane": "browser", "events": 2, "event_head": "canon-v1:" + "b" * 64, "receipts": 1, "receipt_head": "canon-v1:" + "c" * 64, "sealed": True, "sealed_outcome": "PASS"}]
+    assert chain_heads({"lanes/browser/native/run-record.json": b"{not json"})[0]["events"] is None
+    assert chain_heads({"lanes/browser/native/run-record.json": dumps_canonical({"events": [], "receipt_links": []})})[0]["sealed"] is False
+
+
+def test_hostile_text_in_a_bundle_is_escaped_in_inspect(bundle_dir, tmp_path):
+    import shutil
+    copy = tmp_path / "t"
+    shutil.copytree(bundle_dir, copy)
+    (copy / "x\x1b[2Jy.txt").write_bytes(b"x")
+    code, out, err = cli("inspect", str(copy))
+    assert "\x1b" not in out and "\x1b" not in err

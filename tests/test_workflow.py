@@ -249,3 +249,13 @@ def test_the_runner_robot_job_installs_robot_not_a_browser_runs_only_the_real_te
     assert len(fetches) == 2 and "--verify-trees --require-git" in steps and steps.count('test -z "$(git status --porcelain)"') == 2
     offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["runner"]["steps"])
     assert "robotframework" not in offline.lower()
+
+
+def test_the_runner_end_to_end_job_installs_both_engines_runs_only_e2e_tests_scrubbed_and_fails_on_skips():
+    job = WF["jobs"]["runner-e2e"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert '"playwright==1.64.1"' in steps and '"robotframework==7.5"' in steps and "playwright install --with-deps chromium" in steps and "-m e2e packages/qa-runner/tests/e2e" in steps
+    assert "env -i HOME=" in steps and "tools/check_junit.py" in steps and "--junitxml" in steps and "PLAYWRIGHT_BROWSERS_PATH" in steps
+    assert "pins" in job["needs"] and "continue-on-error" not in job and "upload-artifact" not in str(job)
+    fetches = [s for s in job["steps"] if "repository" in s.get("with", {})]
+    assert len(fetches) == 2 and "--verify-trees --require-git" in steps and steps.count('test -z "$(git status --porcelain)"') == 2

@@ -104,7 +104,7 @@ def test_the_offline_jobs_do_not_install_playwright():
     import yaml
     jobs = yaml.safe_load(TEXT)["jobs"]
     for name, job in jobs.items():
-        if name in ("browser", "runner-browser"):          # the jobs that install the browser: the adapter's own lane and the orchestrated runner lane
+        if name in ("browser", "runner-browser", "runner-e2e"):          # the jobs that install the browser: the adapter's own lane and the orchestrated runner lane
             continue
         for step in job["steps"]:
             assert "playwright" not in str(step.get("run", "")).lower(), name

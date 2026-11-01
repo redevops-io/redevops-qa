@@ -175,6 +175,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         if cfg.get("schema") != K.LANE_INPUT_SCHEMA:
             raise ValueError("not a lane input")
+        if isinstance(cfg.get("parent_pid"), int):
+            from . import watchdog
+            watchdog.start(cfg["parent_pid"], watchdog.kill_own_group)       # the orchestrator died: end this process, its gateway and its browser
         run_lane(cfg)
         return 0
     except Exception as exc:

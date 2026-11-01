@@ -45,3 +45,31 @@ FAKE_ROBOT = str(Path(__file__).resolve().parent / "fake_robot.py")
 def fake_robot(mode):
     """A ``RunOptions.robot_launcher`` that runs the Robot test double in ``mode`` instead of ``-m robot``."""
     return (FAKE_ROBOT, mode)
+
+
+def process_table():
+    """``{pid: (ppid, pgid, command)}`` of every process, from ``ps`` (what a process check can see; nothing here kills anything)."""
+    import subprocess
+    out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,command="], capture_output=True, text=True, timeout=30).stdout
+    table = {}
+    for line in out.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) == 4 and parts[0].isdigit() and parts[1].isdigit() and parts[2].isdigit():
+            table[int(parts[0])] = (int(parts[1]), int(parts[2]), parts[3])
+    return table
+
+
+def descendants(root: int, table=None):
+    """The pids that descend from ``root`` by parent links (``root`` excluded)."""
+    table = table or process_table()
+    found, frontier = set(), {root}
+    while frontier:
+        nxt = {pid for pid, (ppid, _, _) in table.items() if ppid in frontier and pid not in found}
+        found |= nxt
+        frontier = nxt
+    return found
+
+
+def group_members(pgids, table=None):
+    table = table or process_table()
+    return {pid for pid, (_, pgid, _) in table.items() if pgid in pgids}
