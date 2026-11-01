@@ -267,7 +267,7 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
             out = run_browser_lane(fl, run_id=run_id, origin=origin, workdir=workdir, opts=opts, log=log)
             window = b"".join(l + b"\n" for l in _log_lines(req_path)[before:])       # what the target itself served while this lane ran
             outcomes.append(dataclasses.replace(out, files={**out.files, request_log_path(fl.lane_id): (window, "log")}))
-        if origin is not None and not (opts.cancel is not None and opts.cancel.cancelled) and any(l.probes for l in frozen.lanes):
+        if origin is not None and not (opts.cancel is not None and opts.cancel.cancelled) and any(f != "ui-only" for l in frozen.lanes for f in l.probes.values()):
             reference = _reference_check(origin, log, opts.cancel)          # after every lane: the check saves one setting in the (throwaway) target
     finally:
         app.stop()
@@ -282,6 +282,9 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
     if reference is not None:
         logs[REFERENCE_CHECK_PATH] = dumps_canonical(reference)
     extensions: Dict[str, Any] = {"target_defect": opts.defect, "target": "fixture-app"}
+    ui_only = sorted(f"{l.lane_id}:{aid}" for l in frozen.lanes for aid, fact in l.probes.items() if fact == "ui-only")
+    if ui_only:
+        extensions["no_independent_probe"] = ",".join(ui_only)[:500]           # assertions the plan declares ui-only: what the browser shows, nothing independent behind them
     if any(o.double for o in outcomes):
         extensions["test_double"] = "lane-command"
     for key in ("gateway_denied", "gate_denied"):

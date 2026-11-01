@@ -30,9 +30,12 @@ from .errors import PlanError
 
 PLAN_KEYS = {"schema", "schema_version", "plan_id", "target", "lanes"}
 LANE_KEYS = {ENGINE: {"lane_id", "engine", "spec", "egress", "deadline_s", "requests", "probes"} for ENGINE in K.ENGINES}
-OPTIONAL_LANE_KEYS = {"deadline_s", "probes"}
+OPTIONAL_LANE_KEYS = {"deadline_s"}
 REQUEST_RE = re.compile(r"^(GET|POST) (/[A-Za-z0-9._~/-]{0,100})$")
-PROBE_FACTS = ("discount-rule", "settings-persistence")
+#: what an assertion's verdict is checked against besides the engine's own record: a fact of the independent reference check of the target, or ``ui-only`` (the assertion is about what the browser shows;
+#: no server-side fact applies and nothing independent backs it). EVERY assertion of a lane names one: a lane cannot reach VERIFIED on a fixture-app assertion nobody said anything about.
+UI_ONLY = "ui-only"
+PROBE_FACTS = ("discount-rule", "settings-persistence", UI_ONLY)
 EGRESS_PROFILES = ("origin-only",)
 TARGET_KINDS = ("fixture-app",)
 MAX_PLAN_BYTES = 1024 * 1024
@@ -134,7 +137,7 @@ def _parse_structure(doc: Any) -> List[Mapping[str, Any]]:
             raise PlanError("UNSUPPORTED_ENGINE", f"lane engine must be one of {list(K.ENGINES)} (R0 scope: Playwright Chromium and Robot Framework)")
         _only(lane, LANE_KEYS[lane["engine"]], f"lane {str(lane.get('lane_id'))[:20]!r}", OPTIONAL_LANE_KEYS)
         _check_requests(lane["requests"], str(lane.get("lane_id")))
-        _check_probes(lane.get("probes", {}), str(lane.get("lane_id")))
+        _check_probes(lane["probes"], str(lane.get("lane_id")))
         lid = lane["lane_id"]
         if not isinstance(lid, str) or not K.LANE_ID_RE.fullmatch(lid):
             raise PlanError("BAD_LANE_ID", "a lane id is 1 to 20 characters: a lower-case letter, then lower-case letters, digits and '-'")
@@ -201,17 +204,22 @@ def freeze_plan(up: Upstreams, plan_doc: Any) -> FrozenPlan:
                 raise PlanError("DUPLICATE_ASSERTION", f"assertion id {a['assertion_id']!r} appears in lanes {seen_ids[key][1]!r} and {lid!r} (ids are compared without case): "
                                 "every frozen assertion is accounted exactly once")
             seen_ids[key] = (a["assertion_id"], lid)
-        unknown_probe = sorted(set(lane.get("probes", {})) - {a["assertion_id"] for a in assertions})
+        ids = {a["assertion_id"] for a in assertions}
+        unknown_probe = sorted(set(lane["probes"]) - ids)
         if unknown_probe:
             raise PlanError("BAD_PROBES", f"lane {lid}: probes name assertions that are not in this lane: {[u[:40] for u in unknown_probe]}")
+        unprobed = sorted(ids - set(lane["probes"]))
+        if unprobed:
+            raise PlanError("BAD_PROBES", f"lane {lid}: assertion(s) {[u[:40] for u in unprobed]} name no probe: give each a fact of the reference check ({', '.join(f for f in PROBE_FACTS if f != UI_ONLY)}) "
+                            f"or {UI_ONLY!r} (what the browser shows, with nothing independent behind it)")
         # Everything the plan fixes about a lane besides the assertion itself is bound into the digest of every assertion of that lane, so the plan digest covers it:
         # what the target's request log must show, which independent facts may not contradict a verdict, the egress profile, the whole spec (steps included), the deadline and the plan's id and target.
-        binding = {"engine": lane["engine"], "egress": lane["egress"], "requests": lane["requests"], "probes": lane.get("probes", {}),
+        binding = {"engine": lane["engine"], "egress": lane["egress"], "requests": lane["requests"], "probes": lane["probes"],
                    "deadline_s": lane.get("deadline_s", int(K.DEFAULT_LANE_DEADLINE_S)), "spec_sha256": digest_of(lane["spec"]),
                    "plan": {"plan_id": plan_doc["plan_id"], "target": plan_doc["target"]}}
         digests = {a["assertion_id"]: digest_of({"assertion": a, "binding": binding}) for a in assertions}
         frozen.append(FrozenLane(lane_id=lid, engine=lane["engine"], deadline_s=lane.get("deadline_s", int(K.DEFAULT_LANE_DEADLINE_S)), egress=lane["egress"],
-                                 requests=copy.deepcopy(lane["requests"]), probes=dict(lane.get("probes", {})), spec_template=copy.deepcopy(lane["spec"]), spec_digest=digest_of(lane["spec"]), spec_contract_hash=spec.spec_hash,
+                                 requests=copy.deepcopy(lane["requests"]), probes=dict(lane["probes"]), spec_template=copy.deepcopy(lane["spec"]), spec_digest=digest_of(lane["spec"]), spec_contract_hash=spec.spec_hash,
                                  assertions=tuple(assertions), assertion_digests=digests, harness_pin=pin))
     return FrozenPlan(plan=copy.deepcopy(plan_doc), plan_id=plan_doc["plan_id"], lanes=tuple(frozen), pins=pin_summary(up), runner_version=K.RUNNER_VERSION)
 

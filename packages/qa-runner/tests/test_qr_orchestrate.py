@@ -280,3 +280,9 @@ def test_the_reference_check_of_a_stalled_target_ends_when_the_run_is_cancelled(
     assert _reference_check(f"http://127.0.0.1:{srv.getsockname()[1]}", log, cancel) is None
     assert time.monotonic() - t0 < 8 and "could not run (CheckAborted)" in log[0]
     srv.close()
+
+
+def test_the_report_and_the_summary_name_the_assertions_that_have_no_independent_probe(up, golden_frozen):
+    """Retest R2: the plan declares A-SAVED and A-URL ui-only; the run says so in the report (extension) instead of leaving it to the plan file."""
+    s = run(up, golden_frozen, "pass")
+    assert report(s)["extensions"]["no_independent_probe"] == "browser:A-SAVED,browser:A-URL"

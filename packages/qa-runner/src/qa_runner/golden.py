@@ -69,5 +69,5 @@ def browser_spec() -> Dict[str, Any]:
 def golden_plan() -> Dict[str, Any]:
     lanes: List[Dict[str, Any]] = [{"lane_id": "browser", "engine": K.ENGINE_PLAYWRIGHT, "egress": "origin-only", "deadline_s": 120, "spec": browser_spec(),
              "requests": {"required": ["POST /login", "POST /settings", "GET /settings"], "allowed": ["GET /login", "GET /account", "GET /settings", "POST /login", "POST /settings"]},
-             "probes": {"A-NOTIF-ON": "settings-persistence"}}]
+             "probes": {"A-NOTIF-ON": "settings-persistence", "A-SAVED": "ui-only", "A-URL": "ui-only"}}]
     return {"schema": K.PLAN_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": "golden-fixture", "target": {"kind": "fixture-app"}, "lanes": lanes}

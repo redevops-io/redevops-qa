@@ -6,7 +6,9 @@
       "engine": "playwright-chromium",
       "lane_id": "browser",
       "probes": {
-        "A-NOTIF-ON": "settings-persistence"
+        "A-NOTIF-ON": "settings-persistence",
+        "A-SAVED": "ui-only",
+        "A-URL": "ui-only"
       },
       "requests": {
         "allowed": [

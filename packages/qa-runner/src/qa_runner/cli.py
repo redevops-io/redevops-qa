@@ -138,6 +138,8 @@ def _run(args, out: TextIO, err: TextIO) -> int:
     ext = report.get("extensions") or {}
     if "egress_gateway_denied" in ext or "egress_gate_denied" in ext:
         print(f"  egress: the gateway denied {ext.get('egress_gateway_denied', 0)} request(s), the in-browser request gate denied {ext.get('egress_gate_denied', 0)} (details in the lane's logs)", file=out)
+    if ext.get("no_independent_probe"):
+        print(f"  no independent probe (declared ui-only in the plan; the verdict rests on the engine's record and the target's request log): {safe_text(ext['no_independent_probe'], 200)}", file=out)
     if ext.get("test_double"):
         print("  TEST DOUBLE: a lane of this run was produced by a test double; no assertion of it can be verified", file=out)
     print(f"  assertions: frozen {acc['frozen']} = verified {acc['verified']} + failed {acc['failed']} + inconclusive {acc['inconclusive']} + unaccounted {acc['unaccounted']}", file=out)

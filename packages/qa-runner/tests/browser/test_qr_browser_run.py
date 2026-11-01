@@ -161,7 +161,7 @@ def test_a_page_that_tries_to_reach_another_origin_is_denied_by_the_gateway_and_
         spec["assertions"] = [_assertion("A-URL", {"kind": "URL", "pattern": r"/$"}, "MATCHES", r"/$")]
         plan = golden_plan()
         plan["lanes"][0]["spec"] = spec
-        plan["lanes"][0]["probes"] = {}
+        plan["lanes"][0]["probes"] = {"A-URL": "ui-only"}
         plan["lanes"][0]["requests"] = {"required": ["GET /"], "allowed": []}
         fl = freeze_plan(up, plan).lane("browser")
         doc = run_lane(lane_input(fl, run_id="r0-hostile", origin=page.origin, out_dir=str(tmp_path / "out")))
