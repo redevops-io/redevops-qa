@@ -1,0 +1,21 @@
+GET /
+--- 200
+Server: qa-fixture-app
+Content-Type: text/html; charset=utf-8
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Content-Length: 274
+Connection: close
+
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>QA fixture app</title></head>
+<body>
+<h1>QA fixture app</h1>
+<ul>
+<li><a href="/login">Sign in</a></li>
+<li><a href="/settings">Settings</a></li>
+<li><a href="/orders">Orders</a></li>
+</ul>
+</body>
+</html>

@@ -1,0 +1,12 @@
+GET /api/me/settings
+--- 401
+Server: qa-fixture-app
+Content-Type: application/json
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Content-Length: 33
+Connection: close
+
+{
+  "error": "unauthenticated"
+}

@@ -22,6 +22,7 @@ pythonpath = [
     "packages/qa-robot/src",
     "packages/qa-appium/src",
     "packages/qa-checks/src",
+    "packages/qa-fixture-app/src",
 ]
 # The real-browser lane (tests/browser in the browser-backed packages) is never collected by the offline suite: it needs
 # Playwright and Chromium and runs only in its own CI job, which names those directories explicitly.

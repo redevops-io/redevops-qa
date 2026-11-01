@@ -119,6 +119,16 @@ def test_the_adapter_kit_job_is_offline_pin_free_and_fails_on_skips():
     assert not any("repository" in s.get("with", {}) for s in job["steps"]) and "needs" not in job and "playwright" not in steps.lower()
 
 
+def test_the_fixture_app_job_is_offline_pin_free_runs_both_supported_pythons_and_fails_on_skips():
+    job = WF["jobs"]["fixture-app"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert "packages/qa-fixture-app/tests" in steps and "env -i HOME=" in steps and "tools/check_junit.py" in steps
+    assert job["strategy"]["matrix"]["python"] == ["3.11", "3.12"] and job["strategy"]["fail-fast"] is False
+    assert not any("repository" in s.get("with", {}) for s in job["steps"]) and "needs" not in job and "continue-on-error" not in job
+    assert "playwright" not in steps.lower() and "pip install" in steps and "--junitxml" in steps
+    assert steps.count('test -z "$(git status --porcelain)"') == 2         # clean before and after: the tests write nothing into the tree
+
+
 def test_the_selenium_offline_job_installs_no_selenium_and_the_browser_job_never_skips_or_downloads():
     offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["selenium-offline"]["steps"])
     assert "selenium==" not in offline and "packages/qa-selenium/tests" in offline and "tools/check_junit.py" in offline

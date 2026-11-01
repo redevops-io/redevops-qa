@@ -1,0 +1,18 @@
+POST /health
+form: a=1
+--- 405
+Server: qa-fixture-app
+Content-Type: text/html; charset=utf-8
+Cache-Control: no-store
+X-Content-Type-Options: nosniff
+Allow: GET, HEAD
+Content-Length: 153
+Connection: close
+
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Method not allowed</title></head>
+<body>
+<h1>Method not allowed</h1>
+</body>
+</html>
