@@ -129,7 +129,12 @@ def test_a_sealed_run_is_what_this_adapter_runs_by_default_and_pip_cannot_be_sta
 
 def test_a_python_that_is_not_in_the_manifest_is_never_started(tmp_path):
     ws, out = mini_workspace(tmp_path)
-    adapter = SeleniumSuiteAdapter("/usr/bin/python3", suite_manifest(sys.executable))
+    # An executable that is not the manifest's: a file of our own. "/usr/bin/python3" is not one on Debian and Ubuntu, where it is the
+    # very interpreter a system-Python virtual environment links to, so the manifest rightly accepts it.
+    other_python = tmp_path / "other-python"
+    other_python.write_text("#!/bin/sh\nexit 0\n")
+    other_python.chmod(0o755)
+    adapter = SeleniumSuiteAdapter(str(other_python), suite_manifest(sys.executable))
     req = SuiteRunRequest(run_id="r1", adapter_id="selenium-suite", workspace=str(ws), suite_path="suite/test_mini.py", output_dir=str(out))
     assert SuiteRunner(adapter).run(req).error_code is ErrorCode.EXECUTABLE_NOT_ALLOWED
 

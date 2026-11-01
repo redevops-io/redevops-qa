@@ -192,5 +192,10 @@ def test_pip_cannot_be_started_by_this_adapter_in_a_sealed_run(tmp_path):
 
 def test_a_python_that_is_not_in_the_manifest_is_never_started(tmp_path):
     ws, out = workspace(tmp_path)
-    adapter = RobotSuiteAdapter("/usr/bin/python3", manifest=suite_manifest(sys.executable))
+    # An executable that is not the manifest's: a file of our own. "/usr/bin/python3" is not one on Debian and Ubuntu, where it is the
+    # very interpreter a system-Python virtual environment links to, so the manifest rightly accepts it.
+    other_python = tmp_path / "other-python"
+    other_python.write_text("#!/bin/sh\nexit 0\n")
+    other_python.chmod(0o755)
+    adapter = RobotSuiteAdapter(str(other_python), manifest=suite_manifest(sys.executable))
     assert SuiteRunner(adapter).run(request(tmp_path)).error_code is ErrorCode.EXECUTABLE_NOT_ALLOWED
