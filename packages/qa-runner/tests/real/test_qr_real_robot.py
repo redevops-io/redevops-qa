@@ -112,5 +112,6 @@ def test_the_command_line_end_to_end_with_the_robot_plan(tmp_path):
         done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "run", str(plan), "--out", str(out), "--defect", defect], env=env, cwd=str(tmp_path),
                               capture_output=True, text=True, timeout=180)
         assert done.returncode == code and f": {outcome} (" in done.stdout, done.stdout + done.stderr
+        assert "independent verification (a separate process): ACCEPTED" in done.stdout
         (bundle,) = list(out.iterdir())
         assert subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle)], env=env, capture_output=True, timeout=60).returncode == 0

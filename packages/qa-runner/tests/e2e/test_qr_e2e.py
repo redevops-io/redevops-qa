@@ -167,6 +167,7 @@ def test_the_command_line_demo_end_to_end_in_a_scrubbed_environment(tmp_path):
         done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "demo", "--out", str(out), "--defect", defect], env=env, cwd=str(tmp_path), capture_output=True, text=True, timeout=240)
         assert done.returncode == code and f": {outcome} (" in done.stdout, done.stdout + done.stderr
         assert "INDEPENDENT VERDICT" in done.stdout and "lane browser:" in done.stdout and "lane robot:" in done.stdout
+        assert "independent verification (a separate process): ACCEPTED as internally consistent; 4 of 4 verdict(s) recomputed from the bundle alone agree with the report" in done.stdout
         (bundle,) = list(out.iterdir())
         assert subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle)], env=env, capture_output=True, timeout=60).returncode == 0
         report = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "report", str(bundle)], env=env, capture_output=True, text=True, timeout=60)
@@ -185,3 +186,9 @@ def test_freeze_then_run_the_lock_end_to_end(tmp_path):
     (bundle,) = list((tmp_path / "o").iterdir())
     verify = subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle), "--plan-digest", digest], env=env, capture_output=True, text=True, timeout=60)
     assert verify.returncode == 0 and "matches the supplied value" in verify.stdout
+    manifest = [l for l in done.stdout.splitlines() if "manifest digest:" in l][0].split("manifest digest: ")[1].split()[0]
+    redevops = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "verify", str(bundle), "--anchor", manifest, "--plan-digest", digest, "--require-anchor", "--require-plan-digest"],
+                              env=env, capture_output=True, text=True, timeout=120)
+    assert redevops.returncode == 0 and "ACCEPTED" in redevops.stdout and "matches the supplied value" in redevops.stdout, redevops.stdout + redevops.stderr
+    wrong = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "verify", str(bundle), "--anchor", "sha256:" + "0" * 64], env=env, capture_output=True, text=True, timeout=120)
+    assert wrong.returncode == 5 and "REJECTED" in wrong.stdout and "ANCHOR_MISMATCH" in wrong.stdout

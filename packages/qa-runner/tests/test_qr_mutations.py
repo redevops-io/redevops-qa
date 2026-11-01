@@ -14,6 +14,8 @@ CLI = "test_qr_cli.py"
 PARTS = "test_qr_lane_parts.py"
 FREEZE = "test_qr_freeze_cli.py"
 CHILD = "test_qr_lane_child.py"
+VERIFY = "test_qr_verify.py"
+TAMPER = "test_qr_tamper_suite.py"
 SCRIPT = "test_qr_judge_script.py"
 ROBOT = "test_qr_robot_lane.py"
 
@@ -29,7 +31,7 @@ CASES = [
      [t(PLAN, "test_structural_refusals")]),
     ("an assertion id may live in one lane only", "plan.py", 'if a["assertion_id"] in seen_ids:', "if False:",
      [t(PLAN, "test_an_assertion_id_in_two_lanes_is_refused_so_every_assertion_is_accounted_once")]),
-    ("a lock must equal the freeze of its own plan", "plan.py", "if dumps_canonical(again.lock_document()) != dumps_canonical(lock_doc):", "if False:", [t(PLAN, "test_an_edited_lock_is_refused")]),
+    ("a lock must equal the freeze of its own plan", "plan.py", "    if dumps_canonical(expected) != dumps_canonical(got):", "    if False:", [t(PLAN, "test_an_edited_lock_is_refused")]),
     ("the contracts parser refuses what the harness mirror tolerates", "plan.py", "        return c.TestSpec.from_json(copy.deepcopy(dict(doc)))", "        return None",
      [t(PLAN, "test_an_unknown_field_is_refused_at_every_level")]),
     ("the origin placeholder is replaced only at the start of a value", "plan.py", "if not value.startswith(K.ORIGIN_PLACEHOLDER) or value.count(K.ORIGIN_PLACEHOLDER) != 1:", "if False:",
@@ -59,9 +61,9 @@ CASES = [
     ("the native status of a result is the lane's", "bundle.py", '"native_status": lane.native_status,', '"native_status": "NATIVE_PASS",',
      [t(BUNDLE, "test_each_result_carries_the_native_status_of_its_own_lane")]),
     # ---- orchestrate.py --------------------------------------------------------------------------------------------------------------
-    ("an executor environment failure is an engine error", "orchestrate.py", '    return "NATIVE_ERROR", outcome\n', '    return "NATIVE_PASS", outcome\n',
+    ("an executor environment failure is an engine error", "natives.py", '    return "NATIVE_ERROR", outcome\n', '    return "NATIVE_PASS", outcome\n',
      [t(ORCH, "test_an_executor_environment_failure_is_an_engine_error_even_when_the_observations_look_right")]),
-    ("a product failure is a native failure", "orchestrate.py", '        return "NATIVE_FAIL", "PRODUCT_FAIL"\n', '        return "NATIVE_PASS", "PRODUCT_FAIL"\n',
+    ("a product failure is a native failure", "natives.py", '        return "NATIVE_FAIL", "PRODUCT_FAIL"\n', '        return "NATIVE_PASS", "PRODUCT_FAIL"\n',
      [t(ORCH, "test_a_failed_assertion_fails_the_run_and_exits_one")]),
     ("a lane past its deadline is a timeout", "orchestrate.py", "    if proc.error_code == ErrorCode.TIMEOUT:", "    if False:", [t(ORCH, "test_a_lane_that_outlives_its_deadline_is_a_timeout_never_verified")]),
     ("a cancelled lane is an engine error", "orchestrate.py", "    elif proc.error_code == ErrorCode.CANCELLED:", "    elif False:",
@@ -77,8 +79,8 @@ CASES = [
      "if rows and False:", [t(ORCH, "test_a_forged_verdict_field_in_the_observations_leaves_the_assertions_inconclusive")]),
     ("a bad run id is refused", "orchestrate.py", "    if not K.RUN_ID_RE.fullmatch(run_id):", "    if False:", [t(ORCH, "test_a_bad_run_id_is_refused_before_anything_starts")]),
     ("an unknown defect is refused", "orchestrate.py", "    if opts.defect not in K.DEFECTS:", "    if False:", [t(ORCH, "test_an_unknown_defect_is_refused")]),
-    ("the exit code of a failed run", "orchestrate.py", '    if outcome == "FAILED":\n        return K.EXIT_FAILED', '    if outcome == "FAILED":\n        return K.EXIT_INCONCLUSIVE', [t(ORCH, "test_the_exit_code_table")]),
-    ("a lane that did not complete is an environment exit", "orchestrate.py", 'if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]):',
+    ("the exit code of a failed run", "exits.py", '    if outcome == "FAILED":\n        return K.EXIT_FAILED', '    if outcome == "FAILED":\n        return K.EXIT_INCONCLUSIVE', [t(ORCH, "test_the_exit_code_table")]),
+    ("a lane that did not complete is an environment exit", "exits.py", 'if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]):',
      "if False:", [t(ORCH, "test_the_exit_code_table")]),
     # ---- the Robot lane: plan.py -----------------------------------------------------------------------------------------------------
     ("a Robot lane holds SCRIPT assertions only", "plan.py", '        if a["executor"] != "SCRIPT":', "        if False:", [t(PLAN, "test_robot_lane_refusals")]),
@@ -101,8 +103,8 @@ CASES = [
     ("a replay from another run is refused", "judge.py", "    full_run = f\"{run_id}.{lane.lane_id}\"", "    full_run = 'r0-other.' + lane.lane_id", [t(SCRIPT, "test_a_replay_of_another_runs_record_is_unusable")]),
     # ---- the Robot lane: lane_robot.py ------------------------------------------------------------------------------------------------
     ("suite files must be the frozen ones", "lane_robot.py", "    if {rel: _sha(d) for rel, d in copies.items()} != fl.suite_files:", "    if False:", [t(ROBOT, "test_suite_files_that_changed_after_freezing_are_refused_before_anything_runs")]),
-    ("an engine failure is a native failure", "lane_robot.py", '        status, raw = "NATIVE_FAIL", "FAIL"', '        status, raw = "NATIVE_PASS", "FAIL"', [t(ROBOT, "test_the_discount_defect_is_a_native_fail_and_a_failed_assertion")]),
-    ("an engine timeout is a timeout", "lane_robot.py", "        if result.error_code is ErrorCode.TIMEOUT:", "        if False:", [t(ROBOT, "test_an_engine_that_hangs_is_a_timeout_and_never_verified")]),
+    ("an engine failure is a native failure", "natives.py", '        return "NATIVE_FAIL", "FAIL"', '        return "NATIVE_PASS", "FAIL"', [t(ROBOT, "test_the_discount_defect_is_a_native_fail_and_a_failed_assertion")]),
+    ("an engine timeout is a timeout", "natives.py", '        if error_code == "TIMEOUT":', "        if False:", [t(ROBOT, "test_an_engine_that_hangs_is_a_timeout_and_never_verified")]),
     ("a target that did not start leaves the lane unavailable", "lane_robot.py", "    if origin is None:\n", "    if False:\n", [t(ROBOT, "test_a_target_that_does_not_start_leaves_the_robot_lane_unavailable")]),
     ("a cancelled run skips the lane", "lane_robot.py", "    if cancel is not None and cancel.cancelled:", "    if False:", [t(ROBOT, "test_a_run_cancelled_before_the_lane_starts_skips_it")]),
     ("the egress profile of a Robot lane says not enforced", "lane_robot.py", '"profile": "not-enforced"', '"profile": "gateway"', [t(ROBOT, "test_the_egress_profile_of_a_robot_lane_says_it_is_not_enforced")]),
@@ -121,6 +123,37 @@ CASES = [
      "            if not p.is_file() or p.stat().st_size > limit:", [t(CHILD, "test_a_file_the_child_names_outside_its_output_directory_is_refused")]),
     ("an outcome file must be the lane's own", "lane_robot.py", '        if not isinstance(doc, dict) or doc.get("schema") != K.LANE_RESULT_SCHEMA or doc.get("status") != "COMPLETED":',
      "        if not isinstance(doc, dict):", [t(CHILD, "test_no_outcome_file_or_one_that_is_not_ours_is_no_outcome")]),
+    # ---- verify ---------------------------------------------------------------------------------------------------------------------------
+    ("verdicts are recomputed and compared", "verify.py", "            same = (got[\"verdict\"][\"state\"] == r[\"state\"]", "            same = True or (got[\"verdict\"][\"state\"] == r[\"state\"]",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[forged PASS: the report recomputed by the library over the real evidence]"), t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[flipped verdict: a verified assertion reported as failed over passing evidence]")]),
+    ("the lock must re-freeze to itself", "verify.py", "        frozen = thaw_lock(up, doc, for_verification=True)", "        frozen = None if True else thaw_lock(up, doc, for_verification=True)",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[edited expected value in the plan lock]"), t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[an unknown field in the plan lock]")]),
+    ("the frozen set of the report must be the lock's", "verify.py", '    if report["assertion_set"]["assertions"] != sorted(frozen.rows, key=lambda r: r["assertion_id"]):', "    if False:",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[an assertion id frozen twice]")]),
+    ("the assertion lock must be the one the plan lock gives", "verify.py", '    if files.get("assertion-lock.json") != frozen.assertion_lock_bytes():', "    if False:",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[edited assertion digest in the assertion lock]")]),
+    ("suite files must be the frozen ones", "verify.py", "                if data is None or sha256_bytes(data) != digest:", "                if False:", [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[a changed suite file]")]),
+    ("the native status is re-derived from the engine's files", "verify.py", "        elif derived is not None and derived != got:", "        elif False:",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[native FAIL relabelled as PASS in the report, the engine's files unchanged]")]),
+    ("a completed lane needs the engine's own result", "verify.py", '        if native["status"] in ("NATIVE_PASS", "NATIVE_FAIL") and derived is None:', "        if False:", [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[a VERIFIED status in the engine's own result, everything recomputed]")]),
+    ("the engine's files must agree with each other", "verify.py", '                        if (derived[0] == "NATIVE_PASS") != all(s == "PASS" for s in tests) or (derived[0] == "NATIVE_FAIL") != any(s == "FAIL" for s in tests):',
+     "                        if False:", [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[replay: the other run's native report and record, all recomputed]")]),
+    ("the harness run record is integrity-checked", "verify.py", "        for f in found.findings:", "        for f in []:", [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[an event payload of the run record edited, everything recomputed]")]),
+    ("the run record belongs to this run", "verify.py", '        if rec.get("run_id") != f"{report[\'run_id\']}.{lid}" or manifest.run_id != f"{report[\'run_id\']}.{lid}":', "        if False:",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the run record of another run]")]),
+    ("the executed spec is rebuilt from the frozen template", "verify.py", "                if manifest.spec_ref != executed.spec_ref():", "                if False:", [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the allowed origin changed so the executed spec is not the frozen one]")]),
+    ("observations must be what the run record says was read", "verify.py", '            if r is not None and (r.actual != row.get("value") or r.actual_digest != row.get("value_digest")):', "            if False:",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[an observation that is not what the run record says was read]")]),
+    ("an accepted bundle exits with the run's status, a rejected one with 5", "verify.py", "        return self.run_exit_code if self.accepted else K.EXIT_REJECTED", "        return self.run_exit_code",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[forged PASS: the report recomputed by the library over the real evidence]")]),
+    ("a required anchor that did not match is a finding", "verify.py", "    if require_anchor and not qe.anchor.matches:", "    if False:", [t(VERIFY, "test_a_required_anchor_or_plan_digest_that_was_not_supplied_is_a_finding")]),
+    ("a required plan digest that did not match is a finding", "verify.py", "    if require_plan_digest and not (qe.plan is not None and qe.plan.matches):", "    if False:", [t(VERIFY, "test_a_required_anchor_or_plan_digest_that_was_not_supplied_is_a_finding")]),
+    ("the qa-evidence findings are the verifier's findings", "verify.py", "    for f in qe.findings:\n        v.add(f.code, f.path, f.message)", "    for f in []:\n        v.add(f.code, f.path, f.message)",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[an extra file the manifest does not list]")]),
+    ("the cross-check of the in-run verdicts applies in verify", "bundle.py", '        if seen is not None and r["state"] in ("VERIFIED", "FAILED") and seen != _HARNESS_FOR_STATE[r["state"]]:', "        if False:",
+     [t(BUNDLE, "test_when_the_in_run_verifier_and_the_recomputation_disagree_nothing_is_certified")]),
+    ("the run ends by verifying in a separate process", "cli.py", "    code = _verify_in_a_new_process(bundle_dir, summary.plan_digest, summary.exit_code, out)", "    code = summary.exit_code",
+     [t(VERIFY, "test_run_exits_5_when_the_separate_verification_rejects_what_it_just_wrote")]),
     # ---- lane_browser.py -------------------------------------------------------------------------------------------------------------
     ("declared preconditions cannot be attested", "lane_browser.py", "        return True if not spec.preconditions else None", "        return True",
      [t(PARTS, "test_preconditions_and_fixtures_nothing_here_can_attest_are_unknown_never_true")]),

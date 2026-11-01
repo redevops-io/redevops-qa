@@ -29,6 +29,7 @@ from qa_robot import RobotConfig, RobotSuiteAdapter, observation_document, parse
 from . import constants as K, suites, watchdog
 from .bundle import LaneOutcome
 from .judge import observation_path
+from .natives import native_from_adapter_result
 from .plan import FrozenLane
 from .procs import child_env, run_child
 
@@ -83,22 +84,8 @@ def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, 
     files[f"logs/{fl.lane_id}.stdout.txt"] = (result.stdout_tail.encode("utf-8", "replace")[-65536:], "log")
     files[f"logs/{fl.lane_id}.stderr.txt"] = (result.stderr_tail.encode("utf-8", "replace")[-65536:], "log")
 
-    status, raw = "NATIVE_ERROR", "error"
-    if result.status is Status.PASS:
-        status, raw = "NATIVE_PASS", "PASS"
-    elif result.status is Status.FAIL:
-        status, raw = "NATIVE_FAIL", "FAIL"
-    elif result.status is Status.SKIP:
-        status, raw = "NATIVE_SKIPPED", "SKIP"
-    elif result.status is Status.ERROR:
-        if result.error_code is ErrorCode.TIMEOUT:
-            status, raw = "NATIVE_TIMEOUT", "timeout"
-        elif result.error_code is ErrorCode.CANCELLED:
-            raw = "cancelled"
-        elif result.error_code is ErrorCode.SPAWN_FAILED:
-            status, raw = "NATIVE_UNAVAILABLE", "spawn-failed"
-        else:
-            raw = ("error-" + str(result.error_code.value if result.error_code else "unknown")).lower()[:60]
+    mapped = native_from_adapter_result(result.status.value, result.error_code.value if result.error_code else None)
+    status, raw = mapped if mapped is not None else ("NATIVE_ERROR", "error")
     counts = None
     if status in ("NATIVE_PASS", "NATIVE_FAIL", "NATIVE_SKIPPED") and result.native_assertions:
         n = result.native_assertions
@@ -193,7 +180,7 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
     home.mkdir(parents=True)
     out.mkdir(parents=True)
     cfg = {"schema": K.LANE_INPUT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "lane_id": fl.lane_id, "engine": fl.engine, "suite": fl.suite, "suite_files": dict(fl.suite_files),
-           "run_id": run_id, "origin": origin, "deadline_s": max(1, math.ceil(deadline_s)), "out_dir": str(out), "workdir": str(lane_dir), "suite_dir": str(suites.SUITE_DIR),
+           "run_id": run_id, "origin": origin, "deadline_s": max(1, math.ceil(deadline_s)), "out_dir": str(out), "workdir": str(workdir), "suite_dir": str(suites.SUITE_DIR),
            "launcher": list(launcher) if launcher else None, "parent_pid": os.getpid()}
     spec_in = lane_dir / "input.json"
     spec_in.write_bytes(dumps_canonical(cfg))

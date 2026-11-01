@@ -234,7 +234,8 @@ def test_the_runner_browser_job_runs_only_the_browser_tests_in_a_scrubbed_enviro
 
 def test_the_runner_documentation_states_what_it_does_not_show():
     text = (ROOT / "packages" / "qa-runner" / "README.md").read_text(encoding="utf-8")
-    for needle in ("unkeyed", "does not say the application is correct", "Linux x86_64", "never installs", "source-available, not open source"):
+    for needle in ("unkeyed", "does not say the application is correct", "Linux x86_64", "never installs", "source-available, not open source", "What verification does and does not prove",
+                   "INTERNALLY CONSISTENT", "does not establish that the application is correct", "--anchor"):
         assert needle in text
     assert "open source" not in text.replace("not open source", "")
 

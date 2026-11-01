@@ -29,6 +29,8 @@ from .deps import Upstreams
 from .egress import policy_config
 from .errors import EnvironmentFault, PlanError
 from .judge import observation_document, observation_path
+from .exits import exit_code_for  # noqa: F401  (kept importable from here)
+from .natives import native_from_harness
 from .plan import FrozenLane, FrozenPlan, materialise_spec
 from .procs import FixtureApp, child_env, make_workdir, run_child
 
@@ -78,17 +80,6 @@ class RunSummary:
     cancelled: bool
 
 
-def exit_code_for(report: Mapping[str, Any], cancelled: bool = False) -> int:
-    outcome = report["verdict"]["outcome"]
-    if outcome == "VERIFIED":
-        return K.EXIT_VERIFIED
-    if outcome == "FAILED":
-        return K.EXIT_FAILED
-    if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]):
-        return K.EXIT_ENVIRONMENT
-    return K.EXIT_INCONCLUSIVE
-
-
 def _read_bounded(path: Path, limit: int) -> Optional[bytes]:
     try:
         if not path.is_file() or path.is_symlink() or path.stat().st_size > limit:
@@ -96,17 +87,6 @@ def _read_bounded(path: Path, limit: int) -> Optional[bytes]:
         return path.read_bytes()
     except OSError:
         return None
-
-
-def _native_from_harness(outcome: str, reason: Optional[str]) -> Tuple[str, str]:
-    """The engine-side status of a browser lane from the harness executor's own outcome. PASS maps to NATIVE_PASS only: it is never a verdict."""
-    if outcome == "PASS":
-        return "NATIVE_PASS", "PASS"
-    if outcome == "PRODUCT_FAIL":
-        return "NATIVE_FAIL", "PRODUCT_FAIL"
-    if reason and "DEADLINE" in reason.upper():
-        return "NATIVE_TIMEOUT", outcome
-    return "NATIVE_ERROR", outcome
 
 
 def lane_input(fl: FrozenLane, *, run_id: str, origin: str, out_dir: str) -> Dict[str, Any]:
@@ -183,7 +163,7 @@ def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], work
     elif proc.error_code == ErrorCode.SPAWN_FAILED:
         status, raw_status = "NATIVE_UNAVAILABLE", "spawn-failed"
     elif result is not None and result.get("status") == "COMPLETED" and proc.exit_code == 0 and not too_many:
-        status, raw_status = _native_from_harness(str(result.get("outcome")), result.get("reason"))
+        status, raw_status = native_from_harness(str(result.get("outcome")), result.get("reason"))
         exit_code = result.get("exit_code") if isinstance(result.get("exit_code"), int) else None
         rows = result.get("observations") if isinstance(result.get("observations"), list) else []
         if rows and all(isinstance(r, dict) and isinstance(r.get("assertion_id"), str) for r in rows):

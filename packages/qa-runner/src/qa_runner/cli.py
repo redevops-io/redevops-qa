@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
-"""``redevops-qa``: one command for the whole path: ``doctor``, ``freeze``, ``run``, ``report``, ``inspect`` and the one-shot ``demo`` (``verify`` follows).
+"""``redevops-qa``: one command for the whole path: ``doctor``, ``freeze``, ``run``, ``verify``, ``report``, ``inspect`` and the one-shot ``demo``.
 
 Exit status of ``run`` and ``demo``: 0 the run is VERIFIED; 1 an assertion FAILED; 2 the plan, the lock or an option was refused before anything ran; 3 a lane did not run
 to completion (error, timeout, cancelled, unavailable) or the environment could not provide what the run needs; 4 inconclusive (every lane completed but not every
 assertion is verified, or an engine and the verifier disagree); 6 an internal error of the runner. A crash is never reported as a product failure. ``freeze``: 0 or 2.
-``report`` and ``inspect``: 0 the bundle verified as internally consistent, 1 it did not, 2 it cannot be opened. They never recompute a verdict."""
+``report`` and ``inspect``: 0 the bundle verified as internally consistent, 1 it did not, 2 it cannot be opened. They never recompute a verdict.
+``verify``: the same table as ``run`` for an accepted bundle (0 VERIFIED, 1 FAILED, 3 a lane did not complete, 4 inconclusive), 5 when ANY finding rejects the evidence, 2 when the bundle
+cannot be opened. ``run`` and ``demo`` end by calling ``verify`` in a separate interpreter and exit 5 if it does not accept what the run just wrote."""
 from __future__ import annotations
 
 import argparse
@@ -23,11 +25,9 @@ from qa_evidence.sources import SourceError
 from . import __version__
 from . import constants as K
 from .deps import verified_bootstrap
-from .doctor import render, run_doctor
 from .errors import EnvironmentFault, PlanError, RunnerError
 from .golden import demo_plan
 from .inspect_cmd import inspect_text
-from .orchestrate import RunOptions, RunSummary, run_plan
 from .plan import MAX_PLAN_BYTES, FrozenPlan, freeze_plan, load_plan_or_lock
 
 
@@ -58,6 +58,14 @@ def _parser() -> argparse.ArgumentParser:
     sp.add_argument("--out", default="qa-evidence", metavar="DIR", help="directory to create the bundle in: DIR/<run id> (default: ./qa-evidence)")
     run_options(sp)
 
+    sp = sub.add_parser("verify", help="re-verify a finished run from its bundle alone, offline: recompute every digest, the frozen assertions and every verdict; exit 5 on any finding")
+    sp.add_argument("bundle", help="a bundle directory or archive")
+    sp.add_argument("--anchor", metavar="sha256:HEX", help="external anchor value: the manifest digest published outside the bundle (print it with `run`, publish it where the producer cannot rewrite it)")
+    sp.add_argument("--plan-digest", metavar="sha256:HEX", help="the plan digest printed by `freeze`, obtained from outside the bundle")
+    sp.add_argument("--require-anchor", action="store_true", help="a finding unless --anchor matches the recomputed manifest digest")
+    sp.add_argument("--require-plan-digest", action="store_true", help="a finding unless --plan-digest matches the plan digest of the bundle")
+    sp.add_argument("--json", action="store_true", help="print the result as JSON")
+
     for name, text in (("report", "print the report of a bundle for people (text, JSON or one HTML file); it verifies the bundle first and never recomputes a verdict"),
                        ("inspect", "list what is in a bundle: files, digests, tool versions, lanes and the heads of the chains inside it")):
         sp = sub.add_parser(name, help=text)
@@ -81,6 +89,7 @@ def _read_plan(path: str) -> bytes:
 
 
 def _doctor(args, out: TextIO, err: TextIO) -> int:
+    from .doctor import render, run_doctor
     engines = (K.ENGINE_PLAYWRIGHT, K.ENGINE_ROBOT)
     if args.plan:
         up = verified_bootstrap()
@@ -114,6 +123,7 @@ def _freeze(args, out: TextIO, err: TextIO) -> int:
 
 
 def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text: bool = False) -> int:
+    from .orchestrate import RunOptions, run_plan
     target = Path(args.out)
     if args.run_id is not None and (target / args.run_id).exists():
         raise PlanError("OUTPUT_EXISTS", f"{safe_text(str(target / args.run_id))} already exists: a bundle is never overwritten")
@@ -131,13 +141,47 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
     target.mkdir(parents=True, exist_ok=True)
     summary.bundle.write_directory(str(bundle_dir))
     _print_summary(summary, bundle_dir, out)
+    code = _verify_in_a_new_process(bundle_dir, summary.plan_digest, summary.exit_code, out)
     if report_text:
         print("", file=out)
         out.write(render_text(inspect_bundle(str(bundle_dir))))          # no plan digest supplied: the one this process computed would only match itself
-    return summary.exit_code
+    return code
 
 
-def _print_summary(summary: RunSummary, bundle_dir: Path, out: TextIO) -> None:
+def _verify_in_a_new_process(bundle_dir: Path, plan_digest: str, expected_exit: int, out: TextIO) -> int:
+    """The run's own verification: ``verify`` in a fresh interpreter with a fresh environment (no state shared with this process), given the bundle and the plan digest this process
+    froze. The plan digest comes from the same process that ran the plan, so it checks that the run wrote what it froze, not that the plan is the one somebody asked for."""
+    import subprocess
+    from .procs import child_env, make_workdir
+    import shutil
+    home = make_workdir("redevops-qa-verify-")
+    try:
+        done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "verify", str(bundle_dir.resolve()), "--plan-digest", plan_digest, "--json"], env=child_env(home), cwd=home,
+                              capture_output=True, text=True, timeout=300)
+        try:
+            doc = json.loads(done.stdout)
+        except ValueError:
+            doc = None
+    except (OSError, subprocess.SubprocessError):
+        done, doc = None, None
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+    if doc is None or done is None or done.returncode == K.EXIT_INTERNAL:
+        print("  independent verification (a separate process): COULD NOT RUN; nothing is accepted", file=out)
+        return K.EXIT_REJECTED
+    if not doc["accepted"]:
+        codes = ", ".join(sorted({safe_text(f["code"], 60) for f in doc["findings"]}))
+        print(f"  independent verification (a separate process): REJECTED ({codes})", file=out)
+        return K.EXIT_REJECTED
+    if doc["exit_code"] != expected_exit:
+        print(f"  independent verification (a separate process): ACCEPTED, but its exit status ({doc['exit_code']}) is not the run's ({expected_exit}); nothing is accepted", file=out)
+        return K.EXIT_REJECTED
+    print(f"  independent verification (a separate process): ACCEPTED as internally consistent; {doc['agreeing_assertions']} of {doc['recomputed_assertions']} verdict(s) recomputed from the bundle alone "
+          "agree with the report; no external anchor", file=out)
+    return expected_exit
+
+
+def _print_summary(summary, bundle_dir: Path, out: TextIO) -> None:
     report = json.loads(summary.bundle.files["report.json"])
     print(f"run {summary.run_id}: {report['verdict']['outcome']} ({report['verdict']['reason_code']})" + ("  [cancelled]" if summary.cancelled else ""), file=out)
     acc = report["accounting"]
@@ -171,6 +215,16 @@ def _run(args, out: TextIO, err: TextIO) -> int:
 def _demo(args, out: TextIO, err: TextIO) -> int:
     up = verified_bootstrap()
     return _execute(freeze_plan(up, demo_plan()), args, out, err, report_text=True)
+
+
+def _verify(args, out: TextIO, err: TextIO) -> int:
+    from .verify import render_text as verify_text, verify_location
+    try:
+        v = verify_location(args.bundle, anchor=args.anchor, plan_digest=args.plan_digest, require_anchor=args.require_anchor, require_plan_digest=args.require_plan_digest)
+    except SourceError as exc:
+        raise PlanError("BUNDLE_UNREADABLE", safe_text(str(exc))) from None
+    out.write(json.dumps(v.to_json(), sort_keys=True, indent=2) + "\n" if args.json else verify_text(args.bundle, v))
+    return v.exit_code
 
 
 def _inspection(args):
@@ -219,7 +273,7 @@ def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Op
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else K.EXIT_USAGE
     try:
-        return {"doctor": _doctor, "freeze": _freeze, "run": _run, "demo": _demo, "report": _report, "inspect": _inspect}[args.command](args, out, err)
+        return {"doctor": _doctor, "freeze": _freeze, "run": _run, "verify": _verify, "demo": _demo, "report": _report, "inspect": _inspect}[args.command](args, out, err)
     except PlanError as exc:
         print(f"error: {safe_text(str(exc))}", file=err)
         return K.EXIT_USAGE
