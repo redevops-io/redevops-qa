@@ -9,8 +9,7 @@ What these tests establish, against the pinned Chromium and Playwright:
   3. CONTROLS that show the tests can fail: a browser launched with no proxy at all, and one launched with a proxy but without
      the ``<-loopback>`` override, both reach the loopback fixture WITHOUT the gateway seeing anything.
 
-NOT RUN in the environment this file was written in (no Playwright package, no browser, no network). It runs in the browser CI
-job only. If the control in (3b) ever fails, the pinned Playwright or Chromium changed how the implicit loopback bypass works
+Runs in the browser CI job only (it needs Playwright and Chromium and never skips). If the control in (3b) ever fails, the pinned Playwright or Chromium changed how the implicit loopback bypass works
 and ``qa_egress.launch`` must be revisited; that is what this lane is for.
 """
 import pytest
@@ -46,7 +45,8 @@ def lane(playwright_available):
             entry("127.0.0.1", port, "127.0.0.1/32"), entry("localhost", port, "127.0.0.1/32"), entry("10.1.2.3", port, "10.1.2.3/32"),
             # an operator who lists a metadata address by mistake: it must still be refused
             entry("169.254.169.254", port, "169.254.169.254/32"), entry("169.254.169.254", 80, "169.254.169.254/32"),
-            entry("fd00:ec2::254", 80, "fd00:ec2::254/128")))
+            # an AllowEntry host that is an IPv6 literal is written in its URL form, bracketed (the policy refuses a bare one)
+            entry("[fd00:ec2::254]", 80, "fd00:ec2::254/128")))
         resolver = ScriptedResolver({"localhost": [["127.0.0.1"]]})
         spy = SpyOpener({"127.0.0.1": port, "10.1.2.3": port})
         server = GatewayServer(policy, resolver, opener=spy)

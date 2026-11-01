@@ -38,6 +38,7 @@ from .errors import DriverUnavailable
 
 DENIED_HEADER = "x-egress-decision"          # set by the egress gateway on a refusal it answers itself
 MAX_ELEMENTS_PER_QUERY = 200
+_REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
 _ARIA_LINE = re.compile(r'^\s*-\s+([A-Za-z][\w-]*)(?:\s+"((?:[^"\\]|\\.)*)")?')
 
 _JS_OBSCURED = """(el) => {
@@ -65,6 +66,26 @@ _JS_READ = """(el) => {
 _JS_META = """() => ({title: document.title || '', lang: document.documentElement.lang || '', ready: document.readyState,
   elements: document.getElementsByTagName('*').length, links: document.links.length, forms: document.forms.length,
   inputs: document.querySelectorAll('input,textarea,select').length})"""
+
+
+def _resolve_location(base: str, location: str) -> str:
+    """The absolute URL a ``Location`` header names, for the gate to decide. Only the origin matters to the gate, so this
+    resolves the forms that can change it (absolute, ``//host``, ``/path``) and treats the rest as the base's origin. A value
+    Chromium would normalise in a way this does not model (control characters, a backslash, which Chromium reads as ``/``
+    for http and https) is refused by raising: the caller fails the hop closed."""
+    if any(ord(c) < 0x21 or ord(c) == 0x7F or c == "\\" for c in location):
+        raise ValueError("unmodelled Location form")
+    match = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*):", location)
+    if match is not None:
+        return location
+    origin = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*:)//[^/?#]*", base)
+    if origin is None:
+        raise ValueError("no base origin")
+    if location.startswith("//"):
+        return origin.group(1) + location
+    if location.startswith("/"):
+        return origin.group(0) + location
+    return origin.group(0) + "/" + location
 
 
 def _css_string(text: str) -> str:
@@ -426,6 +447,54 @@ class PlaywrightSession:
         page.on("crash", lambda _: setattr(self, "_crashed", True))
         page.on("dialog", self._on_dialog)
         page.on("filechooser", lambda chooser: None)       # never fulfilled: no file is ever offered to a page
+        if self._spec.request_gate is not None:
+            self._gate_redirects(page)
+
+    def _gate_redirects(self, page: Any) -> None:
+        """Put every redirect hop through the request gate *before* the browser requests it.
+
+        ``context.route`` only sees the first URL of a redirect chain: once a route continues the request, Chromium follows the
+        ``Location`` itself and the hop never reaches the route (Playwright documents this for ``page.route``; the real-browser
+        lane showed a 302 to an unlisted host was fetched, with no gate decision). So a DevTools ``Fetch`` interception at the
+        *response* stage, on its own CDP session, sees each 3xx answer with its ``Location`` while the hop is still unrequested.
+        A hop the gate refuses is failed as ``BlockedByClient`` (the same outcome as a refused route); every other response is
+        continued untouched. Anything unexpected while deciding fails the request closed."""
+        cdp = self._context.new_cdp_session(page)
+
+        def paused(event: Dict[str, Any]) -> None:
+            request_id = event["requestId"]
+            allowed = False
+            try:
+                status = event.get("responseStatusCode")
+                if status not in _REDIRECT_STATUSES:
+                    allowed = True
+                else:
+                    request = event.get("request") or {}
+                    headers = {str(h.get("name", "")).lower(): str(h.get("value", "")) for h in event.get("responseHeaders") or ()}
+                    location = headers.get("location")
+                    if location is None:
+                        allowed = True                       # a 3xx without Location is not followed by the browser
+                    else:
+                        target = _resolve_location(str(request.get("url", "")), location)
+                        info = RequestInfo(url=target, resource_type=str(event.get("resourceType", "")).lower(),
+                                           is_navigation=event.get("resourceType") == "Document",
+                                           method=str(request.get("method", "GET")))
+                        allowed = bool(self._spec.request_gate(info))
+                        if not allowed:
+                            self._log(self._network, "network", NetworkEvent(
+                                method=info.method, url=target, resource_type=info.resource_type, blocked=True))
+            except Exception:
+                allowed = False
+            try:
+                if allowed:
+                    cdp.send("Fetch.continueResponse", {"requestId": request_id})
+                else:
+                    cdp.send("Fetch.failRequest", {"requestId": request_id, "errorReason": "BlockedByClient"})
+            except Exception:
+                pass                                         # the page went away while the hop was being decided
+
+        cdp.on("Fetch.requestPaused", paused)
+        cdp.send("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Response"}]})
 
     def _log(self, ring: Deque[Any], which: str, event: Any) -> None:
         if len(ring) == ring.maxlen:
@@ -556,21 +625,54 @@ class PlaywrightSession:
                     continue
                 if query.name is not None and not self._name_ok(name, query.name, query.exact):
                     continue
-            handle = self._call(item.element_handle, timeout=1000)
-            self._counter += 1
-            ref = f"e{self._counter}"
-            self._handles[ref] = handle
+            fresh = self._call(item.element_handle, timeout=1000)
+            ref, handle = self._ref_for(fresh)
             out.append(self._info(ref, handle, role, name))
         return tuple(out)
+
+    def _ref_for(self, fresh: Any) -> Tuple[str, Any]:
+        """The ref for an element, stable for as long as the element stays attached (the contract of ``ElementInfo.ref``).
+
+        The adapter re-queries before it acts and requires the element it resolved earlier to be among the new results *by ref*.
+        Playwright returns a new ``ElementHandle`` for every query, so a ref minted per query would never match and every act
+        would fail with LOCATOR_NOT_FOUND. The new handle is therefore compared, in one page round trip and by object identity
+        (``===``), with the handles already issued: a match reuses that ref and drops the new handle; no match mints a new ref."""
+        known = list(self._handles.items())
+        if known:
+            index = self._call(fresh.evaluate, "(el, others) => others.findIndex((o) => o === el)", [h for _, h in known])
+            if isinstance(index, int) and 0 <= index < len(known):
+                try:
+                    fresh.dispose()
+                except Exception:
+                    pass
+                return known[index]
+        self._counter += 1
+        ref = f"e{self._counter}"
+        self._handles[ref] = fresh
+        return ref, fresh
 
     @staticmethod
     def _name_ok(actual: str, wanted: str, exact: bool) -> bool:
         return actual == wanted if exact else wanted.lower() in actual.lower()
 
+    def _editable(self, handle: Any) -> bool:
+        """Whether the element accepts text. Playwright's ``is_editable`` *raises* (it does not return False) for an element that
+        is not a form control, a ``contenteditable`` host or a role that allows ``aria-readonly`` (a button, a link, a heading):
+        such an element is simply not editable, so that one error is the answer ``False``. Any other failure is classified."""
+        self._live()
+        try:
+            return bool(handle.is_editable())
+        except DriverFault:
+            raise
+        except Exception as exc:
+            if "does not have a role allowing [aria-readonly]" in str(exc):
+                return False
+            raise classify_error(exc) from None
+
     def _info(self, ref: str, handle: Any, role: str, name: str) -> ElementInfo:
         visible = bool(self._call(handle.is_visible))
         enabled = bool(self._call(handle.is_enabled))
-        editable = bool(self._call(handle.is_editable))
+        editable = self._editable(handle)
         kind = str(self._call(handle.get_attribute, "type") or "").lower()
         covered = self._call(handle.evaluate, _JS_OBSCURED) if visible else None
         return ElementInfo(ref=ref, role=role, name=name, visible=visible, enabled=enabled, editable=editable,
