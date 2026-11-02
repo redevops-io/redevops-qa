@@ -11,14 +11,15 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from pathlib import Path
 from typing import Optional, Sequence
 
 from qa_adapter_kit import (AdapterClass, AdapterManifest, ArtifactRef, CommandSpec, FrameworkRef, ImportedReport, Limits, MalformedReport,
                             ModelError, PinnedFile, ProcessOutcome, RunLayout, SuiteRunRequest)
 
-from .output_xml import parse_output_xml
+from qa_adapter_kit.boundedread import UnsafeRead, read_regular
+
+from .output_xml import MAX_OUTPUT_BYTES, parse_output_xml
 from .policy import RobotConfig, check_run, scan_suite
 
 ADAPTER_ID = "robot-suite"
@@ -77,9 +78,10 @@ class RobotSuiteAdapter:
             raise MalformedReport(f"Robot Framework ended with exit code {outcome.exit_code}, so its report is not trusted")
         raw_path = self._raw_dir(layout) / "output.xml"
         try:
-            data = raw_path.read_bytes()
-        except OSError:
-            raise MalformedReport("output.xml was not written") from None
+            # one descriptor, regular files only, byte cap and deadline, no symbolic link below the engine's home (a FIFO where the report should be would hang a plain read)
+            data = read_regular(str(raw_path), max_bytes=MAX_OUTPUT_BYTES, deadline_s=30.0, follow_symlinks=False, root=str(layout.home))
+        except UnsafeRead:
+            raise MalformedReport("output.xml was not written, is not a regular file, or is too large") from None
         parsed = parse_output_xml(data)
         scan = self._scan or scan_suite(layout.workspace, layout.suite, self.config)
         check_run(parsed.owners, parsed.keyword_names, scan, self.config)
@@ -90,6 +92,6 @@ class RobotSuiteAdapter:
         (layout.output_dir / SUMMARY_NAME).write_text(json.dumps(summary, sort_keys=True, indent=1), encoding="utf-8")
         artifacts = [ArtifactRef(path=SUMMARY_NAME, media_type="application/json", role="native-summary")]
         if self.config.keep_raw_output:
-            shutil.copyfile(raw_path, layout.output_dir / "output.xml")
+            (layout.output_dir / "output.xml").write_bytes(data)             # the bytes that were read and parsed, not a second read of the path
             artifacts.append(ArtifactRef(path="output.xml", media_type="application/xml", role="native-report"))
         return ImportedReport(assertions=parsed.assertions, artifacts=artifacts)

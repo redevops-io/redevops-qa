@@ -22,6 +22,7 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from .adapter import (ActionOutcome, ArtifactRef, ImportedReport, InteractiveAdapter, InteractiveLayout, MalformedReport, RunLayout,
                       SuiteAdapter)
+from .boundedread import UnsafeRead, read_regular
 from .errors import AdapterFault, AdapterKitError, AdapterUnavailable, ModelError, PathRefused, PolicyRefused
 from .models import (AdapterManifest, AdapterResult, EvidenceArtifact, InteractiveActionRequest, InteractiveObservation, Limits, NativeAssertion,
                      SuiteRunRequest, aggregate_status)
@@ -61,12 +62,13 @@ def _collect_artifacts(refs: Sequence[ArtifactRef], policy: PathPolicy, output_d
             raise PathRefused(f"artifact {ref.path!r} is outside the output directory or on the prohibited list") from None
         if output_dir != real and output_dir not in real.parents:
             raise PathRefused(f"artifact {ref.path!r} is not inside the output directory")
-        if not real.is_file():
-            raise AdapterKitError(f"declared artifact {ref.path!r} was not produced", ErrorCode.MISSING_ARTIFACT)
-        size = real.stat().st_size
-        if size > limits.max_artifact_bytes:
-            raise AdapterKitError(f"artifact {ref.path!r} is larger than {limits.max_artifact_bytes} bytes", ErrorCode.ARTIFACT_REFUSED)
-        data = real.read_bytes()
+        try:
+            data = read_regular(str(real), max_bytes=limits.max_artifact_bytes, deadline_s=30.0, follow_symlinks=False, root=str(output_dir))     # one descriptor: a FIFO or a link is refused, never waited for
+        except UnsafeRead as exc:
+            if exc.code == "TOO_LARGE":
+                raise AdapterKitError(f"artifact {ref.path!r} is larger than {limits.max_artifact_bytes} bytes", ErrorCode.ARTIFACT_REFUSED) from None
+            raise AdapterKitError(f"declared artifact {ref.path!r} was not produced as a regular file", ErrorCode.MISSING_ARTIFACT) from None
+        size = len(data)
         if ref.media_type.startswith(_TEXT_MEDIA) and any(s.encode() in data for s in secrets if s):
             raise AdapterKitError(f"artifact {ref.path!r} contains a secret value and is not kept as evidence", ErrorCode.ARTIFACT_REFUSED)
         out.append(EvidenceArtifact(path=str(real.relative_to(output_dir)), media_type=ref.media_type, sha256=hashlib.sha256(data).hexdigest(),

@@ -169,7 +169,7 @@ def test_a_reference_check_that_agrees_with_a_failure_leaves_the_failure(up, lan
 def test_the_request_expectations_and_probes_are_part_of_the_plan_digest(up):
     base = freeze_plan(up, golden_plan())
     for mutate in (lambda l: l["requests"]["required"].pop(), lambda l: l["requests"]["allowed"].append("GET /admin"), lambda l: l["probes"].update({"A-NOTIF-ON": "ui-only"}),
-                   lambda l: l["probes"].update({"A-SAVED": "settings-persistence"})):
+                   lambda l: l.update(deadline_s=3600)):
         plan = golden_plan()
         mutate(plan["lanes"][0])
         assert freeze_plan(up, plan).plan_digest != base.plan_digest
