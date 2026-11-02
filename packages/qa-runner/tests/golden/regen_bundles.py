@@ -15,10 +15,17 @@ from qa_runner.plan import freeze_plan
 HERE = Path(__file__).resolve().parent
 up = verified_bootstrap()
 frozen = freeze_plan(up, demo_plan())
-for defect in ("none", "discount"):
+for defect in ("none", "discount"):                       # (the over-cap bundle is written below)
     summary = run_plan(up, frozen, RunOptions(defect=defect, run_id=f"r0-golden-{defect}"))
     target = HERE / f"bundle-{defect}.tar"
     if target.exists():
         target.unlink()
     summary.bundle.write_archive(str(target))
     print(defect, summary.outcome, target.stat().st_size, "bytes", summary.manifest_digest, file=sys.stderr)
+# a run that hit the evidence cap (150000 bytes): the incomplete result, both lanes cut; ``verify`` accepts it as such (exit 3) and the over-cap tests start from it
+summary = run_plan(up, frozen, RunOptions(defect="none", run_id="r0-golden-overcap", max_evidence_bytes=150_000))
+target = HERE / "bundle-overcap.tar"
+if target.exists():
+    target.unlink()
+summary.bundle.write_archive(str(target))
+print("overcap", summary.outcome, target.stat().st_size, "bytes", summary.manifest_digest, file=sys.stderr)

@@ -98,7 +98,7 @@ def lane_outcomes_from(up, files: Mapping[str, bytes]):
     return outcomes
 
 
-def forge_consistently(up, files: Mapping[str, bytes], *, edit_lane: Callable, frozen=None) -> Files:
+def forge_consistently(up, files: Mapping[str, bytes], *, edit_lane: Callable, frozen=None, extensions: Optional[Mapping] = None, logs_extra: Optional[Mapping[str, bytes]] = None) -> Files:
     """Hand the (edited) lanes and the plan lock to the real builder: every digest, count, verdict and the manifest are recomputed, so the result is internally consistent."""
     import dataclasses
     from qa_runner.bundle import RunInputs, build_run_bundle
@@ -109,5 +109,6 @@ def forge_consistently(up, files: Mapping[str, bytes], *, edit_lane: Callable, f
     outcomes = {lid: edit_lane(lid, o) for lid, o in outcomes.items()}
     logs = {p: files[p] for p in files if p.startswith("logs/") and p.count("/") == 1 and p not in [f"logs/{l}.{s}.txt" for l in outcomes for s in ("stdout", "stderr")]}
     inputs = RunInputs(frozen=frozen, run_id=report["run_id"], started_at=report["started_at"], finished_at=report["finished_at"], environment=report["environment"],
-                       lanes=tuple(outcomes[l.lane_id] for l in frozen.lanes), logs=logs, extensions=report.get("extensions") or {})
+                       lanes=tuple(outcomes[l.lane_id] for l in frozen.lanes), logs={**logs, **dict(logs_extra or {})},
+                       extensions={**(report.get("extensions") or {}), **dict(extensions or {})})
     return dict(build_run_bundle(up, inputs).files)

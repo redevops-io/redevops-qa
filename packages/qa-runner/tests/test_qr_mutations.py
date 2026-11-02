@@ -15,6 +15,7 @@ PARTS = "test_qr_lane_parts.py"
 FREEZE = "test_qr_freeze_cli.py"
 CHILD = "test_qr_lane_child.py"
 VERIFY = "test_qr_verify.py"
+OC = "test_qr_verify_overcap.py"
 TAMPER = "test_qr_tamper_suite.py"
 SCRIPT = "test_qr_judge_script.py"
 ROBOT = "test_qr_robot_lane.py"
@@ -297,6 +298,20 @@ CASES = [
     ("the Robot lane's control file is not charged to the evidence budget", "lane_robot.py", 'raw = read_regular(str(out / "outcome.json"), max_bytes=K.MAX_CHILD_JSON_BYTES, deadline_s=30.0, follow_symlinks=False, root=budget.root)', 'raw = budget.read(out / "outcome.json", K.MAX_CHILD_JSON_BYTES, "outcome.json")', [t("test_qr_robot_lane.py", "test_a_robot_lane_cut_at_any_cap_is_labelled_evidence_over_cap_never_a_child_exit")]),
     ("the Robot lane's counts are checked", "lane_robot.py", '        if counts is not None and not (isinstance(counts, dict)', '        if False and counts is not None and not (isinstance(counts, dict)', [t("test_qr_robot_lane.py", "test_an_outcome_file_with_a_field_of_the_wrong_kind_is_not_taken_in")]),
     ("incomplete evidence is an environment limit, exit 3", "exits.py", ' or "evidence_incomplete" in (report.get("extensions") or {}):', ':', [t("test_qr_robot_lane.py", "test_a_robot_lane_cut_at_any_cap_is_labelled_evidence_over_cap_never_a_child_exit")]),
+    # ---- an over-cap run and a rejected bundle (retest round 2: R2-1, R2-2) ----------------------------------------------------------------
+    ("a lane the report declares over the cap may differ from its files", "verify.py", "        elif derived is not None and derived != got and got == OVER_CAP and lid in tol.over:", "        elif False:", [t(OC, "test_an_honest_over_cap_run_is_accepted_as_an_incomplete_result_with_the_environment_exit")]),
+    ("the tolerance needs the report to say the evidence is incomplete", "verify.py", "    if not incomplete:\n        return Tolerance()", "    if False:\n        return Tolerance()", [t(OC, "test_a_lane_relabelled_as_over_cap_without_the_report_saying_the_evidence_is_incomplete_is_still_a_relabel")]),
+    ("a VERIFIED run cannot have incomplete evidence", "verify.py", '    if report["verdict"]["outcome"] == "VERIFIED":\n        v.add("EVIDENCE_INCOMPLETE_BUT_VERIFIED"', '    if False:\n        v.add("EVIDENCE_INCOMPLETE_BUT_VERIFIED"', [t(OC, "test_a_forged_evidence_incomplete_cannot_make_a_verified_run_acceptable")]),
+    ("the list of unkept files has the shape the runner writes", "verify.py", "all(isinstance(x, str) and NOT_KEPT_NAME_RE.fullmatch(x) for x in listed)", "True", [t(OC, "test_a_list_of_unkept_files_that_is_not_of_the_shape_the_runner_writes_is_a_finding")]),
+    ("a missing blob is excused only when the run lists it", "verify.py", " and _blob_name_at(rec, f.where, lid) in tol.names:", ":", [t(OC, "test_the_declaration_does_not_excuse_a_file_the_run_did_not_list")]),
+    ("a suite file is excused only when the run lists it", "verify.py", 'f"lanes/{lane.lane_id}/suite/{rel}" in tol.names:', "True:", [t(OC, "test_a_reviewed_suite_file_may_be_absent_from_a_lane_over_the_cap_only_when_the_run_lists_it")]),
+    ("the list of unkept files is an expected file only for an incomplete run", "verify.py", "    if tol.incomplete:\n        names.add(K.NOT_KEPT_PATH)", "    names.add(K.NOT_KEPT_PATH)", [t(OC, "test_a_list_of_unkept_files_in_a_bundle_whose_report_does_not_say_it_is_incomplete_is_an_unexpected_file")]),
+    ("a rejected bundle shows no claimed outcome in json", "verify.py", '"run_outcome": self.outcome if self.accepted else None,', '"run_outcome": self.outcome,', [t(OC, "test_a_rejected_bundle_shows_no_claimed_outcome_in_text_or_json_and_keeps_its_findings")]),
+    ("a rejected bundle shows no disagreements in json", "verify.py", "self.disagreements if self.accepted else []", "self.disagreements", [t(OC, "test_a_rejected_bundle_shows_no_claimed_outcome_in_text_or_json_and_keeps_its_findings")]),
+    ("a rejected bundle shows no claimed outcome in text", "verify.py", "    if v.accepted and v.outcome is not None:", "    if v.outcome is not None:", [t(OC, "test_a_rejected_bundle_shows_no_claimed_outcome_in_text_or_json_and_keeps_its_findings")]),
+    ("the run lists what its budget did not keep", "orchestrate.py", "        logs[K.NOT_KEPT_PATH] = _not_kept_document(not_kept)\n", "        pass\n", [t(ORCH, "test_a_run_over_its_evidence_budget_keeps_what_fits_says_so_and_is_never_a_crash")]),
+    ("what the Robot child could not keep reaches the run", "lane_robot.py", "        budget.dropped.extend(not_kept)", "        pass", [t("test_qr_lane_child.py", "test_what_the_lane_child_could_not_keep_is_carried_to_the_run_so_that_the_report_names_it")]),
+    ("the Robot child writes the names it could not keep", "lane_robot.py", '"not_kept": [str(x)[:160] for x in not_kept][:MAX_NOT_KEPT],', '"not_kept": [],', [t("test_qr_lane_child.py", "test_what_the_lane_child_could_not_keep_is_carried_to_the_run_so_that_the_report_names_it")]),
     ("limits are parsed strictly", "limits.py", "    if value is None or not math.isfinite(value) or not 1.0 <= value <= MAX_SECONDS:", "    if value is None:", [t("test_qr_limits.py", "test_a_bad_timeout_is_refused_by_name")]),
     ("byte limits are parsed strictly", "limits.py", "    if value is None or not MIN_BYTES <= value <= MAX_BYTES:", "    if value is None:", [t("test_qr_limits.py", "test_a_bad_byte_limit_is_refused_by_name")]),
     ("a bad evidence limit is refused before anything starts", "orchestrate.py", "    _evidence_cap(opts)                                   # a bad", "    pass                                   # a bad", [t("test_qr_limits.py", "test_a_bad_evidence_limit_is_refused_before_a_directory_is_made_or_anything_starts")]),

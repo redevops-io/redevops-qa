@@ -218,3 +218,26 @@ def test_freeze_then_run_the_lock_end_to_end(tmp_path):
     assert redevops.returncode == 0 and "ACCEPTED" in redevops.stdout and "matches the supplied value" in redevops.stdout, redevops.stdout + redevops.stderr
     wrong = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "verify", str(bundle), "--anchor", "sha256:" + "0" * 64], env=env, capture_output=True, text=True, timeout=120)
     assert wrong.returncode == 5 and "REJECTED" in wrong.stdout and "ANCHOR_MISMATCH" in wrong.stdout
+
+
+@pytest.mark.parametrize("cap", [1_200, 5_000, 20_000, 60_000, 100_000, 150_000, 190_000])
+def test_a_run_over_the_evidence_cap_is_an_incomplete_result_with_exit_3_and_its_own_re_verification_accepts_it(tmp_path, cap):
+    """Retest R2-1: the run's own re-verification rejected an over-cap run (exit 5, NATIVE_STATUS_RELABELLED / RUN_RECORD_MISSING_BLOB). Both real engines, the cap cutting the browser lane, the Robot
+    lane or both; the result is the decided one: incomplete, never VERIFIED, exit 3, and `verify` over the written bundle gives the same."""
+    env = {**child_env(str(tmp_path)), "REDEVOPS_QA_MAX_EVIDENCE_BYTES": str(cap)}
+    out = tmp_path / "out"
+    done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "demo", "--out", str(out)], env=env, cwd=str(tmp_path), capture_output=True, text=True, timeout=240)
+    assert done.returncode == K.EXIT_ENVIRONMENT, done.stdout + done.stderr
+    assert "re-verification in a fresh process" in done.stdout and "ACCEPTED as internally consistent" in done.stdout and "REJECTED" not in done.stdout, done.stdout
+    assert "VERIFIED (ALL_ASSERTIONS_VERIFIED)" not in done.stdout
+    (bundle,) = list(out.iterdir())
+    again = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "verify", str(bundle), "--json"], env=env, capture_output=True, text=True, timeout=120)
+    doc = json.loads(again.stdout)
+    assert again.returncode == K.EXIT_ENVIRONMENT and doc["accepted"] is True and doc["exit_code"] == K.EXIT_ENVIRONMENT and doc["findings"] == [] and doc["run_outcome"]["outcome"] != "VERIFIED"
+    assert any("INCOMPLETE" in n for n in doc["notes"])
+
+
+def test_a_run_below_the_cap_is_unchanged_by_the_cap_setting(tmp_path):
+    env = {**child_env(str(tmp_path)), "REDEVOPS_QA_MAX_EVIDENCE_BYTES": str(100 * 1024 * 1024)}
+    done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "demo", "--out", str(tmp_path / "out")], env=env, cwd=str(tmp_path), capture_output=True, text=True, timeout=240)
+    assert done.returncode == 0 and "VERIFIED (ALL_ASSERTIONS_VERIFIED)" in done.stdout and "ACCEPTED as internally consistent" in done.stdout

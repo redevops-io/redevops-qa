@@ -153,7 +153,7 @@ native status that says so; its assertions are `INCONCLUSIVE`; the run is never 
 
 Two mechanisms, for two kinds of files.
 
-* **Paths a user supplies** (a plan or lock, a bundle to report or inspect, and from the next part a bundle to verify) are read by a child process (`isolated.py`, `read_worker.py`): the parent holds nothing but what
+* **Paths a user supplies** (a plan or lock, and a bundle to `verify`, `report` or `inspect`) are read by a child process (`isolated.py`, `read_worker.py`): the parent holds nothing but what
   came through a pipe, stops taking bytes at the cap (and kills the child), stops waiting at a wall-clock deadline (`REDEVOPS_QA_READ_TIMEOUT`, default 30 s; bundles `REDEVOPS_QA_BUNDLE_READ_TIMEOUT`, default
   120 s) and kills the child, and on SIGINT, SIGTERM or SIGHUP kills the child and ends with exit 3. The child opens the path without blocking (`O_NONBLOCK`), `fstat`s the same descriptor and refuses anything
   that is not a regular file (a FIFO, a device, a directory: never read, `/dev/zero` included), refuses a file above the cap before reading, and reads with a running total (a growing file stops at the cap).
@@ -176,7 +176,7 @@ Two mechanisms, for two kinds of files.
 
 **Tested** (each in a child with a hard timeout and, where the platform enforces one, an address-space cap; none opens an unbounded source): a reading child that never answers is killed at the deadline and is
 gone; a child that writes without end is stopped at the byte cap; SIGINT, SIGTERM, SIGHUP end the wait and the child; refusals of a FIFO with no writer, a FIFO with a capped writer (nothing is consumed), a
-character device, a symlink, a sparse file of 300 MiB, a size that lies at the open and a growing file; the same for `run` and `doctor --plan`; the evidence budget and its fallback; the reference check against a
+character device, a symlink, a sparse plan or lock of 300 MiB, a sparse bundle archive of 3 GiB and a sparse bundle member of 400 MiB (a finding, never read), a size that lies at the open and a growing file; the same for `run`, `doctor --plan`, `verify`, `report` and `inspect` (a stalled bundle read ends at the deadline, a cancel during it ends with exit 3); the evidence budget and its fallback (a run over the cap is an incomplete result, exit 3, that its own re-verification and `verify` accept as such: both real engines at seven caps, the Robot lane cut at the lowest ones); the reference check against a
 capped 64 MiB answer, a one-byte-at-a-time body, dripped headers and a cancel during a stall.
 **Not tested, only inferred:** a child blocked in UNINTERRUPTIBLE kernel I/O on a hard-hung network or FUSE mount. SIGKILL is sent and the parent does not wait for the child past a short grace, but the
 process itself may stay until the kernel returns the I/O (a subprocess timeout does not guarantee that every blocked kernel operation ends). No test has a stalled mount; the "never answers" child is a stand-in.
@@ -252,6 +252,15 @@ What an accepted bundle means, and what it does not:
   in a note.
 * **The offline mutation suite cannot reach the end-to-end tests** (`-m e2e` is an unknown marker under its strict configuration), so no mutant covers process cleanup end to end; the end-to-end job
   runs those tests unmutated.
+
+### A run that hit the evidence cap
+
+A run whose lanes' files did not fit `REDEVOPS_QA_MAX_EVIDENCE_BYTES` is an explicit INCOMPLETE result: the lane that lost files is an engine error `evidence-over-cap`, the report says `extensions.evidence_incomplete`,
+the bundle lists what it did not keep (`logs/evidence-not-kept.json`), the run is never VERIFIED and its exit status is 3. `verify` (and the run's own re-verification) accepts exactly that, with a note, and the
+same exit status 3. What it tolerates, and nothing else: a lane the report itself declares `evidence-over-cap` (and only when `evidence_incomplete` is there too) may differ from what its files say, because it can
+only LOWER the result; a file the list names may be absent (a reviewed suite file, a blob the run record points at: matched by name, one finding per blob); a blob that is missing and not listed, a lane reported as
+completed that its files contradict, a VERIFIED run that says its evidence is incomplete, a changed file that was kept, a list that is not of the shape the runner writes, or a list in a bundle that does not say
+it is incomplete are findings. The list is written by the same run as everything else: without an anchor it shows nothing a forger could not also write, but with it a forger gains no higher status.
 
 ## Reading limits: tested and inferred (summary)
 

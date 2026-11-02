@@ -130,7 +130,7 @@ class _Lane:
     suite_files: Mapping[str, str]
 
 
-def _write_outcome(outcome: LaneOutcome, log: List[str], out: Path) -> None:
+def _write_outcome(outcome: LaneOutcome, log: List[str], out: Path, not_kept: Sequence[str] = ()) -> None:
     data = out / "data"
     data.mkdir(parents=True, exist_ok=True)
     n = 0
@@ -142,13 +142,15 @@ def _write_outcome(outcome: LaneOutcome, log: List[str], out: Path) -> None:
         return f"data/{n}.bin"
     doc = {"schema": K.LANE_RESULT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "status": "COMPLETED", "engine_version": outcome.engine_version,
            "native_status": outcome.native_status, "raw_status": outcome.raw_status, "exit_code": outcome.exit_code, "counts": dict(outcome.counts) if outcome.counts else None,
-           "log": log, "native": {rel: put(blob) for rel, blob in outcome.native_files.items()},
+           "log": log, "not_kept": [str(x)[:160] for x in not_kept][:MAX_NOT_KEPT],
+           "native": {rel: put(blob) for rel, blob in outcome.native_files.items()},
            "files": {path: {"role": role, "data": put(blob)} for path, (blob, role) in outcome.files.items()}}
     (out / "outcome.json").write_bytes(dumps_canonical(doc))
 
 
 DATA_REF_RE = re.compile(r"^data/[0-9]{1,6}\.bin$")
 MAX_OUTCOME_FILES = 512
+MAX_NOT_KEPT = 500                                  # the names of the files the lane child could not keep: they reach the report (``evidence_not_kept``), which is how verify knows what is absent on purpose
 
 
 def _read_outcome(fl: Any, out: Path, budget: Budget, limit: int = 64 * 1024 * 1024) -> Tuple[Optional[LaneOutcome], List[str]]:
@@ -172,6 +174,10 @@ def _read_outcome(fl: Any, out: Path, budget: Budget, limit: int = 64 * 1024 * 1
             return None, []
         if not isinstance(doc.get("engine_version"), str) or doc.get("native_status") not in NATIVE_STATUSES or not isinstance(doc.get("raw_status"), str) or not isinstance(doc.get("log", []), list):
             return None, []
+        not_kept = doc.get("not_kept", [])
+        if not (isinstance(not_kept, list) and len(not_kept) <= MAX_NOT_KEPT and all(isinstance(x, str) and 0 < len(x) <= 160 for x in not_kept)):
+            return None, []
+        budget.dropped.extend(not_kept)                  # what the child could not keep is as much a part of the run's incomplete evidence as what this process could not
         counts = doc.get("counts")
         if counts is not None and not (isinstance(counts, dict) and set(counts) <= {"passed", "failed", "errored", "skipped"}
                                        and all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 1_000_000 for v in counts.values())):
@@ -255,9 +261,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     lane = _Lane(lane_id=cfg["lane_id"], engine=cfg["engine"], suite=cfg["suite"], suite_files=dict(cfg["suite_files"]))
     lines: List[str] = []
     try:
+        budget = Budget(int(cfg["evidence_budget"]) if isinstance(cfg.get("evidence_budget"), int) else K.DEFAULT_MAX_EVIDENCE_BYTES)
         outcome = _run_inner(lane, run_id=cfg["run_id"], origin=cfg["origin"], workdir=cfg["workdir"], cancel=cancel, deadline_s=float(cfg["deadline_s"]), log=lines,
-                             launcher=cfg.get("launcher"), budget=Budget(int(cfg["evidence_budget"]) if isinstance(cfg.get("evidence_budget"), int) else K.DEFAULT_MAX_EVIDENCE_BYTES))
-        _write_outcome(outcome, lines, Path(cfg["out_dir"]))
+                             launcher=cfg.get("launcher"), budget=budget)
+        _write_outcome(outcome, lines, Path(cfg["out_dir"]), budget.dropped)
         return 0
     except Exception as exc:
         print(f"lane failed: {type(exc).__name__}: {str(exc)[:500]}", file=sys.stderr)

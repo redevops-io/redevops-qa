@@ -88,7 +88,8 @@ class Verification:
     def to_json(self) -> Dict[str, Any]:
         q = self.qe
         return {"schema": "redevops-qa/verify-result", "schema_version": K.SCHEMA_VERSION, "accepted": self.accepted, "assurance": self.assurance,
-                "exit_code": self.exit_code, "run_outcome": self.outcome, "engine_verifier_disagreements": self.disagreements,
+                "exit_code": self.exit_code, "run_outcome": self.outcome if self.accepted else None,          # a rejected bundle's own claim is not shown as a result
+                "engine_verifier_disagreements": self.disagreements if self.accepted else [],
                 "recomputed_assertions": self.recomputed, "agreeing_assertions": self.agreeing,
                 "anchor": _anchor_json(q.anchor) if q is not None else None, "plan": q.plan.to_json() if q is not None and q.plan is not None else None,
                 "findings": [f.to_json() for f in self.findings], "notes": list(self.notes)}
@@ -103,6 +104,46 @@ def _anchor_json(anchor: Any) -> Dict[str, Any]:
     return doc
 
 
+OVER_CAP = ("NATIVE_ERROR", "evidence-over-cap")
+NOT_KEPT_NAME_RE = re.compile(r"^(lanes|logs)/[\x21-\x7e]{1,150}$")
+
+
+@dataclass(frozen=True)
+class Tolerance:
+    """What a run that hit the evidence cap is allowed to lack (retest R2-1), and nothing more. ``over``: the lanes the report itself declares an engine error ``evidence-over-cap``, and only when the
+    report also says ``evidence_incomplete``. ``names``: the bundle paths the run lists as not kept (``logs/evidence-not-kept.json``). Both can only LOWER a result: a lane reported as an over-cap engine
+    error may differ from what its files say (they say it completed; the report refuses to rely on an incomplete record), a listed file may be absent, and as many missing blobs of the run record as were
+    listed are accepted. A kept file is checked as always; a missing one that is not listed, a status that is higher than the files say, or a VERIFIED run with incomplete evidence is a finding."""
+
+    over: frozenset = frozenset()
+    names: frozenset = frozenset()
+    incomplete: bool = False
+
+
+def _tolerance(files: Mapping[str, bytes], report: Mapping[str, Any], v: "Verification") -> Tolerance:
+    incomplete = "evidence_incomplete" in (report.get("extensions") or {})
+    data = files.get(K.NOT_KEPT_PATH)
+    if not incomplete:
+        return Tolerance()                  # a not-kept list without the report saying so is an unexpected file (``_check_file_set``), and tolerates nothing
+    v.notes.append("the evidence of this run is INCOMPLETE (it hit the evidence cap: " + safe_text(str(report["extensions"]["evidence_incomplete"]), 160) + "): every assertion that depends on a file that was not kept is "
+                   "inconclusive, and the run is never verified")
+    if report["verdict"]["outcome"] == "VERIFIED":
+        v.add("EVIDENCE_INCOMPLETE_BUT_VERIFIED", "extensions", "the report says the evidence is incomplete and also that the run is VERIFIED: a run with incomplete evidence is never verified")
+    names: frozenset = frozenset()
+    if data is not None:
+        try:
+            doc = loads_strict(data)
+            listed = doc["names"]
+            if doc.get("schema") != K.NOT_KEPT_SCHEMA or doc.get("schema_version") != K.SCHEMA_VERSION or set(doc) != {"schema", "schema_version", "names"} or not (
+                    isinstance(listed, list) and len(listed) <= 2000 and all(isinstance(x, str) and NOT_KEPT_NAME_RE.fullmatch(x) for x in listed)):
+                raise ValueError("shape")
+            names = frozenset(listed)
+        except (CanonError, KeyError, TypeError, ValueError):
+            v.add("NOT_KEPT_MALFORMED", K.NOT_KEPT_PATH, "the list of files the run did not keep is not of the shape the runner writes")
+    over = frozenset(l["lane_id"] for l in report["lanes"] if (l["native"]["status"], l["native"]["raw_status"]) == OVER_CAP)
+    return Tolerance(over=over, names=names, incomplete=True)
+
+
 def _json(files: Mapping[str, bytes], path: str) -> Any:
     return loads_strict(files[path])
 
@@ -112,7 +153,7 @@ def _lane_files(files: Mapping[str, bytes], lane_id: str) -> Dict[str, bytes]:
     return {p[len(prefix):]: d for p, d in files.items() if p.startswith(prefix)}
 
 
-def _check_lock(up: Upstreams, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification) -> Optional[FrozenPlan]:
+def _check_lock(up: Upstreams, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification, tol: Tolerance = Tolerance()) -> Optional[FrozenPlan]:
     if LOCK_PATH not in files:
         v.add("LOCK_MISSING", LOCK_PATH, "the bundle carries no plan lock: the frozen assertions cannot be re-derived")
         return None
@@ -160,6 +201,8 @@ def _check_lock(up: Upstreams, files: Mapping[str, bytes], report: Mapping[str, 
                 data = files.get(f"lanes/{lane.lane_id}/suite/{rel}")
                 if data is None and not present and status.get(lane.lane_id) not in ("NATIVE_PASS", "NATIVE_FAIL"):
                     continue                                            # a lane that never started (cancelled, target down) has no copy of the suite to compare
+                if data is None and lane.lane_id in tol.over and f"lanes/{lane.lane_id}/suite/{rel}" in tol.names:
+                    continue                                            # the run lists it as not kept (the evidence cap), in a lane that says it hit the cap
                 if data is None or sha256_bytes(data) != digest:
                     v.add("SUITE_FILE_MISMATCH", f"lanes/{lane.lane_id}/suite/{rel}", "the suite file in the bundle is not the one the plan lock froze")
     return frozen
@@ -221,7 +264,7 @@ def _check_report_fields(frozen: FrozenPlan, files: Mapping[str, bytes], report:
         v.add("REPORT_FIELD_MISMATCH", "redaction", "the redaction note is not the one the runner writes")
 
 
-def _check_native(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification) -> None:
+def _check_native(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification, tol: Tolerance = Tolerance()) -> None:
     for lane in report["lanes"]:
         lid, native = lane["lane_id"], lane["native"]
         got = (native["status"], native["raw_status"])
@@ -253,11 +296,27 @@ def _check_native(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mappin
             continue
         if native["status"] in ("NATIVE_PASS", "NATIVE_FAIL") and derived is None:
             v.add("NATIVE_RESULT_MISSING", f"lanes/{lid}/native", "the lane is reported as completed but the engine's own result file is not in the bundle")
+        elif derived is not None and derived != got and got == OVER_CAP and lid in tol.over:
+            v.notes.append(f"lane {safe_text(lid, 20)}: reported as an engine error (evidence-over-cap) although its own files say {derived[0]} ({safe_text(derived[1], 40)}): the run kept an incomplete record "
+                           "and does not rely on it (a lower result than the files give, accepted; the reverse is never accepted)")
         elif derived is not None and derived != got:
             v.add("NATIVE_STATUS_RELABELLED", f"lanes/{lid}", f"the report says {got[0]} ({got[1]}); the engine's own files say {derived[0]} ({derived[1]})")
 
 
-def _check_run_record(up: Upstreams, frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification) -> None:
+def _blob_name_at(rec: Mapping[str, Any], where: str, lane_id: str) -> Optional[str]:
+    """The bundle path of the blob the harness integrity check found missing at ``where`` (``<event index>.<field>``, e.g. ``37.screenshot_ref``), or ``None`` when it cannot be told."""
+    m = re.fullmatch(r"([0-9]{1,6})\.([a-z0-9_]{1,40})", str(where))
+    if m is None:
+        return None
+    try:
+        ref = rec["events"][int(m.group(1))]["payload"][m.group(2)]
+        digest = str(ref["ref"] if isinstance(ref, dict) else ref).split(":", 1)[-1]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    return f"lanes/{lane_id}/native/blobs/{digest}" if BLOB_RE.fullmatch(digest) else None
+
+
+def _check_run_record(up: Upstreams, frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification, tol: Tolerance = Tolerance()) -> None:
     h = up.harness
     for lane in frozen.lanes:
         if lane.engine != K.ENGINE_PLAYWRIGHT:
@@ -279,6 +338,8 @@ def _check_run_record(up: Upstreams, frozen: FrozenPlan, files: Mapping[str, byt
             continue
         found = h.integrity.verify_run_evidence(events=rec["events"], receipts=receipts, links=links, manifest=manifest, blobs=BundleBlobs(h, files, lid))
         for f in found.findings:
+            if f.code == "MISSING_BLOB" and lid in tol.over and _blob_name_at(rec, f.where, lid) in tol.names:
+                continue                                                # the blob the record points at is one the run lists as not kept, in a lane that hit the cap
             v.add(f"RUN_RECORD_{f.code}", path, f"the harness integrity check found {f.code} at {safe_text(f.where, 40)}")
         contradiction = record_contradicts_itself(rec, manifest)
         if contradiction is not None:
@@ -315,9 +376,11 @@ ROOT_FILES = frozenset({"report.json", "bundle-manifest.json", "assertion-lock.j
 BLOB_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
-def _expected_files(frozen: FrozenPlan) -> Tuple[frozenset, Dict[str, str]]:
+def _expected_files(frozen: FrozenPlan, tol: Tolerance = Tolerance()) -> Tuple[frozenset, Dict[str, str]]:
     """The paths a run of this plan writes (exactly: the builder and the lanes write nothing else) and the per-lane directories that may hold blobs."""
     names = set(ROOT_FILES)
+    if tol.incomplete:
+        names.add(K.NOT_KEPT_PATH)
     blobs: Dict[str, str] = {}
     for lane in frozen.lanes:
         base = f"lanes/{lane.lane_id}/"
@@ -332,9 +395,9 @@ def _expected_files(frozen: FrozenPlan) -> Tuple[frozenset, Dict[str, str]]:
     return frozenset(names), blobs
 
 
-def _check_file_set(frozen: FrozenPlan, files: Mapping[str, bytes], v: Verification) -> None:
+def _check_file_set(frozen: FrozenPlan, files: Mapping[str, bytes], v: Verification, tol: Tolerance = Tolerance()) -> None:
     """A file the bundle lists that no run of this plan writes (a covert payload in a place nobody reads) is a finding, not an extra to ignore."""
-    names, blob_dirs = _expected_files(frozen)
+    names, blob_dirs = _expected_files(frozen, tol)
     for path in sorted(files):
         if path in names:
             continue
@@ -371,12 +434,13 @@ def verify_snapshot(snapshot: Any, *, anchor: Optional[str] = None, plan_digest:
             files = snapshot.files
             report = loads_strict(files["report.json"])
             up = up or verified_bootstrap()
-            frozen = _check_lock(up, files, report, v)
+            tol = _tolerance(files, report, v)
+            frozen = _check_lock(up, files, report, v, tol)
             if frozen is not None:
                 _check_verdicts(up, frozen, files, report, v)
-                _check_native(frozen, files, report, v)
-                _check_run_record(up, frozen, files, report, v)
-                _check_file_set(frozen, files, v)
+                _check_native(frozen, files, report, v, tol)
+                _check_run_record(up, frozen, files, report, v, tol)
+                _check_file_set(frozen, files, v, tol)
                 _check_report_fields(frozen, files, report, v)
             v.run_exit_code = exit_code_for(report)
         except EnvironmentFault as exc:
@@ -398,9 +462,9 @@ def render_text(location: str, v: Verification) -> str:
         lines.append(f"  external anchor: {v.qe.anchor.notice}")
         if v.qe.plan is not None:
             lines.append(f"  frozen assertion set: {v.qe.plan.notice}")
-    if v.outcome is not None:
+    if v.accepted and v.outcome is not None:
         lines.append(f"  recorded run outcome: {t(v.outcome['outcome'])} ({t(v.outcome['reason_code'])})")
-    for d in v.disagreements:
+    for d in (v.disagreements if v.accepted else []):
         lines.append(f"  ENGINE_VERIFIER_DISAGREE lane {t(d['lane_id'])}: native {t(d['native_status'])}, verdicts {t(', '.join(d['verdict_states']) or 'none')}")
     for n in v.notes:
         lines.append(f"  note: {t(n)}")

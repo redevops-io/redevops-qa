@@ -218,6 +218,22 @@ def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], work
                        native_files=native, files=files, counts=counts, harness_verdicts=harness_verdicts, double=opts.lane_command is not None, egress=egress, chromium=chromium)
 
 
+MAX_NOT_KEPT_LISTED = 2000
+
+
+def _bundle_name(lane_id: Optional[str], name: str) -> str:
+    """The bundle path of a file the evidence budget did not let in. A lane reads its files by their name in its output directory (``lane-result.json``, ``blobs/<hex>``) or by ``native/<name>``; the
+    ones it builds itself already carry their bundle path (``lanes/...``, ``logs/...``)."""
+    name = name[:160]
+    if name.startswith(("lanes/", "logs/")) or lane_id is None:
+        return name
+    return f"lanes/{lane_id}/{name}" if name.startswith("native/") else f"lanes/{lane_id}/native/{name}"
+
+
+def _not_kept_document(names: List[str]) -> bytes:
+    return dumps_canonical({"schema": K.NOT_KEPT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "names": sorted(set(names))[:MAX_NOT_KEPT_LISTED]})
+
+
 def _evidence_cap(opts: RunOptions) -> int:
     if opts.max_evidence_bytes is not None:
         return opts.max_evidence_bytes
@@ -268,6 +284,8 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
     origin: Optional[str] = None
     outcomes: List[LaneOutcome] = []
     reference: Optional[Dict[str, Any]] = None
+    after_lanes = 0
+    not_kept: List[str] = []                                   # bundle paths of what the evidence budget did not let in (verify tolerates exactly these as absent, and only in a lane declared over the cap)
     budget = Budget(_evidence_cap(opts), root=workdir)         # one budget for everything the run keeps of its lanes: over it, the rest is not kept, the run says so, nothing is deleted
     try:
         try:
@@ -278,6 +296,7 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         for fl in frozen.lanes:
             deadline = float(fl.deadline_s if opts.lane_deadline_s is None else min(opts.lane_deadline_s, fl.deadline_s))
             before = len(_log_lines(req_path, workdir))
+            mark = len(budget.dropped)
             if fl.engine == K.ENGINE_PLAYWRIGHT:
                 out = run_browser_lane(fl, run_id=run_id, origin=origin, workdir=workdir, opts=opts, log=log, budget=budget)
             elif fl.engine == K.ENGINE_ROBOT:
@@ -290,11 +309,14 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
             if budget.keep(request_log_path(fl.lane_id), window):
                 kept[request_log_path(fl.lane_id)] = (window, "log")
             outcomes.append(dataclasses.replace(out, files=kept))
+            not_kept.extend(_bundle_name(fl.lane_id, n) for n in budget.dropped[mark:])
+            after_lanes = len(budget.dropped)
         if origin is not None and not (opts.cancel is not None and opts.cancel.cancelled) and any(f != "ui-only" for l in frozen.lanes for f in l.probes.values()):
             reference = _reference_check(origin, log, opts.cancel)          # after every lane: the check saves one setting in the (throwaway) target
     finally:
         app.stop()
     request_log = budget.read(req_path, 16 * 1024 * 1024, "logs/target-requests.jsonl") or b""
+    not_kept.extend(_bundle_name(None, n) for n in budget.dropped[after_lanes:])          # what was dropped outside a lane (the target's own log)
     cancelled = bool(opts.cancel is not None and opts.cancel.cancelled)
     if cancelled:
         log.append("the run was cancelled")
@@ -315,6 +337,7 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
             extensions["egress_" + key] = sum(o.egress.get(key, 0) for o in outcomes)
     if budget.dropped:
         extensions["evidence_incomplete"] = f"{len(budget.dropped)} file(s) not kept: the evidence budget of {budget.total} bytes was used up"
+        logs[K.NOT_KEPT_PATH] = _not_kept_document(not_kept)
     inputs = RunInputs(frozen=frozen, run_id=run_id, started_at=started, finished_at=finished, environment=env, lanes=tuple(outcomes), logs=logs, extensions=extensions)
     try:
         built = build_run_bundle(up, inputs)
@@ -325,6 +348,7 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         slim = tuple(dataclasses.replace(o, native_files={k: v for k, v in o.native_files.items() if not k.startswith("blobs/")}, native_status="NATIVE_ERROR", raw_status="evidence-over-cap") for o in outcomes)
         logs["logs/orchestrator.log"] = ("\n".join(log) + "\n").encode("utf-8")
         extensions["evidence_incomplete"] = "the bundle format refused the evidence as collected; the blobs were left out"
+        logs[K.NOT_KEPT_PATH] = _not_kept_document(list(not_kept) + [f"lanes/{o.lane_id}/native/{k}" for o in outcomes for k in o.native_files if k.startswith("blobs/")])
         built = build_run_bundle(up, dataclasses.replace(inputs, lanes=slim, logs=logs, extensions=extensions))
     report = json.loads(built.files["report.json"])
     code = exit_code_for(report, cancelled)
