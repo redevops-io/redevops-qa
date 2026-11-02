@@ -263,22 +263,31 @@ def test_the_reference_check_of_a_stalled_target_ends_when_the_run_is_cancelled(
     srv.listen(2)
     srv.settimeout(30)
 
+    done = threading.Event()
+
     def stall():                                          # a capped server: it answers the headers and then stays silent for 15 seconds at most
+        conn = None
         try:
             conn, _ = srv.accept()
             conn.settimeout(5)
             conn.recv(4096)
             conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n")
-            time.sleep(15)
+            done.wait(15)
         except OSError:
             pass
-    threading.Thread(target=stall, daemon=True).start()
+        finally:
+            if conn is not None:
+                conn.close()
+    thread = threading.Thread(target=stall, daemon=True)
+    thread.start()
     cancel = CancelToken()
     threading.Timer(1.0, cancel.cancel).start()
     log = []
     t0 = time.monotonic()
     assert _reference_check(f"http://127.0.0.1:{srv.getsockname()[1]}", log, cancel) is None
     assert time.monotonic() - t0 < 8 and "could not run (CheckAborted)" in log[0]
+    done.set()
+    thread.join(5)
     srv.close()
 
 
