@@ -271,15 +271,19 @@ timeout, a cancel, a target that never started) wrote whatever it got to: nothin
 Round 4: ONE rule covers every way the budget can keep something out. `bundle.finalize_results` (the builder and `verify` call the same function) turns every VERIFIED assertion into `INCONCLUSIVE`
 with the reason `EVIDENCE_INCOMPLETE` whenever the report says `evidence_incomplete`, so a cap that drops only a run-level file (the target's own request log belongs to no lane) gives an INCONCLUSIVE run with
 exit 3, never VERIFIED; `verify` recomputes the same downgrade and accepts it. A name in the list must be a file a run of the plan can write (the expected set, or a blob of a browser lane); a fabricated
-name is `NOT_KEPT_MALFORMED`.
+name is `NOT_KEPT_MALFORMED`; a listed blob must also be one the lane's kept run record refers to (its digest appears in the record), so a made-up hex name does not count as something the lane lost.
 
-Limits of this tolerance, stated plainly (none needs more than a rewrite of the whole bundle, and `--anchor` / `--plan-digest` from outside reject all of them):
+Limits of this tolerance, stated plainly (each needs a rewrite of the whole bundle; only `--anchor`, a manifest digest supplied from outside, rejects all of them; `--plan-digest` does NOT, because these forgeries leave the plan untouched and its digest matches):
 * A bundle that is rebuilt consistently by the product's own builder can declare a lane `evidence-over-cap` (or any non-complete status) with a matching list and thereby lower a FAILED or VERIFIED run to
   INCONCLUSIVE, exit 3, without an anchor. The result can only be lower; the orchestrator's log is not used to corroborate it (the Robot lane's over-cap label can come from the parent's budget, which the
   child's log lines do not carry), so it is documented rather than checked.
 * Files an over-cap lane's own run wrote and that are not in the required set can be deleted without being listed: the browser lane's `lane-result.json` and `run-record.json`, the stdout and stderr tails
   (`logs/<lane>.stdout.txt`, `.stderr.txt`) and `observations.json`. A missing `lane-result.json` or `run-record.json` makes the lane's assertions inconclusive anyway; the tails and the observations
   are not read by a verdict of an incomplete lane.
+* A run-level declaration (`evidence_incomplete` with a legal name that is in fact present) is not checked against an absence: only a lane declared over the cap must have lost something. It can only lower
+  a VERIFIED run to INCONCLUSIVE/3; a FAILED run stays FAILED.
+* `EVIDENCE_INCOMPLETE` was added to qa-evidence's closed list of INCONCLUSIVE reasons without a format version (as `TEST_DOUBLE` and `NATIVE_FAIL_VERIFIED_ASSERTIONS` were before): an older qa-evidence
+  refuses a bundle that uses it. Note it when the format is frozen.
 The list is written by the same run as everything else: without an anchor it shows nothing a forger could not also write, but with it a forger gains no higher status.
 
 ## Reading limits: tested and inferred (summary)

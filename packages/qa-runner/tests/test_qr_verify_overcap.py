@@ -282,7 +282,7 @@ def test_a_forger_cannot_keep_verified_verdicts_in_a_report_that_declares_incomp
     assert not v.accepted and "EVIDENCE_INCOMPLETE_BUT_VERIFIED" in codes(v)
 
 
-@pytest.mark.parametrize("name,ok", [("lanes/browser/native/blobs/" + "a" * 64, True), ("lanes/robot/native/blobs/" + "a" * 64, False), ("lanes/nowhere/target-requests.jsonl", False),
+@pytest.mark.parametrize("name,ok", [("lanes/browser/native/blobs/" + "a" * 64, False), ("lanes/robot/native/blobs/" + "a" * 64, False), ("lanes/nowhere/target-requests.jsonl", False),
                                      ("logs/anything-else.txt", False), ("lanes/browser/native/blobs/short", False), ("lanes/robot/suite/OrderApi.py", True)])
 def test_a_listed_name_must_be_one_a_run_of_the_plan_can_write(up, tmp_path, name, ok):
     """R4-2: a fabricated name used to be accepted in the list."""
@@ -290,3 +290,20 @@ def test_a_listed_name_must_be_one_a_run_of_the_plan_can_write(up, tmp_path, nam
                                logs_extra=not_kept(sorted(set(loads_strict(golden("overcap")[K.NOT_KEPT_PATH])["names"] + [name]))))
     v = verify_files_in(tmp_path, files)
     assert (v.accepted or "NOT_KEPT_MALFORMED" not in codes(v)) if ok else (not v.accepted and "NOT_KEPT_MALFORMED" in codes(v)), codes(v)
+
+
+def test_a_listed_blob_must_be_one_the_kept_run_record_refers_to(up, tmp_path):
+    """R5-2: a made-up but well-formed blob name (any 64 hex digits) satisfied 'this over-cap lane lost something', so a FAILED run was one invented string away from an accepted INCONCLUSIVE."""
+    files = golden("overcap")
+    record = files["lanes/browser/native/run-record.json"].decode()
+    real = loads_strict(files[K.NOT_KEPT_PATH])["names"]
+    made_up = "lanes/browser/native/blobs/" + "ab" * 32
+    assert "ab" * 32 not in record
+    names = sorted(set(real + [made_up]))
+    v = verify_files_in(tmp_path, forge_consistently(up, files, edit_lane=lambda lid, o: o, extensions=declared(len(names)), logs_extra=not_kept(names)))
+    assert not v.accepted and "NOT_KEPT_MALFORMED" in codes(v)
+    discount = golden("discount")
+    names = [made_up]
+    v = verify_files_in(tmp_path, forge_consistently(up, discount, edit_lane=lose(("browser",)), extensions=declared(1), logs_extra=not_kept(names)))
+    assert not v.accepted and "NOT_KEPT_MALFORMED" in codes(v)
+    assert verify_files_in(tmp_path, golden("overcap")).accepted                                     # the honest list names blobs the record refers to

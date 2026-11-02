@@ -158,7 +158,9 @@ def test_a_lane_that_outlives_its_deadline_is_a_timeout_and_no_process_it_starte
         time.sleep(0.2)
         left = survivors()
     assert not left, "a process the run started is still alive: " + "; ".join(f"{p} [{st}] {cmd[:100]}" for p, (st, cmd) in sorted(left.items()))
-    assert any("chrom" in cmd.lower() for cmd in seen.values()) or True
+    # the check is only worth something if it saw the run: at least one descendant, and the browser (an empty or truncated process table would otherwise let the test pass)
+    assert seen, "no process was seen below the test: the process table is empty or unreadable, so nothing was checked"
+    assert any("chrom" in cmd.lower() for cmd in seen.values()), f"no Chromium process was seen during the run; saw: {sorted(seen.values())[:5]}"
 
 
 def test_a_navigation_to_an_origin_the_plan_does_not_allow_is_refused_and_never_reaches_it(up):
