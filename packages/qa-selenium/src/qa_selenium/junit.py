@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from qa_adapter_kit import MalformedReport, NativeAssertion, Status
+from qa_adapter_kit.boundedread import UnsafeRead, read_regular
 
 MAX_REPORT_BYTES = 20 * 1024 * 1024
 MAX_TESTCASES = 10_000
@@ -98,10 +99,12 @@ def parse_junit(data: bytes) -> Tuple[NativeAssertion, ...]:
 
 
 def read_junit(path: Path) -> Tuple[NativeAssertion, ...]:
+    """The engine's report, read the way every file a run writes is read: one descriptor, regular files only, no symbolic link, a byte cap and a deadline (a FIFO where the report should be is
+    refused at once, never waited for: retest round 2, L-R1, the same pattern as the Robot adapter's)."""
     try:
-        size = path.stat().st_size
-        if size > MAX_REPORT_BYTES:
-            raise MalformedReport("the JUnit report is larger than the limit")
-        return parse_junit(path.read_bytes())
-    except OSError:
-        raise MalformedReport("the JUnit report was not written") from None
+        data = read_regular(str(path), max_bytes=MAX_REPORT_BYTES, deadline_s=30.0, follow_symlinks=False, root=str(path.parent))
+    except UnsafeRead as exc:
+        if exc.code == "TOO_LARGE":
+            raise MalformedReport("the JUnit report is larger than the limit") from None
+        raise MalformedReport("the JUnit report was not written, or is not a regular file") from None
+    return parse_junit(data)
