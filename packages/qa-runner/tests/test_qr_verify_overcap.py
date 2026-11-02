@@ -119,9 +119,10 @@ def test_the_declaration_does_not_excuse_a_file_the_run_did_not_list(up, tmp_pat
     assert not v.accepted and "RUN_RECORD_MISSING_BLOB" in codes(v)
 
 
-def test_a_list_of_unkept_files_that_is_not_of_the_shape_the_runner_writes_is_a_finding(up, tmp_path):
+@pytest.mark.parametrize("names", [["../../etc/passwd"], [5], ["lanes/browser/native/blobs/" + "A" * 64], ["x" * 200]])
+def test_a_list_of_unkept_files_that_is_not_of_the_shape_the_runner_writes_is_a_finding(up, tmp_path, names):
     files = golden("overcap")
-    files[K.NOT_KEPT_PATH] = dumps_canonical({"schema": K.NOT_KEPT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "names": ["../../etc/passwd"]})
+    files[K.NOT_KEPT_PATH] = dumps_canonical({"schema": K.NOT_KEPT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "names": names})
     v = verify_files_in(tmp_path, rechain(files))
     assert not v.accepted and "NOT_KEPT_MALFORMED" in codes(v)
 
