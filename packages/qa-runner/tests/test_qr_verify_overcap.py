@@ -18,12 +18,40 @@ from qa_runner import constants as K
 from qa_runner.verify import render_text
 from qr_tamper import codes, edit_json, forge_consistently, golden, load, put, rechain, verify_files_in
 
-INCOMPLETE = {"evidence_incomplete": "forged: 1 file(s) not kept"}
+INCOMPLETE = {"evidence_incomplete": "0 file(s) not kept: forged"}
 BLOB_DIR = "lanes/browser/native/blobs/"
 
 
 def over_cap(lid, o):
     return replace(o, native_status="NATIVE_ERROR", raw_status="evidence-over-cap", counts=None)
+
+
+def declared(n):
+    return {"evidence_incomplete": f"{n} file(s) not kept: forged"}
+
+
+def not_kept(names):
+    return {K.NOT_KEPT_PATH: dumps_canonical({"schema": K.NOT_KEPT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "names": names})}
+
+
+def lose(lanes, *paths):
+    """Lanes declared over the cap that really lost these files (as bundle paths): removed from the lane outcome before the builder runs."""
+    def edit(lid, o):
+        if lid not in lanes:
+            return o
+        o = over_cap(lid, o)
+        native = {k: v for k, v in o.native_files.items() if f"lanes/{lid}/native/{k}" not in paths}
+        return replace(o, files={p: v for p, v in o.files.items() if p not in paths}, native_files=native)
+    return edit
+
+
+def without(files, *paths):
+    """What a forger does after deleting files: the files and their manifest entries gone, every digest recomputed."""
+    out = {p: d for p, d in files.items() if p not in paths}
+    man = load(out, MANIFEST_NAME)
+    man["files"] = [e for e in man["files"] if e["path"] in out]
+    put(out, MANIFEST_NAME, man)
+    return rechain(out)
 
 
 def test_an_honest_over_cap_run_is_accepted_as_an_incomplete_result_with_the_environment_exit(up, tmp_path):
@@ -55,8 +83,9 @@ def test_a_lane_relabelled_as_over_cap_without_the_report_saying_the_evidence_is
 
 def test_a_downgrade_the_report_declares_is_accepted_and_is_never_a_verified_run(up, tmp_path):
     """With the declaration the lower result is accepted: the builder recomputes every verdict, so nothing is VERIFIED, and the exit is 3."""
-    v = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=over_cap, extensions=INCOMPLETE))
-    assert v.accepted and v.outcome["outcome"] != "VERIFIED" and v.exit_code == K.EXIT_ENVIRONMENT
+    lost = ["lanes/browser/target-requests.jsonl", "lanes/robot/target-requests.jsonl"]
+    v = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=lose(("browser", "robot"), *lost), extensions=declared(2), logs_extra=not_kept(lost)))
+    assert v.accepted and v.outcome["outcome"] != "VERIFIED" and v.exit_code == K.EXIT_ENVIRONMENT, codes(v)
 
 
 def test_a_forged_evidence_incomplete_cannot_raise_a_status_the_files_contradict(up, tmp_path):
@@ -122,20 +151,11 @@ def test_a_rejected_bundle_shows_no_claimed_outcome_in_text_or_json_and_keeps_it
     assert v.outcome is not None                      # kept internally (the accepted case needs it); only the display is withheld
 
 
-def drop_suite_file(listed):
-    def edit(lid, o):
-        o = over_cap(lid, o)
-        if lid == "robot":
-            o = replace(o, files={p: v for p, v in o.files.items() if p != "lanes/robot/suite/OrderApi.py"})
-        return o
-    logs = {K.NOT_KEPT_PATH: dumps_canonical({"schema": K.NOT_KEPT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "names": ["lanes/robot/suite/OrderApi.py"] if listed else []})}
-    return edit, logs
-
-
 @pytest.mark.parametrize("listed,accepted", [(True, True), (False, False)])
 def test_a_reviewed_suite_file_may_be_absent_from_a_lane_over_the_cap_only_when_the_run_lists_it(up, tmp_path, listed, accepted):
-    edit, logs = drop_suite_file(listed)
-    v = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=edit, extensions=INCOMPLETE, logs_extra=logs))
+    path = "lanes/robot/suite/OrderApi.py"
+    files = forge_consistently(up, golden("none"), edit_lane=lose(("robot",), path), extensions=declared(1 if listed else 0), logs_extra=not_kept([path] if listed else []))
+    v = verify_files_in(tmp_path, files)
     assert v.accepted is accepted and (accepted or "SUITE_FILE_MISMATCH" in codes(v)), codes(v)
 
 
@@ -152,3 +172,90 @@ def test_report_json_of_a_rejected_bundle_has_no_claimed_outcome_in_its_nested_r
     doc = json.loads(out.getvalue())
     assert code == K.EXIT_REJECTED and doc["content_trusted"] is False and doc["recomputation"]["run_outcome"] is None and doc["recomputation"]["findings"]
     assert "VERIFIED" not in json.dumps({k: v for k, v in doc.items() if k != "recomputation"}) and doc["recomputation"]["accepted"] is False
+
+
+# ---- round 3 ---------------------------------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("base,lane,outcome", [("discount", "robot", "FAILED"), ("none", "robot", "VERIFIED"), ("none", "browser", "VERIFIED")])
+def test_a_lane_cannot_be_declared_over_the_cap_when_nothing_of_it_is_missing(up, tmp_path, base, lane, outcome):
+    """R3-1: a real FAILED or VERIFIED run, one lane declared `evidence-over-cap` with every file kept and an empty list, was accepted as an INCONCLUSIVE exit 3. A demonstrated failure is not
+    hidden behind a status a CI may read as 'retry'."""
+    assert load(golden(base), "report.json")["verdict"]["outcome"] == outcome
+    v = verify_files_in(tmp_path, forge_consistently(up, golden(base), edit_lane=lose((lane,)), extensions=declared(0), logs_extra=not_kept([])))
+    assert not v.accepted and "EVIDENCE_OVER_CAP_NOT_SUPPORTED" in codes(v)
+
+
+def test_a_declared_lane_needs_a_listed_file_that_belongs_to_it_and_is_really_absent(up, tmp_path):
+    present = "lanes/robot/target-requests.jsonl"
+    other = "lanes/browser/target-requests.jsonl"
+    # a file of ANOTHER lane is listed and absent: the declared lane (robot) still lost nothing
+    v = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=lambda lid, o: (lose(("robot",))(lid, replace(o, files={p: d for p, d in o.files.items() if p != other}) if lid == "browser" else o)),
+                                                     extensions=declared(1), logs_extra=not_kept([other])))
+    assert not v.accepted and "EVIDENCE_OVER_CAP_NOT_SUPPORTED" in codes(v)
+    # a file of the lane is listed but it is present
+    v = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=lose(("robot",)), extensions=declared(1), logs_extra=not_kept([present])))
+    assert not v.accepted and "EVIDENCE_OVER_CAP_NOT_SUPPORTED" in codes(v)
+
+
+def test_the_lane_s_own_result_file_missing_supports_the_declaration(up, tmp_path):
+    result = "lanes/robot/native/adapter-result.json"
+    v = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=lose(("robot",), result), extensions=declared(0), logs_extra=not_kept([])))
+    assert v.accepted and v.exit_code == K.EXIT_ENVIRONMENT, codes(v)
+
+
+@pytest.mark.parametrize("said", ["0 file(s) not kept: forged", "5 file(s) not kept: forged", "many files were not kept", ""])
+def test_the_count_in_the_report_is_the_length_of_the_list(up, tmp_path, said):
+    lost = "lanes/robot/target-requests.jsonl"
+    v = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=lose(("robot",), lost), extensions={"evidence_incomplete": said}, logs_extra=not_kept([lost])))
+    assert not v.accepted and "EVIDENCE_OVER_CAP_NOT_SUPPORTED" in codes(v)
+
+
+@pytest.mark.parametrize("path", ["lanes/browser/gateway-log.jsonl", "lanes/browser/browser-guard-log.jsonl", "lanes/robot/egress-profile.json", "lanes/browser/egress-profile.json",
+                                  "lanes/browser/target-requests.jsonl", "logs/orchestrator.log", "logs/target-requests.jsonl", "lanes/robot/suite/OrderApi.py", "lanes/robot/native/robot-summary.json"])
+def test_a_file_every_run_of_the_plan_writes_cannot_just_be_missing(up, tmp_path, path):
+    """R3-2: these were deleted from a VERIFIED run (digests recomputed) and the bundle was accepted as VERIFIED, exit 0."""
+    v = verify_files_in(tmp_path, without(golden("none"), path))
+    assert not v.accepted and "EXPECTED_FILE_MISSING" in codes(v), codes(v)
+
+
+def test_the_suite_copies_of_a_lane_that_is_not_complete_are_still_required_unless_the_run_lists_them(up, tmp_path):
+    """R3-2: `_check_lock` skipped a lane that 'never started', so an over-cap lane could lack both suite copies, listed or not (J4, J2)."""
+    both = ["lanes/robot/suite/OrderApi.py", "lanes/robot/suite/order_discount.robot"]
+    none_listed = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=lose(("robot",), *both), extensions=declared(0), logs_extra=not_kept([])))
+    assert not none_listed.accepted and "EXPECTED_FILE_MISSING" in codes(none_listed) and "SUITE_FILE_MISMATCH" in codes(none_listed)       # both checks: the lock check no longer skips the lane
+    one_listed = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=lose(("robot",), *both), extensions=declared(1), logs_extra=not_kept([both[0]])))
+    assert not one_listed.accepted and "EXPECTED_FILE_MISSING" in codes(one_listed)
+    all_listed = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=lose(("robot",), *both), extensions=declared(2), logs_extra=not_kept(sorted(both))))
+    assert all_listed.accepted, codes(all_listed)
+
+
+def test_a_lane_that_did_not_complete_for_another_reason_has_nothing_required_of_it(up, tmp_path):
+    from qr_tamper import lane_outcomes_from
+    def timed_out(lid, o):
+        if lid != "robot":
+            return o
+        return replace(o, native_status="NATIVE_TIMEOUT", raw_status="timeout", exit_code=None, counts=None, native_files={},
+                       files={p: v for p, v in o.files.items() if p.startswith("logs/")})
+    v = verify_files_in(tmp_path, forge_consistently(up, golden("none"), edit_lane=timed_out))
+    assert "EXPECTED_FILE_MISSING" not in codes(v)
+
+
+def test_the_list_of_unkept_files_must_be_sorted_and_unique(up, tmp_path):
+    """R3-3: a list with a duplicate (or out of order) was accepted; the runner writes the canonical form."""
+    lost = ["lanes/robot/target-requests.jsonl", "lanes/robot/egress-profile.json"]
+    for names in (sorted(lost) + [sorted(lost)[0]], list(reversed(sorted(lost)))):
+        files = forge_consistently(up, golden("none"), edit_lane=lose(("robot",), *lost), extensions=declared(len(names)), logs_extra=not_kept(names))
+        v = verify_files_in(tmp_path, files)
+        assert not v.accepted and "NOT_KEPT_MALFORMED" in codes(v)
+    ok = forge_consistently(up, golden("none"), edit_lane=lose(("robot",), *lost), extensions=declared(2), logs_extra=not_kept(sorted(lost)))
+    assert verify_files_in(tmp_path, ok).accepted
+
+
+def test_the_names_the_run_lists_are_bundle_paths_and_their_count_is_the_one_the_report_gives():
+    from qa_runner.orchestrate import _bundle_name, _not_kept_names
+    assert _bundle_name("browser", "gateway-log.jsonl") == "lanes/browser/gateway-log.jsonl" and _bundle_name("browser", "browser-guard-log.jsonl") == "lanes/browser/browser-guard-log.jsonl"
+    assert _bundle_name("browser", "blobs/ab") == "lanes/browser/native/blobs/ab" and _bundle_name("robot", "native/output.xml") == "lanes/robot/native/output.xml"
+    assert _bundle_name("robot", "lanes/robot/suite/x") == "lanes/robot/suite/x" and _bundle_name(None, "logs/target-requests.jsonl") == "logs/target-requests.jsonl"
+    assert _not_kept_names(["b", "a", "b"]) == ["a", "b"]
+    files = golden("overcap")
+    names = loads_strict(files[K.NOT_KEPT_PATH])["names"]
+    assert names == sorted(set(names)) and load(files, "report.json")["extensions"]["evidence_incomplete"].startswith(f"{len(names)} file(s) not kept")

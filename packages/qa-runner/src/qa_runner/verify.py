@@ -130,6 +130,7 @@ def _tolerance(files: Mapping[str, bytes], report: Mapping[str, Any], v: "Verifi
     if report["verdict"]["outcome"] == "VERIFIED":
         v.add("EVIDENCE_INCOMPLETE_BUT_VERIFIED", "extensions", "the report says the evidence is incomplete and also that the run is VERIFIED: a run with incomplete evidence is never verified")
     names: frozenset = frozenset()
+    count = 0
     if data is not None:
         try:
             doc = loads_strict(data)
@@ -137,10 +138,24 @@ def _tolerance(files: Mapping[str, bytes], report: Mapping[str, Any], v: "Verifi
             if doc.get("schema") != K.NOT_KEPT_SCHEMA or doc.get("schema_version") != K.SCHEMA_VERSION or set(doc) != {"schema", "schema_version", "names"} or not (
                     isinstance(listed, list) and len(listed) <= 2000 and all(isinstance(x, str) and NOT_KEPT_NAME_RE.fullmatch(x) for x in listed)):
                 raise ValueError("shape")
+            if listed != sorted(set(listed)):
+                raise ValueError("not in the canonical sorted, unique form the runner writes")
             names = frozenset(listed)
-        except (CanonError, KeyError, TypeError, ValueError):
-            v.add("NOT_KEPT_MALFORMED", K.NOT_KEPT_PATH, "the list of files the run did not keep is not of the shape the runner writes")
+            count = len(listed)
+        except (CanonError, KeyError, TypeError, ValueError) as exc:
+            v.add("NOT_KEPT_MALFORMED", K.NOT_KEPT_PATH, "the list of files the run did not keep is not of the shape the runner writes" + (f" ({safe_text(str(exc), 80)})" if isinstance(exc, ValueError) and str(exc) != "shape" else ""))
+    said = re.match(r"([0-9]{1,6}) file\(s\) not kept", str(report["extensions"]["evidence_incomplete"]))
+    if said is None or int(said.group(1)) != count:
+        v.add("EVIDENCE_OVER_CAP_NOT_SUPPORTED", "extensions.evidence_incomplete", f"the report says {safe_text(str(report['extensions']['evidence_incomplete']), 60)!r} but the list of files not kept names {count}")
     over = frozenset(l["lane_id"] for l in report["lanes"] if (l["native"]["status"], l["native"]["raw_status"]) == OVER_CAP)
+    for lane in report["lanes"]:
+        lid = lane["lane_id"]
+        if lid not in over:
+            continue
+        control = f"lanes/{lid}/native/" + ("lane-result.json" if lane["engine"]["name"] == K.ENGINE_PLAYWRIGHT else "adapter-result.json")
+        lost = [n for n in names if (n.startswith(f"lanes/{lid}/") or n.startswith(f"logs/{lid}.")) and n not in files]
+        if not lost and control in files:
+            v.add("EVIDENCE_OVER_CAP_NOT_SUPPORTED", f"lanes/{lid}", "the lane is declared an engine error (evidence-over-cap) but nothing of it is missing: no file of this lane is listed as not kept and absent, and its own result file is there")
     return Tolerance(over=over, names=names, incomplete=True)
 
 
@@ -199,7 +214,7 @@ def _check_lock(up: Upstreams, files: Mapping[str, bytes], report: Mapping[str, 
             for rel, digest in lane.suite_files.items():
                 from qa_evidence.canon import sha256_bytes
                 data = files.get(f"lanes/{lane.lane_id}/suite/{rel}")
-                if data is None and not present and status.get(lane.lane_id) not in ("NATIVE_PASS", "NATIVE_FAIL"):
+                if data is None and not present and status.get(lane.lane_id) not in ("NATIVE_PASS", "NATIVE_FAIL") and lane.lane_id not in tol.over:
                     continue                                            # a lane that never started (cancelled, target down) has no copy of the suite to compare
                 if data is None and lane.lane_id in tol.over and f"lanes/{lane.lane_id}/suite/{rel}" in tol.names:
                     continue                                            # the run lists it as not kept (the evidence cap), in a lane that says it hit the cap
@@ -395,6 +410,35 @@ def _expected_files(frozen: FrozenPlan, tol: Tolerance = Tolerance()) -> Tuple[f
     return frozenset(names), blobs
 
 
+def _required_files(frozen: FrozenPlan, report: Mapping[str, Any], tol: Tolerance) -> List[str]:
+    """The files a run of this plan always writes, each of which must be in the bundle or listed as not kept. Run level: the orchestrator's log and the target's request log. For a lane that completed
+    (NATIVE_PASS or NATIVE_FAIL): everything its engine and the orchestrator write for it. For a lane declared over the evidence cap: what the orchestrator itself writes for it, never what depends on
+    what the engine produced. A lane that did not complete for another reason (it timed out, never started, was cancelled) writes whatever it got to: nothing is required of it."""
+    need = ["logs/orchestrator.log", "logs/target-requests.jsonl"]
+    status = {l["lane_id"]: l["native"]["status"] for l in report["lanes"]}
+    for lane in frozen.lanes:
+        lid, base = lane.lane_id, f"lanes/{lane.lane_id}/"
+        done = status.get(lid) in ("NATIVE_PASS", "NATIVE_FAIL")
+        if not done and lid not in tol.over:
+            continue
+        need += [base + "egress-profile.json", base + "target-requests.jsonl"]
+        if lane.engine == K.ENGINE_PLAYWRIGHT:
+            need += [base + "gateway-log.jsonl", base + "browser-guard-log.jsonl"]
+            if done:
+                need += [base + "native/lane-result.json", base + "native/run-record.json"]
+        else:
+            need += [base + "suite/" + n for n in lane.suite_files]
+            if done:
+                need += [base + "native/output.xml", base + "native/robot-summary.json", base + "native/adapter-result.json"]
+    return need
+
+
+def _check_required(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification, tol: Tolerance) -> None:
+    for path in _required_files(frozen, report, tol):
+        if path not in files and path not in tol.names:
+            v.add("EXPECTED_FILE_MISSING", safe_text(path, 120), "a file every run of this plan writes is neither in the bundle nor listed as not kept")
+
+
 def _check_file_set(frozen: FrozenPlan, files: Mapping[str, bytes], v: Verification, tol: Tolerance = Tolerance()) -> None:
     """A file the bundle lists that no run of this plan writes (a covert payload in a place nobody reads) is a finding, not an extra to ignore."""
     names, blob_dirs = _expected_files(frozen, tol)
@@ -441,6 +485,7 @@ def verify_snapshot(snapshot: Any, *, anchor: Optional[str] = None, plan_digest:
                 _check_native(frozen, files, report, v, tol)
                 _check_run_record(up, frozen, files, report, v, tol)
                 _check_file_set(frozen, files, v, tol)
+                _check_required(frozen, files, report, v, tol)
                 _check_report_fields(frozen, files, report, v)
             v.run_exit_code = exit_code_for(report)
         except EnvironmentFault as exc:

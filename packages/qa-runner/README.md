@@ -260,7 +260,12 @@ the bundle lists what it did not keep (`logs/evidence-not-kept.json`), the run i
 same exit status 3. What it tolerates, and nothing else: a lane the report itself declares `evidence-over-cap` (and only when `evidence_incomplete` is there too) may differ from what its files say, because it can
 only LOWER the result; a file the list names may be absent (a reviewed suite file, a blob the run record points at: matched by name, one finding per blob); a blob that is missing and not listed, a lane reported as
 completed that its files contradict, a VERIFIED run that says its evidence is incomplete, a changed file that was kept, a list that is not of the shape the runner writes, or a list in a bundle that does not say
-it is incomplete are findings. The list is written by the same run as everything else: without an anchor it shows nothing a forger could not also write, but with it a forger gains no higher status.
+it is incomplete are findings. Round 3 tightened the tolerance: a lane declared `evidence-over-cap` must really have lost something (a file of that lane is listed and absent, or the lane's own result file is missing), the count in
+`extensions.evidence_incomplete` must equal the length of the list (`EVIDENCE_OVER_CAP_NOT_SUPPORTED` otherwise), the list must be in the sorted, unique form the runner writes, and every file a run of the
+plan always writes must be in the bundle or listed (`EXPECTED_FILE_MISSING`): the orchestrator's log and the target's request log; for a lane that completed or is over the cap, its egress profile, its
+request-log window, the browser lane's gateway and guard logs, the Robot lane's suite copies (and, for a completed lane, the engine's own files). A lane that did not complete for another reason (a
+timeout, a cancel, a target that never started) wrote whatever it got to: nothing is required of it.
+The list is written by the same run as everything else: without an anchor it shows nothing a forger could not also write, but with it a forger gains no higher status.
 
 ## Reading limits: tested and inferred (summary)
 

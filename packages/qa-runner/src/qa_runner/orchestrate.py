@@ -227,11 +227,18 @@ def _bundle_name(lane_id: Optional[str], name: str) -> str:
     name = name[:160]
     if name.startswith(("lanes/", "logs/")) or lane_id is None:
         return name
+    if name in ("gateway-log.jsonl", "browser-guard-log.jsonl"):                  # the browser lane's logs are lane files, not native ones
+        return f"lanes/{lane_id}/{name}"
     return f"lanes/{lane_id}/{name}" if name.startswith("native/") else f"lanes/{lane_id}/native/{name}"
 
 
+def _not_kept_names(names: List[str]) -> List[str]:
+    """The canonical form of the list: sorted, unique, at most MAX_NOT_KEPT_LISTED."""
+    return sorted(set(names))[:MAX_NOT_KEPT_LISTED]
+
+
 def _not_kept_document(names: List[str]) -> bytes:
-    return dumps_canonical({"schema": K.NOT_KEPT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "names": sorted(set(names))[:MAX_NOT_KEPT_LISTED]})
+    return dumps_canonical({"schema": K.NOT_KEPT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "names": _not_kept_names(names)})
 
 
 def _evidence_cap(opts: RunOptions) -> int:
@@ -336,8 +343,9 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         if any(key in o.egress for o in outcomes):
             extensions["egress_" + key] = sum(o.egress.get(key, 0) for o in outcomes)
     if budget.dropped:
-        extensions["evidence_incomplete"] = f"{len(budget.dropped)} file(s) not kept: the evidence budget of {budget.total} bytes was used up"
-        logs[K.NOT_KEPT_PATH] = _not_kept_document(not_kept)
+        listed = _not_kept_names(not_kept)
+        extensions["evidence_incomplete"] = f"{len(listed)} file(s) not kept: the evidence budget of {budget.total} bytes was used up"          # the count is the length of the list (verify checks it)
+        logs[K.NOT_KEPT_PATH] = _not_kept_document(listed)
     inputs = RunInputs(frozen=frozen, run_id=run_id, started_at=started, finished_at=finished, environment=env, lanes=tuple(outcomes), logs=logs, extensions=extensions)
     try:
         built = build_run_bundle(up, inputs)
@@ -345,10 +353,13 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         # The bundle format refused what was collected (a cap of its own: file count or total size). The evidence is not thrown away and the run does not end as a crash: every lane's bulk (blobs) is left out,
         # the lane is an engine error with the reason, and the bundle that is built says so.
         log.append("the bundle format refused the evidence as collected (" + ", ".join(sorted({c for c, _, _ in exc.problems})[:3]) + "): the blobs of every lane were left out")
-        slim = tuple(dataclasses.replace(o, native_files={k: v for k, v in o.native_files.items() if not k.startswith("blobs/")}, native_status="NATIVE_ERROR", raw_status="evidence-over-cap") for o in outcomes)
+        # only a lane that actually lost blobs becomes an engine error: a lane with nothing left out is not declared incomplete (verify requires that what a lane is declared to have lost is absent)
+        slim = tuple(dataclasses.replace(o, native_files={k: v for k, v in o.native_files.items() if not k.startswith("blobs/")}, native_status="NATIVE_ERROR", raw_status="evidence-over-cap")
+                     if any(k.startswith("blobs/") for k in o.native_files) else o for o in outcomes)
         logs["logs/orchestrator.log"] = ("\n".join(log) + "\n").encode("utf-8")
-        extensions["evidence_incomplete"] = "the bundle format refused the evidence as collected; the blobs were left out"
-        logs[K.NOT_KEPT_PATH] = _not_kept_document(list(not_kept) + [f"lanes/{o.lane_id}/native/{k}" for o in outcomes for k in o.native_files if k.startswith("blobs/")])
+        listed = _not_kept_names(list(not_kept) + [f"lanes/{o.lane_id}/native/{k}" for o in outcomes for k in o.native_files if k.startswith("blobs/")])
+        extensions["evidence_incomplete"] = f"{len(listed)} file(s) not kept: the bundle format refused the evidence as collected; the blobs were left out"
+        logs[K.NOT_KEPT_PATH] = _not_kept_document(listed)
         built = build_run_bundle(up, dataclasses.replace(inputs, lanes=slim, logs=logs, extensions=extensions))
     report = json.loads(built.files["report.json"])
     code = exit_code_for(report, cancelled)
