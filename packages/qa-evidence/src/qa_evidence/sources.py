@@ -59,6 +59,49 @@ class MemorySource(Source):
             yield data[i:i + CHUNK]
 
 
+class SnapshotSource(Source):
+    """An immutable copy of another source, taken once: its listing, its problems and the bytes of every file it could read (at most ``limits.max_file_bytes + 1`` of each, and in total at most
+    ``limits.max_total_bytes + max_file_bytes + 1``). Everything that verifies, inspects or recomputes from a snapshot sees the same bytes, whatever happens to the files afterwards.
+    A file that was not read (over the total cap) raises ``OSError`` when it is asked for."""
+    kind = "snapshot"
+
+    def __init__(self, kind: str, entries: List[SourceEntry], problems: List[Tuple[str, str, str]], data: Mapping[str, bytes]):
+        super().__init__()
+        self.kind = kind
+        self.entries, self.problems = list(entries), list(problems)
+        self._data = dict(data)
+
+    @property
+    def files(self) -> Dict[str, bytes]:
+        return dict(self._data)
+
+    def read_chunks(self, path, limit):
+        if path not in self._data:
+            raise OSError("the file was not read into the snapshot")
+        data = self._data[path][:limit + 1]
+        for i in range(0, len(data), CHUNK):
+            yield data[i:i + CHUNK]
+
+
+def take_snapshot(source: Source, limits: Limits = DEFAULT_LIMITS) -> SnapshotSource:
+    """Read ``source`` once, in full, into a ``SnapshotSource`` (the problems of the listing are kept; a file that cannot be read becomes a problem, never a crash)."""
+    data: Dict[str, bytes] = {}
+    problems = list(source.problems)
+    budget = limits.max_total_bytes + limits.max_file_bytes + 1
+    for entry in source.entries:
+        if budget <= 0:
+            problems.append(("NOT_READ", entry.path, "the total size cap was reached before this file was read"))
+            continue
+        try:
+            blob = source.read_all(entry.path, limits.max_file_bytes)
+        except (OSError, KeyError) as exc:
+            problems.append(("UNREADABLE", entry.path, f"the file could not be read ({type(exc).__name__})"))
+            continue
+        data[entry.path] = blob
+        budget -= len(blob)
+    return SnapshotSource(source.kind, source.entries, problems, data)
+
+
 class DirSource(Source):
     kind = "directory"
 

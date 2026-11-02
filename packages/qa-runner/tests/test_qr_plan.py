@@ -290,6 +290,8 @@ def test_assertion_ids_that_differ_only_in_case_are_refused_at_freeze_not_after_
     ("a method that is not GET or POST", lambda l: l["requests"].update(required=["DELETE /login"]), "BAD_REQUESTS"),
     ("a duplicate request", lambda l: l["requests"].update(required=["GET /login", "GET /login"]), "BAD_REQUESTS"),
     ("an unknown key", lambda l: l["requests"].update(forbidden=[]), "BAD_REQUESTS"),
+    ("a '..' segment in a required request", lambda l: l["requests"].update(required=["GET /../../etc/passwd"]), "BAD_REQUESTS"),
+    ("a '..' segment in an allowed request", lambda l: l["requests"]["allowed"].append("POST /a/../b"), "BAD_REQUESTS"),
     ("a probe of an unknown fact", lambda l: l.update(probes={"A-SAVED": "everything"}), "BAD_PROBES"),
     ("a probe of an assertion that is not in the lane", lambda l: l.update(probes={"A-NOPE": "settings-persistence", **l["probes"]}), "BAD_PROBES"),
     ("no probes at all", lambda l: l.pop("probes"), "MISSING_FIELD"),
@@ -362,3 +364,18 @@ def test_everything_that_defines_the_robot_run_is_in_the_plan_digest(up, name, e
 def test_a_robot_lane_needs_a_real_fact_of_the_reference_check_for_its_assertion(up, name, edit, code):
     """Retest R2: a library that calls the API but ignores the answers was VERIFIED against a discount-defective target once the plan's probes were removed."""
     robot_refused(up, edit, code)
+
+
+def test_a_plan_or_lock_of_the_older_format_is_refused_by_name(up, golden_frozen):
+    """Retest N6: plan fields became required (requests, probes for every assertion, suite pins) with the schema version left at 1.0, so an older document failed with a bare MISSING_FIELD."""
+    plan = golden_plan()
+    assert plan["schema_version"] == K.PLAN_SCHEMA_VERSION == "1.1"
+    plan["schema_version"] = "1.0"
+    err = refused(up, plan, "UNSUPPORTED_PLAN_VERSION")
+    assert "unsupported schema_version '1.0'" in str(err) and "older runner" in str(err)
+    lock = copy.deepcopy(golden_frozen.lock_document())
+    assert lock["schema_version"] == "1.1"
+    lock["schema_version"] = "1.0"
+    with pytest.raises(PlanError) as exc:
+        thaw_lock(up, lock)
+    assert exc.value.code == "UNSUPPORTED_LOCK_VERSION" and "unsupported schema_version '1.0'" in str(exc.value) and "older runner" in str(exc.value)

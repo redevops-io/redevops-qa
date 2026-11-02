@@ -90,3 +90,34 @@ def test_a_file_that_cannot_be_listed_or_read_is_a_finding_not_a_crash(tmp_path)
         assert "UNREADABLE" in codes(r) and not r.ok
     finally:
         os.chmod(locked, 0o755)
+
+
+# ---- one immutable snapshot (retest N4) ---------------------------------------------------------------------------------------------------------
+def test_a_snapshot_verifies_and_inspects_exactly_like_the_source_it_was_taken_from(tmp_path):
+    from qa_evidence.inspector import inspect_bundle, inspect_source
+    from qa_evidence.sources import take_snapshot
+    from qa_evidence.verify import verify_source
+    base = build_base()
+    write_directory(base.files, str(tmp_path / "d"))
+    source = open_source(str(tmp_path / "d"))
+    snap = take_snapshot(source)
+    source.close()
+    assert snap.files == dict(base.files) and snap.kind == "directory"
+    assert verify_source(snap)[0].ok and verify_bundle(str(tmp_path / "d")).ok
+    assert inspect_source(snap).content_trusted == inspect_bundle(str(tmp_path / "d")).content_trusted is True
+
+
+def test_a_snapshot_does_not_change_when_the_files_do_and_keeps_the_problems_of_the_listing(tmp_path):
+    from qa_evidence.sources import take_snapshot
+    base = build_base()
+    write_directory(base.files, str(tmp_path / "d"))
+    os.mkfifo(tmp_path / "d" / "pipe")                                   # a special file: a problem of the listing, never read
+    source = open_source(str(tmp_path / "d"))
+    snap = take_snapshot(source)
+    source.close()
+    victim = next(iter(base.files))
+    (tmp_path / "d" / victim).write_bytes(b"changed after the snapshot")
+    assert snap.files[victim] == base.files[victim]
+    assert [c for c, _, _ in snap.problems] == ["SPECIAL_FILE"]
+    with pytest.raises(OSError):
+        b"".join(snap.read_chunks("never-read", 10))

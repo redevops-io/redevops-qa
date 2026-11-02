@@ -20,11 +20,11 @@ from qa_adapter_kit import ErrorCode, Limits, Status, SuiteRunRequest, SuiteRunn
 from qa_evidence.canon import dumps_canonical
 from qa_robot import RobotConfig, RobotSuiteAdapter, observation_document, parse_observations, suite_manifest
 
-from . import suites
+from . import constants as K, suites
 from .bundle import LaneOutcome
 from .judge import observation_path
 from .plan import FrozenLane
-from .safe_read import UnsafeRead, read_regular
+from .safe_read import Budget
 
 GUARD = str(Path(__file__).resolve().with_name("robot_guard.py"))        # what the adapter starts instead of ``-m robot``: Robot's command line plus a watch on the parent
 
@@ -41,7 +41,9 @@ def _outcome(fl: FrozenLane, version: str, status: str, raw: str, **kw: Any) -> 
 
 
 def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdir: str, cancel: Any, deadline_s: float, log: List[str],
-                   launcher: Optional[Sequence[str]] = None) -> LaneOutcome:
+                   launcher: Optional[Sequence[str]] = None, budget: Optional[Budget] = None) -> LaneOutcome:
+    budget = budget if budget is not None else Budget(K.DEFAULT_MAX_EVIDENCE_BYTES)
+    dropped_before = len(budget.dropped)
     try:
         version = importlib.metadata.version("robotframework")
     except importlib.metadata.PackageNotFoundError:
@@ -76,10 +78,9 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
     native: Dict[str, bytes] = {}
     for name in ("output.xml", "robot-summary.json"):
         p = out / name
-        try:
-            native[name] = read_regular(str(p), max_bytes=32 * 1024 * 1024, deadline_s=10.0, follow_symlinks=False)      # one descriptor, regular files only, byte and time caps
-        except UnsafeRead:
-            pass
+        data = budget.read(p, 32 * 1024 * 1024, name)           # one descriptor, regular files only, no symlink, byte and time caps, and the run's evidence budget
+        if data is not None:
+            native[name] = data
     native["adapter-result.json"] = (json.dumps(result.to_dict(), sort_keys=True, indent=2) + "\n").encode("utf-8")
     files: Dict[str, Tuple[bytes, str]] = {egress_file[0]: egress_file[1]}
     for rel, data in sorted(copies.items()):
@@ -103,6 +104,9 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
             status, raw = "NATIVE_UNAVAILABLE", "spawn-failed"
         else:
             raw = ("error-" + str(result.error_code.value if result.error_code else "unknown")).lower()[:60]
+    if len(budget.dropped) > dropped_before:
+        status, raw = "NATIVE_ERROR", "evidence-over-cap"
+        log.append(f"lane {fl.lane_id}: the evidence budget is used up: not kept: {', '.join(budget.dropped[dropped_before:][:5])}")
     counts = None
     if status in ("NATIVE_PASS", "NATIVE_FAIL", "NATIVE_SKIPPED") and result.native_assertions:
         n = result.native_assertions

@@ -108,3 +108,23 @@ def run_limited(argv, *, timeout=30.0, mem_mb=1536, env=None, cwd=None):
         proc.communicate()
         raise AssertionError(f"the child did not finish within {timeout:g} seconds (it was killed): {argv[:4]}")
     return proc.returncode, out, err
+
+
+def reap(proc, seen=()):
+    """The finalizer of a process test: whatever the test's own assertions did, the process it started and every process it was seen to start are killed (a failed assertion must not leave a browser or an
+    engine running)."""
+    import signal
+    for pid in set(seen) | (descendants(proc.pid) if proc.poll() is None else set()):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+    try:
+        proc.communicate(timeout=15)
+    except Exception:
+        pass

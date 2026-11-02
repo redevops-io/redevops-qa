@@ -105,9 +105,9 @@ def browser_lane() -> Dict[str, Any]:
 
 def robot_plan() -> Dict[str, Any]:
     """A one-lane plan with the Robot lane (``examples/robot-plan.json``)."""
-    return {"schema": K.PLAN_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": "golden-fixture-robot", "target": {"kind": "fixture-app"}, "lanes": [robot_lane()]}
+    return {"schema": K.PLAN_SCHEMA, "schema_version": K.PLAN_SCHEMA_VERSION, "plan_id": "golden-fixture-robot", "target": {"kind": "fixture-app"}, "lanes": [robot_lane()]}
 
 
 def golden_plan() -> Dict[str, Any]:
     lanes: List[Dict[str, Any]] = [browser_lane()]
-    return {"schema": K.PLAN_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": "golden-fixture", "target": {"kind": "fixture-app"}, "lanes": lanes}
+    return {"schema": K.PLAN_SCHEMA, "schema_version": K.PLAN_SCHEMA_VERSION, "plan_id": "golden-fixture", "target": {"kind": "fixture-app"}, "lanes": lanes}

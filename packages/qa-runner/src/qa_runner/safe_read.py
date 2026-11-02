@@ -11,6 +11,7 @@ import errno
 import os
 import stat
 import time
+from typing import Optional
 
 CHUNK = 64 * 1024
 
@@ -62,3 +63,34 @@ def read_regular(path: str, *, max_bytes: int, deadline_s: float = 10.0, follow_
 
 def _is_symlink_refusal(exc: OSError) -> bool:
     return exc.errno in (errno.ELOOP, getattr(errno, "EMLINK", -1))
+
+
+class Budget:
+    """A total byte budget for what the orchestrator keeps of a run (the lanes' output and logs together). A file that does not fit is NOT read and NOT kept, and its name is recorded: the evidence
+    collected so far stays, the result says it is incomplete (the run is never VERIFIED), and nothing is deleted. ``total`` comes from ``REDEVOPS_QA_MAX_EVIDENCE_BYTES`` (default 128 MiB: half the cap of a bundle)."""
+
+    def __init__(self, total: int):
+        self.total, self.used, self.dropped = total, 0, []
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.total - self.used)
+
+    def keep(self, name: str, data: bytes) -> bool:
+        """Account for bytes already in memory (a log tail, a record built here): ``False`` and recorded when they do not fit."""
+        if len(data) > self.remaining:
+            self.dropped.append(name)
+            return False
+        self.used += len(data)
+        return True
+
+    def read(self, path: str, limit: int, name: str) -> "Optional[bytes]":
+        """The bytes of the regular file at ``path`` if it fits the budget and ``limit``; ``None`` for a missing or unusable file, ``None`` and recorded for one that is too large for what is left."""
+        try:
+            data = read_regular(str(path), max_bytes=min(limit, self.remaining), deadline_s=10.0, follow_symlinks=False)
+        except UnsafeRead as exc:
+            if exc.code == "TOO_LARGE":
+                self.dropped.append(name)
+            return None
+        self.used += len(data)
+        return data

@@ -18,7 +18,7 @@ from qa_runner.orchestrate import RunOptions, run_plan
 from qa_runner.plan import freeze_plan
 from qa_runner.procs import FixtureApp
 from qa_runner.procs import child_env
-from qr_support import descendants, fake_robot, process_table, wait_for, wait_gone
+from qr_support import descendants, fake_robot, process_table, reap, wait_for, wait_gone
 
 
 @pytest.fixture(scope="module")
@@ -149,19 +149,22 @@ def test_a_two_lane_plan_runs_both_lanes_in_order_when_the_browser_lane_is_a_dou
 def test_killing_the_parent_without_warning_ends_the_engine_and_what_it_started(tmp_path):
     """Review finding M1: after SIGKILL of the runner the Robot engine (and a stray child of it) kept running; nothing watched the parent."""
     here = Path(__file__).resolve().parent
-    proc = subprocess.Popen([sys.executable, "-s", str(here / "slow_robot_parent.py")], env=child_env(str(tmp_path)), cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen([sys.executable, "-s", str(here / "slow_robot_parent.py")], env=child_env(str(tmp_path)), cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
     seen = set()
-
-    def engine_running():
-        table = process_table()
-        kids = descendants(proc.pid, table)
-        seen.update(kids)
-        return any("slow_robot.py" in table[k][2] for k in kids if k in table) and any("guard-stray" in table[k][2] for k in kids if k in table)
-    assert wait_for(engine_running, 60), "the engine and its stray child never started"
-    seen.update(descendants(proc.pid))
-    proc.kill()
-    proc.communicate(timeout=30)
-    assert [p for p in seen if not wait_gone(p, 25)] == []
+    try:
+        def engine_running():
+            table = process_table()
+            kids = descendants(proc.pid, table)
+            seen.update(kids)
+            return any("slow_robot.py" in table[k][2] for k in kids if k in table) and any("guard-stray" in table[k][2] for k in kids if k in table)
+        assert wait_for(engine_running, 60), "the engine and its stray child never started"
+        seen.update(descendants(proc.pid))
+        proc.kill()
+        proc.communicate(timeout=30)
+        assert [p for p in seen if not wait_gone(p, 25)] == []
+    finally:
+        reap(proc, seen)
 
 
 def test_the_engine_is_started_under_the_guard_that_watches_the_parent(up, frozen, tmp_path, monkeypatch):
@@ -184,10 +187,18 @@ def test_the_engine_is_started_under_the_guard_that_watches_the_parent(up, froze
 def test_the_native_files_of_the_engine_are_read_through_the_bounded_read(up, frozen, tmp_path, monkeypatch):
     """Retest R1 for the Robot lane: a report that is a FIFO or a symlink is not read (and not waited for); the lane ends as an error with no record."""
     import os
-    import qa_runner.lane_robot as lr
+    import qa_runner.safe_read as sr
     seen = []
-    real = lr.read_regular
-    monkeypatch.setattr(lr, "read_regular", lambda path, **kw: seen.append((os.path.basename(path), kw)) or real(path, **kw))
+    real = sr.read_regular
+    monkeypatch.setattr(sr, "read_regular", lambda path, **kw: seen.append((os.path.basename(path), kw)) or real(path, **kw))
     s = run(up, frozen, "live")
-    assert {n for n, _ in seen} == {"output.xml", "robot-summary.json"}
-    assert all(kw["follow_symlinks"] is False and kw["max_bytes"] == 32 * 1024 * 1024 for _, kw in seen)
+    assert {"output.xml", "robot-summary.json"} <= {n for n, _ in seen}
+    assert all(kw["follow_symlinks"] is False and kw["max_bytes"] <= 32 * 1024 * 1024 for _, kw in seen)
+
+
+def test_a_robot_lane_over_the_evidence_budget_is_an_engine_error_that_keeps_what_fits(up, frozen):
+    """Retest N2 for the Robot lane: the engine's files do not fit a 300 byte budget, nothing is deleted, the lane says so and is never verified."""
+    s = run_plan(up, frozen, RunOptions(robot_launcher=fake_robot("live"), lane_deadline_s=60, run_id="r0-test", max_evidence_bytes=300))
+    r = rep(s)
+    assert s.lanes == (("robot", "NATIVE_ERROR"),) and r["lanes"][0]["native"]["raw_status"] == "evidence-over-cap" and "evidence_incomplete" in r["extensions"]
+    assert s.outcome == "INCONCLUSIVE" and s.exit_code == K.EXIT_ENVIRONMENT and verify_files(s.bundle.files).ok

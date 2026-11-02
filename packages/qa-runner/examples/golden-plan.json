@@ -275,7 +275,7 @@
   ],
   "plan_id": "golden-fixture",
   "schema": "redevops-qa/plan",
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "target": {
     "kind": "fixture-app"
   }

@@ -98,7 +98,7 @@ class FrozenPlan:
         return assertion_set_digest(self.rows)
 
     def lock_document(self) -> Dict[str, Any]:
-        return {"schema": K.LOCK_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": self.plan_id, "plan": self.plan, "plan_digest": self.plan_digest,
+        return {"schema": K.LOCK_SCHEMA, "schema_version": K.PLAN_SCHEMA_VERSION, "plan_id": self.plan_id, "plan": self.plan, "plan_digest": self.plan_digest,
                 "plan_sha256": digest_of(self.plan), "pins": dict(self.pins), "runner_version": self.runner_version,
                 "lanes": [{"lane_id": l.lane_id, "engine": l.engine, "egress": l.egress, "requests": l.requests, "probes": l.probes, "spec_digest": l.spec_digest,
                            "spec_contract_hash": l.spec_contract_hash, "suite": l.suite, "suite_files": dict(sorted(l.suite_files.items())), "harness_pin": l.harness_pin,
@@ -126,8 +126,9 @@ def _parse_structure(doc: Any) -> List[Mapping[str, Any]]:
     if not isinstance(doc, dict):
         raise PlanError("PLAN_NOT_AN_OBJECT", "a plan is a JSON object")
     _only(doc, PLAN_KEYS, "the plan")
-    if doc["schema"] != K.PLAN_SCHEMA or doc["schema_version"] != K.SCHEMA_VERSION:
-        raise PlanError("UNSUPPORTED_PLAN_VERSION", f"this runner reads {K.PLAN_SCHEMA} {K.SCHEMA_VERSION} only")
+    if doc["schema"] != K.PLAN_SCHEMA or doc["schema_version"] != K.PLAN_SCHEMA_VERSION:
+        raise PlanError("UNSUPPORTED_PLAN_VERSION", f"unsupported schema_version {str(doc['schema_version'])[:20]!r}: this runner reads {K.PLAN_SCHEMA} {K.PLAN_SCHEMA_VERSION} only"
+                        + (" (a plan written for an older runner: from 1.1 a lane names `requests` and a probe for every assertion; rewrite it)" if doc["schema_version"] == "1.0" else ""))
     if not isinstance(doc["plan_id"], str) or not K.ASSERTION_ID_RE.fullmatch(doc["plan_id"]):
         raise PlanError("BAD_PLAN_ID", "plan_id must look like an identifier")
     target = doc["target"]
@@ -159,6 +160,10 @@ def _parse_structure(doc: Any) -> List[Mapping[str, Any]]:
 
 
 def _check_requests(req: Any, lid: str) -> None:
+    for key in ("required", "allowed"):
+        for item in req.get(key, []) if isinstance(req, dict) and isinstance(req.get(key), list) else []:
+            if isinstance(item, str) and ".." in item.split(" ", 1)[-1].split("/"):
+                raise PlanError("BAD_REQUESTS", f"lane {lid[:20]}: requests.{key} may not contain a '..' segment")
     if not isinstance(req, dict) or set(req) != {"required", "allowed"}:
         raise PlanError("BAD_REQUESTS", f"lane {lid[:20]}: requests is {{\"required\": [...], \"allowed\": [...]}} of 'METHOD /path' entries")
     for key in ("required", "allowed"):
@@ -275,8 +280,9 @@ def thaw_lock(up: Upstreams, lock_doc: Any) -> FrozenPlan:
     """Read a lock document: re-freeze the plan it carries and require every recorded digest and pin to be what that gives (no trust in the lock's own numbers)."""
     if not isinstance(lock_doc, dict) or lock_doc.get("schema") != K.LOCK_SCHEMA:
         raise PlanError("NOT_A_LOCK", f"this is not a {K.LOCK_SCHEMA} document")
-    if lock_doc.get("schema_version") != K.SCHEMA_VERSION:
-        raise PlanError("UNSUPPORTED_LOCK_VERSION", f"this runner reads {K.LOCK_SCHEMA} {K.SCHEMA_VERSION} only")
+    if lock_doc.get("schema_version") != K.PLAN_SCHEMA_VERSION:
+        raise PlanError("UNSUPPORTED_LOCK_VERSION", f"unsupported schema_version {str(lock_doc.get('schema_version'))[:20]!r}: this runner reads {K.LOCK_SCHEMA} {K.PLAN_SCHEMA_VERSION} only"
+                        + (" (a lock, or a bundle's plan lock, written by an older runner; run the plan again with this runner)" if lock_doc.get("schema_version") == "1.0" else ""))
     again = freeze_plan(up, lock_doc.get("plan"))
     if dumps_canonical(again.lock_document()) != dumps_canonical(lock_doc):
         raise PlanError("LOCK_MISMATCH", "the lock does not equal the freeze of the plan it carries (an edited expected value, digest, pin or tool version)")
