@@ -37,6 +37,7 @@ from .corroborate import REFERENCE_CHECK_PATH, request_log_path
 from .judge import observation_document, observation_path
 from .safe_read import Budget, UnsafeRead, read_regular
 from .plan import FrozenLane, FrozenPlan, materialise_spec
+from . import limits
 from .procs import FixtureApp, child_env, make_workdir, run_child
 
 MAX_BLOBS = 400
@@ -99,10 +100,10 @@ def exit_code_for(report: Mapping[str, Any], cancelled: bool = False) -> int:
     return K.EXIT_INCONCLUSIVE
 
 
-def _read_bounded(path: Path, limit: int) -> Optional[bytes]:
+def _read_bounded(path: Path, limit: int, root: Optional[str] = None) -> Optional[bytes]:
     """A file a lane or the target wrote: read through ``safe_read`` (one descriptor, regular files only, no symlink, byte and time caps), or ``None``."""
     try:
-        return read_regular(str(path), max_bytes=limit, deadline_s=10.0, follow_symlinks=False)
+        return read_regular(str(path), max_bytes=limit, deadline_s=10.0, follow_symlinks=False, root=root)
     except UnsafeRead:
         return None
 
@@ -129,7 +130,7 @@ def _unavailable(fl: FrozenLane, engine_version: str, raw: str, status: str = "N
 
 
 def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdir: str, opts: RunOptions, log: List[str], budget: Optional[Budget] = None) -> LaneOutcome:
-    budget = budget if budget is not None else Budget(_evidence_cap(opts))
+    budget = budget if budget is not None else Budget(_evidence_cap(opts), root=workdir)
     try:
         version = importlib.metadata.version("playwright")
     except importlib.metadata.PackageNotFoundError:
@@ -237,8 +238,7 @@ def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], work
 def _evidence_cap(opts: RunOptions) -> int:
     if opts.max_evidence_bytes is not None:
         return opts.max_evidence_bytes
-    env = os.environ.get("REDEVOPS_QA_MAX_EVIDENCE_BYTES", "")
-    return int(env) if env.isdigit() and int(env) > 0 else K.DEFAULT_MAX_EVIDENCE_BYTES
+    return limits.env_bytes("REDEVOPS_QA_MAX_EVIDENCE_BYTES", K.DEFAULT_MAX_EVIDENCE_BYTES)
 
 
 def _blob_names(blob_dir: Path) -> List[str]:
@@ -256,8 +256,8 @@ def _blob_names(blob_dir: Path) -> List[str]:
     return sorted(found)
 
 
-def _log_lines(path: Path) -> List[bytes]:
-    data = _read_bounded(path, 16 * 1024 * 1024)
+def _log_lines(path: Path, root: Optional[str] = None) -> List[bytes]:
+    data = _read_bounded(path, 16 * 1024 * 1024, root)
     return data.splitlines() if data else []
 
 
@@ -269,6 +269,7 @@ def run_plan(up: Upstreams, frozen: FrozenPlan, opts: RunOptions = RunOptions())
         raise PlanError("BAD_DEFECT", f"defect must be one of {list(K.DEFECTS)}")
     if opts.lane_deadline_s is not None and not 1 <= opts.lane_deadline_s <= 3600:
         raise PlanError("BAD_DEADLINE", "a lane deadline is between 1 and 3600 seconds")
+    _evidence_cap(opts)                                   # a bad REDEVOPS_QA_MAX_EVIDENCE_BYTES is refused here (exit 2), before a directory is made or anything starts
     workdir = make_workdir()
     try:
         return _run_in(up, frozen, opts, run_id, workdir)
@@ -284,7 +285,7 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
     origin: Optional[str] = None
     outcomes: List[LaneOutcome] = []
     reference: Optional[Dict[str, Any]] = None
-    budget = Budget(_evidence_cap(opts))                       # one budget for everything the run keeps of its lanes: over it, the rest is not kept, the run says so, nothing is deleted
+    budget = Budget(_evidence_cap(opts), root=workdir)         # one budget for everything the run keeps of its lanes: over it, the rest is not kept, the run says so, nothing is deleted
     try:
         try:
             origin = app.start()
@@ -294,9 +295,9 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         for fl in frozen.lanes:
             if fl.engine != K.ENGINE_PLAYWRIGHT:
                 raise PlanError("UNSUPPORTED_ENGINE", f"no runner for engine {fl.engine!r}")
-            before = len(_log_lines(req_path))
+            before = len(_log_lines(req_path, workdir))
             out = run_browser_lane(fl, run_id=run_id, origin=origin, workdir=workdir, opts=opts, log=log, budget=budget)
-            window = b"".join(l + b"\n" for l in _log_lines(req_path)[before:])       # what the target itself served while this lane ran
+            window = b"".join(l + b"\n" for l in _log_lines(req_path, workdir)[before:])       # what the target itself served while this lane ran
             kept = dict(out.files)
             if budget.keep(request_log_path(fl.lane_id), window):
                 kept[request_log_path(fl.lane_id)] = (window, "log")

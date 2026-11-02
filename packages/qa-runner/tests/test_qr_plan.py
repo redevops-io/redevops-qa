@@ -217,6 +217,9 @@ def test_assertion_ids_that_differ_only_in_case_are_refused_at_freeze_not_after_
     ("no probes at all", lambda l: l.pop("probes"), "MISSING_FIELD"),
     ("an empty set of probes", lambda l: l.update(probes={}), "BAD_PROBES"),
     ("one assertion that names no probe", lambda l: l["probes"].pop("A-SAVED"), "BAD_PROBES"),
+    ("the discount rule fact on the notification checkbox", lambda l: l["probes"].update({"A-NOTIF-ON": "discount-rule"}), "BAD_PROBES"),
+    ("the settings fact on the status text it does not read", lambda l: l["probes"].update({"A-SAVED": "settings-persistence"}), "BAD_PROBES"),
+    ("the settings fact on the URL", lambda l: l["probes"].update({"A-URL": "settings-persistence"}), "BAD_PROBES"),
 ])
 def test_the_requests_and_probes_of_a_lane_are_validated(up, name, edit, code):
     plan = golden_plan()
@@ -252,3 +255,16 @@ def test_a_plan_or_lock_of_the_older_format_is_refused_by_name(up, golden_frozen
     with pytest.raises(PlanError) as exc:
         thaw_lock(up, lock)
     assert exc.value.code == "UNSUPPORTED_LOCK_VERSION" and "unsupported schema_version '1.0'" in str(exc.value) and "older runner" in str(exc.value)
+
+
+def test_a_fact_of_the_reference_check_covers_only_the_assertion_it_speaks_for(up):
+    """Retest R2b: `_check_probes` only checked that the fact was one of the known names, so an order assertion labelled with the settings fact was 'backed' by a check that never looks at orders."""
+    err = refused(up, _with_probe(golden_plan(), "A-SAVED", "settings-persistence"), "BAD_PROBES")
+    assert "cannot cover assertion 'A-SAVED'" in str(err) and "Email notifications" in str(err)
+    frozen = freeze_plan(up, golden_plan())                                               # the right pairing, and ui-only for what the browser shows, freeze
+    assert frozen.lane("browser").probes == {"A-NOTIF-ON": "settings-persistence", "A-SAVED": "ui-only", "A-URL": "ui-only"}
+
+
+def _with_probe(plan, aid, fact):
+    plan["lanes"][0]["probes"][aid] = fact
+    return plan

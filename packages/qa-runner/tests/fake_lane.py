@@ -2,7 +2,7 @@
 """A TEST DOUBLE for the lane child process. It exists only in the tests, to exercise what the parent does with a child that finishes, fails, hangs, crashes or
 spawns a stray process, without a browser. The product has no such mode: nothing in ``qa_runner`` can produce a result without running the engine.
 
-usage: python fake_lane.py MODE INPUT.json [PIDFILE]     (modes: pass, env-fail, settings-bug, hang, exit7, garbage, orphan, disagree, native-fail-verified, unknown-field, junk-rows, bulk, forged-verdict)
+usage: python fake_lane.py MODE INPUT.json [PIDFILE]     (modes: pass, env-fail, settings-bug, hang, exit7, garbage, orphan, disagree, native-fail-verified, unknown-field, junk-rows, bulk, blobs-symlink, forged-verdict)
 """
 import json
 import os
@@ -56,6 +56,13 @@ elif mode == "bulk":
     for i in range(20):
         blob = bytes([i]) * 100_000
         (out / "blobs" / hashlib.sha256(blob).hexdigest()).write_bytes(blob)
+elif mode == "blobs-symlink":
+    result("PASS", 0, ALL_PASS, rows())
+    import hashlib
+    (out / "elsewhere").mkdir(exist_ok=True)
+    blob = b"a blob in a directory that a link stands in for"
+    (out / "elsewhere" / hashlib.sha256(blob).hexdigest()).write_bytes(blob)
+    (out / "blobs").symlink_to(out / "elsewhere")             # the blobs directory is a symbolic link
 elif mode == "junk-rows":
     result("PASS", 0, ALL_PASS, [1, "x", {"assertion_id": 7}])          # rows that are not rows
 elif mode == "hang":

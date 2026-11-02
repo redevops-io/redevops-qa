@@ -18,7 +18,7 @@ OTHER_SRC = ("qa-bridge", "qa-playwright", "qa-egress", "qa-adapter-kit", "qa-ch
 
 
 def _run(work: Path, tests: Sequence[str]) -> subprocess.CompletedProcess:
-    paths = [str(work / "src")] + [str(ROOT / "packages" / p / "src") for p in OTHER_SRC]
+    paths = [str(work / "src"), str(work / "kit")] + [str(ROOT / "packages" / p / "src") for p in OTHER_SRC if p != "qa-adapter-kit"]
     ini = work / "mutant.ini"
     ini.write_text("[pytest]\npythonpath = %s\naddopts = -p no:cacheprovider -q -x\nfilterwarnings = error\n" % " ".join(paths), encoding="utf-8")
     env = {k: os.environ[k] for k in KEEP_ENV if k in os.environ}
@@ -30,6 +30,7 @@ def _run(work: Path, tests: Sequence[str]) -> subprocess.CompletedProcess:
 def _copy(tmp: Path) -> Path:
     work = tmp / "mutant"
     shutil.copytree(PKG / "src", work / "src", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(ROOT / "packages" / "qa-adapter-kit" / "src", work / "kit", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))      # a guard that lives in the kit can be removed too
     return work
 
 
@@ -39,7 +40,7 @@ def baseline_result(tmp: Path, tests: Sequence[str]) -> subprocess.CompletedProc
 
 def mutant_result(tmp: Path, rel: str, old, new, tests: Sequence[str]) -> subprocess.CompletedProcess:
     work = _copy(tmp)
-    target = work / "src" / "qa_runner" / rel
+    target = work / "kit" / "qa_adapter_kit" / rel[len("kit/"):] if rel.startswith("kit/") else work / "src" / "qa_runner" / rel
     text = target.read_text(encoding="utf-8")
     olds, news = ((old,), (new,)) if isinstance(old, str) else (tuple(old), tuple(new))
     for o, n in zip(olds, news):
