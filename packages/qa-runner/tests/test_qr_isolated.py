@@ -144,3 +144,49 @@ def test_the_finalizer_of_the_process_tests_kills_what_a_failed_assertion_would_
     finally:
         reap(proc, seen)
     assert wait_gone(proc.pid, 10) and wait_gone(child, 10)
+
+
+def blocked_reader(pidfile, seconds=60):
+    """A stand-in for a worker blocked in the kernel: it starts the product's own watchdog (as the real worker does in ``main``) and then never returns."""
+    return [sys.executable, "-s", "-c", f"import os, time\nfrom qa_runner import read_worker as w\nopen({str(pidfile)!r}, 'w').write(str(os.getpid()))\nw._watch(w._parent(), time.monotonic() + {seconds})\ntime.sleep(300)"]
+
+
+def test_a_worker_ends_itself_when_the_process_that_started_it_is_killed(tmp_path):
+    """Retest R2-8: SIGKILL of the parent while it waits left the worker alive with ppid 1."""
+    pidfile = tmp_path / "pid"
+    script = tmp_path / "t.py"
+    script.write_text(f"import sys\nfrom qa_runner import isolated\nsl = {blocked_reader(pidfile)!r}\nisolated.read_file('/x', max_bytes=100, deadline_s=120, argv=sl)\n")
+    parent = subprocess.Popen([sys.executable, "-s", str(script)], env=child_env(str(tmp_path)), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    worker = None
+    try:
+        end = time.monotonic() + 20
+        while not (pidfile.exists() and pidfile.read_text()) and time.monotonic() < end:
+            time.sleep(0.1)
+        worker = int(pidfile.read_text())
+        assert alive(worker)
+        parent.kill()
+        parent.wait()
+        assert wait_gone(worker, 10), "the worker outlived its parent"
+    finally:
+        parent.kill()
+        if worker is not None and alive(worker):
+            os.kill(worker, signal.SIGKILL)
+
+
+def test_a_worker_ends_itself_when_the_deadline_it_was_given_has_passed_even_if_nobody_kills_it(tmp_path):
+    pidfile = tmp_path / "pid"
+    me = subprocess.Popen(blocked_reader(pidfile, seconds=1.0), env={**child_env(str(tmp_path)), "REDEVOPS_QA_READ_PARENT": str(os.getpid())}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        assert me.wait(timeout=20) == 3
+    finally:
+        me.kill()
+
+
+def test_the_worker_is_given_the_deadline_and_the_parent_it_must_watch(tmp_path):
+    out = tmp_path / "seen.json"
+    stand_in = [sys.executable, "-c", f"import json, os, sys; open({str(out)!r}, 'w').write(json.dumps([sys.argv[1:], os.environ.get('REDEVOPS_QA_READ_PARENT')]))"]
+    with pytest.raises(isolated.IsolatedReadError):
+        isolated.read_file("/x", max_bytes=100, deadline_s=7.0, argv=stand_in)
+    import json
+    args, parent = json.loads(out.read_text())
+    assert args[0] == "file" and args[2] == "100" and float(args[3]) == 7.0 and parent == str(os.getpid())
