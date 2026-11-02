@@ -16,7 +16,7 @@ from qa_runner.orchestrate import RunOptions, run_plan
 from qa_runner.plan import freeze_plan, load_plan_or_lock
 from qr_support import fake, fake_robot
 
-DEMO_PLAN_DIGEST = "sha256:6f960c30bb013f8a57bb83bc914918b809fa35d2d46e2848ad9d14ea4f55e0e3"
+DEMO_PLAN_DIGEST = "sha256:3e53d5b170e6541bd7fb37188a17c99c766af1d161d5aed452af68a56e68b943"
 DEMO_EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "demo-plan.json"
 
 

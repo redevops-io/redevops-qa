@@ -252,3 +252,74 @@ def test_a_generated_run_id_has_64_random_bits_and_fits_the_lane_ids_and_is_not_
     from agent_harness.qa.blobs import find_truncated_digests
     assert not find_truncated_digests({"run_id": next(iter(ids)) + ".browser"})
     assert len(ids) == 200 and all(K.RUN_ID_RE.fullmatch(i) and len(i.rsplit("-", 1)[1]) == 13 for i in ids)
+
+
+def test_the_reference_check_of_a_stalled_target_ends_when_the_run_is_cancelled(up):
+    """Review finding R3: the call sits outside every lane deadline and the signal handler only sets a flag; a target that stalls at that point could be ended only with SIGKILL."""
+    import socket
+    from qa_runner.orchestrate import _reference_check
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(2)
+    srv.settimeout(30)
+
+    def stall():                                          # a capped server: it answers the headers and then stays silent for 15 seconds at most
+        try:
+            conn, _ = srv.accept()
+            conn.settimeout(5)
+            conn.recv(4096)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n")
+            time.sleep(15)
+        except OSError:
+            pass
+    threading.Thread(target=stall, daemon=True).start()
+    cancel = CancelToken()
+    threading.Timer(1.0, cancel.cancel).start()
+    log = []
+    t0 = time.monotonic()
+    assert _reference_check(f"http://127.0.0.1:{srv.getsockname()[1]}", log, cancel) is None
+    assert time.monotonic() - t0 < 8 and "could not run (CheckAborted)" in log[0]
+    srv.close()
+
+
+def test_the_report_and_the_summary_name_the_assertions_that_have_no_independent_probe(up, golden_frozen):
+    """Retest R2: the plan declares A-SAVED and A-URL ui-only; the run says so in the report (extension) instead of leaving it to the plan file."""
+    s = run(up, golden_frozen, "pass")
+    assert report(s)["extensions"]["no_independent_probe"] == "browser:A-SAVED,browser:A-URL"
+
+
+def test_a_run_over_its_evidence_budget_keeps_what_fits_says_so_and_is_never_a_crash(up, golden_frozen, monkeypatch):
+    """Retest N2: the lane's output was read per file with no total cap; an over-cap bundle ended as `internal error: BuildError` (exit 6) and the evidence of a completed run was lost."""
+    s = run_plan(up, golden_frozen, RunOptions(lane_command=fake("bulk"), lane_deadline_s=30, run_id="r0-test", max_evidence_bytes=450_000))
+    r = report(s)
+    assert s.lanes == (("browser", "NATIVE_ERROR"),) and s.outcome == "INCONCLUSIVE" and s.exit_code == K.EXIT_ENVIRONMENT
+    assert r["lanes"][0]["native"]["raw_status"] == "evidence-over-cap" and "evidence_incomplete" in r["extensions"]
+    kept = [p for p in s.bundle.files if "/blobs/" in p]
+    assert 0 < len(kept) < 20 and sum(len(s.bundle.files[p]) for p in kept) <= 450_000          # the evidence that fits is in the bundle
+    assert verify_files(s.bundle.files).ok and "evidence budget of 450000 bytes is used up" in s.bundle.files["logs/orchestrator.log"].decode()
+
+
+def test_the_evidence_budget_is_configurable_and_the_default_is_conservative(up, golden_frozen, monkeypatch):
+    from qa_runner.orchestrate import _evidence_cap
+    assert _evidence_cap(RunOptions()) == K.DEFAULT_MAX_EVIDENCE_BYTES == 128 * 1024 * 1024
+    monkeypatch.setenv("REDEVOPS_QA_MAX_EVIDENCE_BYTES", "1000000")
+    assert _evidence_cap(RunOptions()) == 1_000_000 and _evidence_cap(RunOptions(max_evidence_bytes=5)) == 5
+    monkeypatch.setenv("REDEVOPS_QA_MAX_EVIDENCE_BYTES", "-1")
+    assert _evidence_cap(RunOptions()) == K.DEFAULT_MAX_EVIDENCE_BYTES
+
+
+def test_a_bundle_the_format_refuses_is_rebuilt_without_the_blobs_not_thrown_away(up, golden_frozen, monkeypatch):
+    import qa_runner.orchestrate as orch
+    from qa_evidence.build import BuildError
+    real = orch.build_run_bundle
+    calls = []
+
+    def refuse_once(up_, inputs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise BuildError([("OVERSIZE_BUNDLE", "", "too big")])
+        return real(up_, inputs)
+    monkeypatch.setattr(orch, "build_run_bundle", refuse_once)
+    s = run_plan(up, golden_frozen, RunOptions(lane_command=fake("bulk"), lane_deadline_s=30, run_id="r0-test"))
+    assert len(calls) == 2 and s.lanes == (("browser", "NATIVE_ERROR"),) and not [p for p in s.bundle.files if "/blobs/" in p]
+    assert "evidence_incomplete" in report(s)["extensions"] and verify_files(s.bundle.files).ok

@@ -83,3 +83,48 @@ def wait_for(predicate, timeout=60.0):
             return True
         time.sleep(0.1)
     return predicate()
+
+
+def run_limited(argv, *, timeout=30.0, mem_mb=1536, env=None, cwd=None):
+    """Run ``argv`` in a child that cannot take the machine down: its own process group, killed whole at ``timeout`` (the test FAILS then, it never waits longer), a cap on its address space
+    where the platform enforces one (Linux: ``RLIMIT_AS``; macOS ignores it, the timeout and the capped writers are the protection there) and a CPU-time cap."""
+    import resource
+    import signal
+    import subprocess
+
+    def limits():
+        os.setsid()
+        for what, value in ((getattr(resource, "RLIMIT_AS", None), mem_mb * 1024 * 1024), (resource.RLIMIT_CPU, int(timeout) + 5)):
+            if what is not None:
+                try:
+                    resource.setrlimit(what, (value, value))
+                except (ValueError, OSError):
+                    pass
+    proc = subprocess.Popen(argv, preexec_fn=limits, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate()
+        raise AssertionError(f"the child did not finish within {timeout:g} seconds (it was killed): {argv[:4]}")
+    return proc.returncode, out, err
+
+
+def reap(proc, seen=()):
+    """The finalizer of a process test: whatever the test's own assertions did, the process it started and every process it was seen to start are killed (a failed assertion must not leave a browser or an
+    engine running)."""
+    import signal
+    for pid in set(seen) | (descendants(proc.pid) if proc.poll() is None else set()):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+    try:
+        proc.communicate(timeout=15)
+    except Exception:
+        pass

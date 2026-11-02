@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from qa_evidence.build import BuildError, read_files
 from qa_evidence.canon import CanonError, loads_strict, safe_text
-from qa_evidence.inspector import inspect_bundle
+from qa_evidence.inspector import inspect_source
 from qa_evidence.sources import SourceError
 
 RECORD_SUFFIX = "/native/run-record.json"
@@ -30,8 +30,10 @@ def chain_heads(files: Dict[str, bytes]) -> List[Dict[str, Any]]:
     return out
 
 
-def inspect_text(location: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None) -> str:
-    ins = inspect_bundle(location, anchor=anchor, plan_digest=plan_digest)
+def inspect_text(snapshot: Any, label: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None) -> str:
+    """The listing of a bundle, from ONE snapshot of it (``isolated.snapshot_bundle``): the verification, the summary and the chain heads all see the same bytes."""
+    location = label
+    ins = inspect_source(snapshot, anchor=anchor, plan_digest=plan_digest)
     v = ins.verification
     t = lambda x, n=200: safe_text(x, n)         # noqa: E731
     lines = [f"bundle {t(location)}: {v.form}, {v.file_count} file(s), manifest digest {t(v.manifest_digest)}",
@@ -55,11 +57,7 @@ def inspect_text(location: str, *, anchor: Optional[str] = None, plan_digest: Op
                          f"independent verdicts {lane['independent_verdicts']}")
         for d in s["engine_verifier_disagreements"]:
             lines.append(f"  ENGINE_VERIFIER_DISAGREE lane {t(d['lane_id'])}: native {t(d['native_status'])}, verdicts {t(', '.join(d['verdict_states']) or 'none')}")
-    try:
-        files = read_files(location)
-    except (BuildError, SourceError):
-        files = {}
-    for h in chain_heads(files):
+    for h in chain_heads(snapshot.files):
         lines.append(f"chain lane {t(h['lane'])}: {h['events']} events, head {t(h['event_head'])}; {h['receipts']} receipts, head {t(h['receipt_head'])}; "
                      f"{'sealed, harness outcome ' + t(h['sealed_outcome']) if h['sealed'] else 'NOT sealed'}")
     lines.append("files:")

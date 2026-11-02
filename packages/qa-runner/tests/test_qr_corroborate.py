@@ -168,8 +168,31 @@ def test_a_reference_check_that_agrees_with_a_failure_leaves_the_failure(up, lan
 # ---- the plan fixes these expectations in the plan digest -----------------------------------------------------------------------------------------
 def test_the_request_expectations_and_probes_are_part_of_the_plan_digest(up):
     base = freeze_plan(up, golden_plan())
-    for mutate in (lambda l: l["requests"]["required"].pop(), lambda l: l["requests"]["allowed"].append("GET /admin"), lambda l: l.update(probes={}),
-                   lambda l: l.update(egress="origin-only", probes={"A-SAVED": "settings-persistence"})):
+    for mutate in (lambda l: l["requests"]["required"].pop(), lambda l: l["requests"]["allowed"].append("GET /admin"), lambda l: l["probes"].update({"A-NOTIF-ON": "ui-only"}),
+                   lambda l: l["probes"].update({"A-SAVED": "settings-persistence"})):
         plan = golden_plan()
         mutate(plan["lanes"][0])
         assert freeze_plan(up, plan).plan_digest != base.plan_digest
+
+
+def test_an_assertion_the_plan_declares_ui_only_does_not_need_the_reference_check_and_the_others_still_do(up, lane):
+    """Retest R2: every assertion names a probe or says ui-only; ui-only is not a fact of the reference check, so it is neither vetoed by it nor waits for it."""
+    files = {p: d for p, d in browser_files("none").items() if p != PROBE}
+    states = judged(up, lane, files)
+    assert states["A-SAVED"][0] == states["A-URL"][0] == "VERIFIED" and states["A-NOTIF-ON"] == ("INCONCLUSIVE", "EVIDENCE_MISSING")
+    from qa_runner.corroborate import probe_verdicts
+    assert probe_verdicts(lane, files) == {"A-NOTIF-ON": "missing"}
+
+
+@pytest.mark.parametrize("name,edit_fn", [
+    ("an extra key", lambda d: d.update(note="x")),
+    ("checked changed", lambda d: d.update(checked=["discount-rule"])),
+    ("deviations not a list", lambda d: d.update(deviations={})),
+    ("a deviation of an unknown check", lambda d: d.update(deviations=[{"check": "x", "where": "/", "expected": 1, "actual": 2}])),
+    ("a deviation with a missing field", lambda d: d.update(deviations=[{"check": "discount-rule", "where": "/"}])),
+    ("a deviation with an extra field", lambda d: d.update(deviations=[{"check": "discount-rule", "where": "/", "expected": 1, "actual": 2, "z": 3}])),
+])
+def test_a_reference_check_document_of_another_shape_is_missing_not_clean(up, lane, name, edit_fn):
+    """Retest N9: the shape of the document was not validated; only the check names were read, so a reshaped or padded document passed as a clean check."""
+    files = edit(browser_files("none"), PROBE, edit_fn)
+    assert judged(up, lane, files)["A-NOTIF-ON"] == ("INCONCLUSIVE", "EVIDENCE_MISSING"), name

@@ -20,7 +20,7 @@ from typing import List, Optional, TextIO
 from qa_adapter_kit.supervisor import CancelToken
 from qa_evidence.canon import safe_text
 from qa_evidence.constants import ANCHOR_ABSENT_NOTICE
-from qa_evidence.inspector import inspect_bundle
+from qa_evidence.inspector import inspect_source
 from qa_evidence.render import render_html, render_text
 from qa_evidence.sources import SourceError
 
@@ -33,6 +33,7 @@ from .golden import demo_plan
 from .inspect_cmd import inspect_text
 from .orchestrate import RunOptions, RunSummary, new_run_id, run_plan
 from .plan import MAX_PLAN_BYTES, FrozenPlan, freeze_plan, load_plan_or_lock
+from . import isolated
 
 
 def _deadline(text: str) -> int:
@@ -85,18 +86,16 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _read_plan(path: str) -> bytes:
-    """The bytes of a plan: a regular file, read with a cap (a size from ``stat`` is 0 for ``/dev/zero``, a FIFO or a process substitution, so the cap is on what is read)."""
+    """The bytes of a plan or lock: a regular file only, at most ``MAX_PLAN_BYTES``, read by a child process that is killed at ``REDEVOPS_QA_READ_TIMEOUT`` seconds (default 30), so a stalled mount, a FIFO
+    or a file that keeps growing cannot hold this process or its memory (see ``isolated``)."""
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
-        with os.fdopen(fd, "rb") as fh:
-            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
-                raise PlanError("PLAN_NOT_A_FILE", f"{safe_text(path)} is not a regular file")
-            data = fh.read(MAX_PLAN_BYTES + 1)
-        if len(data) > MAX_PLAN_BYTES:
-            raise PlanError("PLAN_TOO_LARGE", f"a plan is at most {MAX_PLAN_BYTES} bytes")
-        return data
-    except OSError as exc:
-        raise PlanError("PLAN_UNREADABLE", f"cannot read {safe_text(path)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+        return isolated.read_file(path, max_bytes=MAX_PLAN_BYTES)
+    except isolated.IsolatedReadError as exc:
+        if exc.code == "CANCELLED":
+            raise EnvironmentFault("CANCELLED", "cancelled while reading the plan") from None
+        code = {"NOT_A_REGULAR_FILE": "PLAN_NOT_A_FILE", "TOO_LARGE": "PLAN_TOO_LARGE", "TIMEOUT": "PLAN_READ_TIMEOUT"}.get(exc.code, "PLAN_UNREADABLE")
+        detail = f"a plan is at most {MAX_PLAN_BYTES} bytes" if exc.code == "TOO_LARGE" else f"cannot read {safe_text(path)}: {safe_text(str(exc), 80)}"
+        raise PlanError(code, detail) from None
 
 
 def _doctor(args, out: TextIO, err: TextIO) -> int:
@@ -181,7 +180,7 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
     _print_summary(summary, bundle_dir, out)
     if report_text:
         print("", file=out)
-        out.write(render_text(inspect_bundle(str(bundle_dir))))          # no plan digest supplied: the one this process computed would only match itself
+        out.write(render_text(inspect_source(_snapshot(str(bundle_dir)))))          # no plan digest supplied: the one this process computed would only match itself
     return summary.exit_code
 
 
@@ -200,6 +199,8 @@ def _print_summary(summary: RunSummary, bundle_dir: Path, out: TextIO) -> None:
     ext = report.get("extensions") or {}
     if "egress_gateway_denied" in ext or "egress_gate_denied" in ext:
         print(f"  egress: the gateway denied {ext.get('egress_gateway_denied', 0)} request(s), the in-browser request gate denied {ext.get('egress_gate_denied', 0)} (details in the lane's logs)", file=out)
+    if ext.get("no_independent_probe"):
+        print(f"  no independent probe (declared ui-only in the plan; the verdict rests on the engine's record and the target's request log): {safe_text(ext['no_independent_probe'], 200)}", file=out)
     if ext.get("test_double"):
         print("  TEST DOUBLE: a lane of this run was produced by a test double; no assertion of it can be verified", file=out)
     print(f"  assertions: frozen {acc['frozen']} = verified {acc['verified']} + failed {acc['failed']} + inconclusive {acc['inconclusive']} + unaccounted {acc['unaccounted']}", file=out)
@@ -231,11 +232,18 @@ def _demo(args, out: TextIO, err: TextIO) -> int:
 NOT_RECOMPUTED = "verdicts NOT recomputed by this command: only the bundle's files, digests and accounting were checked; what the bundle says is not shown to be true"
 
 
-def _inspection(args):
+def _snapshot(location: str):
+    """ONE immutable snapshot of a bundle, taken by a child that is killed at the deadline (``isolated``); everything ``report`` and ``inspect`` look at comes from it."""
     try:
-        return inspect_bundle(args.bundle, anchor=args.anchor, plan_digest=args.plan_digest)
-    except SourceError as exc:
-        raise PlanError("BUNDLE_UNREADABLE", safe_text(str(exc))) from None
+        return isolated.snapshot_bundle(location)
+    except isolated.IsolatedReadError as exc:
+        if exc.code == "CANCELLED":
+            raise EnvironmentFault("CANCELLED", "cancelled while reading the bundle") from None
+        raise PlanError("BUNDLE_READ_TIMEOUT" if exc.code == "TIMEOUT" else "BUNDLE_UNREADABLE", safe_text(str(exc), 200)) from None
+
+
+def _inspection(args):
+    return inspect_source(_snapshot(args.bundle), anchor=args.anchor, plan_digest=args.plan_digest)
 
 
 def _report(args, out: TextIO, err: TextIO) -> int:
@@ -261,10 +269,7 @@ def _report(args, out: TextIO, err: TextIO) -> int:
 
 
 def _inspect(args, out: TextIO, err: TextIO) -> int:
-    try:
-        text = inspect_text(args.bundle, anchor=args.anchor, plan_digest=args.plan_digest)
-    except SourceError as exc:
-        raise PlanError("BUNDLE_UNREADABLE", safe_text(str(exc))) from None
+    text = inspect_text(_snapshot(args.bundle), args.bundle, anchor=args.anchor, plan_digest=args.plan_digest)
     out.write(text)
     return 0 if text.splitlines()[1].startswith("verification: OK") else 1
 
@@ -290,6 +295,9 @@ def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Op
     except RunnerError as exc:
         print(f"error: {safe_text(str(exc))}", file=err)
         return K.EXIT_USAGE
+    except KeyboardInterrupt:
+        print("cancelled", file=err)
+        return K.EXIT_ENVIRONMENT
     except Exception as exc:
         # the class of the failure, and the module name when an import failed (ours, not content from a page or a bundle)
         missing = f" (module {safe_text(exc.name, 80)})" if isinstance(exc, ImportError) and exc.name else ""

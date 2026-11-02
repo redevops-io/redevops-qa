@@ -14,6 +14,7 @@ import importlib.metadata
 import json
 import math
 import os
+import re
 import signal
 import sys
 from dataclasses import dataclass, replace
@@ -31,6 +32,7 @@ from .bundle import LaneOutcome
 from .judge import observation_path
 from .plan import FrozenLane
 from .procs import child_env, run_child
+from .safe_read import Budget, UnsafeRead, read_regular
 
 GUARD = str(Path(__file__).resolve().with_name("robot_guard.py"))        # what the adapter starts instead of ``-m robot``: Robot's command line plus a watch on the parent
 
@@ -47,7 +49,9 @@ def _outcome(fl: FrozenLane, version: str, status: str, raw: str, **kw: Any) -> 
 
 
 def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, deadline_s: float, log: List[str],
-               launcher: Optional[Sequence[str]] = None) -> LaneOutcome:
+               launcher: Optional[Sequence[str]] = None, budget: Optional[Budget] = None) -> LaneOutcome:
+    budget = budget if budget is not None else Budget(K.DEFAULT_MAX_EVIDENCE_BYTES)
+    dropped_before = len(budget.dropped)
     try:
         version = importlib.metadata.version("robotframework")
     except importlib.metadata.PackageNotFoundError:
@@ -76,8 +80,9 @@ def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, 
     native: Dict[str, bytes] = {}
     for name in ("output.xml", "robot-summary.json"):
         p = out / name
-        if p.is_file() and not p.is_symlink() and p.stat().st_size <= 32 * 1024 * 1024:
-            native[name] = p.read_bytes()
+        data = budget.read(p, 32 * 1024 * 1024, name)           # one descriptor, regular files only, no symlink, byte and time caps, and the run's evidence budget
+        if data is not None:
+            native[name] = data
     native["adapter-result.json"] = (json.dumps(result.to_dict(), sort_keys=True, indent=2) + "\n").encode("utf-8")
     files: Dict[str, Tuple[bytes, str]] = {egress_file[0]: egress_file[1]}
     for rel, data in sorted(copies.items()):
@@ -101,6 +106,9 @@ def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, 
             status, raw = "NATIVE_UNAVAILABLE", "spawn-failed"
         else:
             raw = ("error-" + str(result.error_code.value if result.error_code else "unknown")).lower()[:60]
+    if len(budget.dropped) > dropped_before:
+        status, raw = "NATIVE_ERROR", "evidence-over-cap"
+        log.append(f"lane {fl.lane_id}: the evidence budget is used up: not kept: {', '.join(budget.dropped[dropped_before:][:5])}")
     counts = None
     if status in ("NATIVE_PASS", "NATIVE_FAIL", "NATIVE_SKIPPED") and result.native_assertions:
         n = result.native_assertions
@@ -152,34 +160,46 @@ def _write_outcome(outcome: LaneOutcome, log: List[str], out: Path) -> None:
     (out / "outcome.json").write_bytes(dumps_canonical(doc))
 
 
-def _read_outcome(fl: Any, out: Path, limit: int = 64 * 1024 * 1024) -> Tuple[Optional[LaneOutcome], List[str]]:
-    path = out / "outcome.json"
+DATA_REF_RE = re.compile(r"^data/[0-9]{1,6}\.bin$")
+MAX_OUTCOME_FILES = 512
+
+
+def _read_outcome(fl: Any, out: Path, budget: Budget, limit: int = 64 * 1024 * 1024) -> Tuple[Optional[LaneOutcome], List[str]]:
+    """What the Robot lane child wrote, read through the bounded read and the run's evidence budget: ``outcome.json`` and the files it names (only ``data/<n>.bin``, at most 512 of them), each by one
+    descriptor (regular file, no symlink, byte cap, deadline); a file that does not fit the budget is not kept and the lane is an engine error (``evidence-over-cap``)."""
+    dropped_before = len(budget.dropped)
     try:
-        if not path.is_file() or path.is_symlink() or path.stat().st_size > K.MAX_CHILD_JSON_BYTES:
+        raw = budget.read(out / "outcome.json", K.MAX_CHILD_JSON_BYTES, "outcome.json")
+        if raw is None:
             return None, []
-        doc = loads_strict(path.read_bytes())
+        doc = loads_strict(raw)
         if not isinstance(doc, dict) or doc.get("schema") != K.LANE_RESULT_SCHEMA or doc.get("status") != "COMPLETED":
             return None, []
-
-        def get(rel: str) -> bytes:
-            p = (out / rel).resolve()
-            if out.resolve() not in p.parents or not p.is_file() or p.stat().st_size > limit:
-                raise ValueError("a file the lane named is not inside its output directory")
-            return p.read_bytes()
-        outcome = LaneOutcome(lane_id=fl.lane_id, engine_name=fl.engine, engine_version=str(doc["engine_version"]), native_status=str(doc["native_status"]),
-                              raw_status=str(doc["raw_status"]), exit_code=doc["exit_code"] if isinstance(doc["exit_code"], int) else None,
-                              native_files={str(rel): get(ref) for rel, ref in doc["native"].items()},
-                              files={str(p): (get(m["data"]), str(m["role"])) for p, m in doc["files"].items()},
-                              counts=doc["counts"] if isinstance(doc["counts"], dict) else None)
+        native_refs, file_refs = doc["native"], doc["files"]
+        if not isinstance(native_refs, dict) or not isinstance(file_refs, dict) or len(native_refs) + len(file_refs) > MAX_OUTCOME_FILES:
+            return None, []
+        for ref in list(native_refs.values()) + [m["data"] for m in file_refs.values()]:
+            if not isinstance(ref, str) or not DATA_REF_RE.fullmatch(ref):
+                return None, []
+        native = {str(rel): budget.read(out / ref, limit, f"native/{rel}") for rel, ref in native_refs.items()}
+        files = {str(p): (budget.read(out / m["data"], limit, p), str(m["role"])) for p, m in file_refs.items()}
+        over = len(budget.dropped) > dropped_before
+        status, raw_status = (("NATIVE_ERROR", "evidence-over-cap") if over else (str(doc["native_status"]), str(doc["raw_status"])))
+        outcome = LaneOutcome(lane_id=fl.lane_id, engine_name=fl.engine, engine_version=str(doc["engine_version"]), native_status=status,
+                              raw_status=raw_status, exit_code=doc["exit_code"] if isinstance(doc["exit_code"], int) else None,
+                              native_files={k: v for k, v in native.items() if v is not None},
+                              files={k: (d, r) for k, (d, r) in files.items() if d is not None},
+                              counts=doc["counts"] if isinstance(doc["counts"], dict) and not over else None)
         return outcome, [str(x)[:300] for x in doc.get("log", [])][:50]
-    except (OSError, ValueError, KeyError, TypeError, CanonError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, CanonError):
         return None, []
 
 
 def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdir: str, cancel: Any, deadline_s: float, log: List[str],
-                   launcher: Optional[Sequence[str]] = None) -> LaneOutcome:
+                   launcher: Optional[Sequence[str]] = None, budget: Optional[Budget] = None) -> LaneOutcome:
     """Run the Robot lane in a child process under the kit supervisor, like the browser lane: the same deadline, cancel, output limit and process-group kill, and a child that
     ends itself (and the engine it started) if this process dies. The engine itself runs under its own supervisor inside the child."""
+    budget = budget if budget is not None else Budget(K.DEFAULT_MAX_EVIDENCE_BYTES)
     try:
         version = importlib.metadata.version("robotframework")
     except importlib.metadata.PackageNotFoundError:
@@ -196,7 +216,7 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
     out.mkdir(parents=True)
     cfg = {"schema": K.LANE_INPUT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "lane_id": fl.lane_id, "engine": fl.engine, "suite": fl.suite, "suite_files": dict(fl.suite_files),
            "run_id": run_id, "origin": origin, "deadline_s": max(1, math.ceil(deadline_s)), "out_dir": str(out), "workdir": str(lane_dir), "suite_dir": str(suites.SUITE_DIR),
-           "launcher": list(launcher) if launcher else None, "parent_pid": os.getpid()}
+           "launcher": list(launcher) if launcher else None, "parent_pid": os.getpid(), "evidence_budget": budget.remaining}
     spec_in = lane_dir / "input.json"
     spec_in.write_bytes(dumps_canonical(cfg))
     proc = run_child([sys.executable, "-s", "-m", "qa_runner.lane_robot", str(spec_in)], cwd=str(lane_dir), env=child_env(str(home)), deadline_s=max(1, math.ceil(deadline_s)) + 20, cancel=cancel, kill_grace_s=12.0)   # the engine runs in its own session: give the child time to end it first
@@ -210,7 +230,7 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
     elif proc.error_code == KitError.SPAWN_FAILED:
         status, raw = "NATIVE_UNAVAILABLE", "spawn-failed"
     else:
-        outcome, lines = _read_outcome(fl, out)
+        outcome, lines = _read_outcome(fl, out, budget)
         if outcome is not None and proc.exit_code == 0:
             log.extend(lines)
             return replace(outcome, double=launcher is not None)       # the child cannot say whether it was started by a test: the parent knows
@@ -223,10 +243,10 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
 def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     try:
-        cfg = loads_strict(Path(argv[0]).read_bytes())
+        cfg = loads_strict(read_regular(argv[0], max_bytes=K.MAX_CHILD_JSON_BYTES, deadline_s=10.0, follow_symlinks=False))
         if cfg.get("schema") != K.LANE_INPUT_SCHEMA:
             raise ValueError("not a lane input")
-    except (OSError, CanonError, ValueError, IndexError) as exc:
+    except (UnsafeRead, CanonError, ValueError, IndexError) as exc:
         print(f"lane input unreadable: {type(exc).__name__}", file=sys.stderr)
         return 2
     cancel = CancelToken()
@@ -239,7 +259,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     lines: List[str] = []
     try:
         outcome = _run_inner(lane, run_id=cfg["run_id"], origin=cfg["origin"], workdir=cfg["workdir"], cancel=cancel, deadline_s=float(cfg["deadline_s"]), log=lines,
-                             launcher=cfg.get("launcher"))
+                             launcher=cfg.get("launcher"), budget=Budget(int(cfg["evidence_budget"]) if isinstance(cfg.get("evidence_budget"), int) else K.DEFAULT_MAX_EVIDENCE_BYTES))
         _write_outcome(outcome, lines, Path(cfg["out_dir"]))
         return 0
     except Exception as exc:

@@ -107,18 +107,36 @@ def corroborate_requests(lane: FrozenLane, files: Mapping[str, bytes]) -> Option
     return None
 
 
+REFERENCE_CHECKS = ("discount-rule", "settings-persistence")
+
+
+def reference_check_shape_ok(doc: Any) -> bool:
+    """The reference check's document is exactly ``{"checked": [both checks], "deviations": [{"check", "where", "expected", "actual"}...]}``: a field that is missing, extra or of another type makes the whole
+    document unusable (a deviation dropped or reshaped must not pass as a clean check)."""
+    if not isinstance(doc, dict) or set(doc) != {"checked", "deviations"} or doc["checked"] != list(REFERENCE_CHECKS) or not isinstance(doc["deviations"], list) or len(doc["deviations"]) > 64:
+        return False
+    return all(isinstance(d, dict) and set(d) == {"check", "where", "expected", "actual"} and d["check"] in REFERENCE_CHECKS and isinstance(d["where"], str) and len(d["where"]) <= 200
+               for d in doc["deviations"])
+
+
 def probe_verdicts(lane: FrozenLane, files: Mapping[str, bytes]) -> Dict[str, str]:
-    """For each assertion the plan ties to a fact of the reference check: ``missing`` (no reference check in the bundle) or ``contradicted`` (the check found that fact deviating)."""
-    if not lane.probes:
+    """For each assertion the plan ties to a fact of the reference check: ``missing`` (no reference check in the bundle) or ``contradicted`` (the check found that fact deviating). An assertion the plan
+    declares ``ui-only`` has no such fact and is not in the result."""
+    facts = {aid: fact for aid, fact in lane.probes.items() if fact != "ui-only"}
+    if not facts:
         return {}
     data = files.get(REFERENCE_CHECK_PATH)
     if data is None:
-        return {aid: "missing" for aid in lane.probes}
+        return {aid: "missing" for aid in facts}
     try:
-        deviating = {d["check"] for d in loads_strict(data)["deviations"]}
-    except (CanonError, KeyError, TypeError):
-        return {aid: "missing" for aid in lane.probes}
-    return {aid: "contradicted" for aid, fact in lane.probes.items() if fact in deviating}
+        doc = loads_strict(data)
+    except CanonError:
+        return {aid: "missing" for aid in facts}
+    if not reference_check_shape_ok(doc):
+        return {aid: "missing" for aid in facts}
+    deviating = {d["check"] for d in doc["deviations"]}
+    return {aid: "contradicted" for aid, fact in facts.items() if fact in deviating}
+
 
 
 def _plain_json(data: bytes) -> Any:

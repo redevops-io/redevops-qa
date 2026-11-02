@@ -100,19 +100,19 @@ def robot_lane() -> Dict[str, Any]:
 def browser_lane() -> Dict[str, Any]:
     return {"lane_id": "browser", "engine": K.ENGINE_PLAYWRIGHT, "egress": "origin-only", "deadline_s": 120, "spec": browser_spec(),
             "requests": {"required": ["POST /login", "POST /settings", "GET /settings"], "allowed": ["GET /login", "GET /account", "GET /settings", "POST /login", "POST /settings"]},
-            "probes": {"A-NOTIF-ON": "settings-persistence"}}
+            "probes": {"A-NOTIF-ON": "settings-persistence", "A-SAVED": "ui-only", "A-URL": "ui-only"}}
 
 
 def robot_plan() -> Dict[str, Any]:
     """A one-lane plan with the Robot lane (``examples/robot-plan.json``)."""
-    return {"schema": K.PLAN_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": "golden-fixture-robot", "target": {"kind": "fixture-app"}, "lanes": [robot_lane()]}
+    return {"schema": K.PLAN_SCHEMA, "schema_version": K.PLAN_SCHEMA_VERSION, "plan_id": "golden-fixture-robot", "target": {"kind": "fixture-app"}, "lanes": [robot_lane()]}
 
 
 def demo_plan() -> Dict[str, Any]:
     """The two-lane plan of ``redevops-qa demo`` (``examples/demo-plan.json``): the browser lane, then the Robot lane, one after the other, under one run id."""
-    return {"schema": K.PLAN_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": "fixture-demo", "target": {"kind": "fixture-app"}, "lanes": [browser_lane(), robot_lane()]}
+    return {"schema": K.PLAN_SCHEMA, "schema_version": K.PLAN_SCHEMA_VERSION, "plan_id": "fixture-demo", "target": {"kind": "fixture-app"}, "lanes": [browser_lane(), robot_lane()]}
 
 
 def golden_plan() -> Dict[str, Any]:
     lanes: List[Dict[str, Any]] = [browser_lane()]
-    return {"schema": K.PLAN_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": "golden-fixture", "target": {"kind": "fixture-app"}, "lanes": lanes}
+    return {"schema": K.PLAN_SCHEMA, "schema_version": K.PLAN_SCHEMA_VERSION, "plan_id": "golden-fixture", "target": {"kind": "fixture-app"}, "lanes": lanes}

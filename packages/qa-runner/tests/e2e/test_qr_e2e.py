@@ -18,7 +18,7 @@ from qa_runner.golden import demo_plan
 from qa_runner.orchestrate import RunOptions, run_plan
 from qa_runner.plan import freeze_plan
 from qa_runner.procs import child_env
-from qr_support import alive, descendants, process_table, wait_gone
+from qr_support import alive, descendants, process_table, reap, wait_gone
 
 pytestmark = pytest.mark.e2e
 HERE = Path(__file__).resolve().parent
@@ -114,7 +114,7 @@ def test_the_browser_lane_times_out_and_the_robot_lane_result_is_kept(up):
 
 def spawn_cli(tmp_path, *argv):
     env = child_env(str(tmp_path))
-    return subprocess.Popen([sys.executable, "-s", "-m", "qa_runner", *argv], env=env, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return subprocess.Popen([sys.executable, "-s", "-m", "qa_runner", *argv], env=env, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
 
 
 def wait_for(predicate, timeout=60.0, step=0.1):
@@ -130,7 +130,13 @@ def wait_for(predicate, timeout=60.0, step=0.1):
 def test_cancelling_the_command_mid_run_ends_every_process_it_started_and_still_writes_an_inconclusive_bundle(tmp_path):
     proc = spawn_cli(tmp_path, "demo", "--out", str(tmp_path / "out"))
     seen = set()
+    try:
+        _cancel_body(tmp_path, proc, seen)
+    finally:
+        reap(proc, seen)          # a failed assertion below leaves nothing running
 
+
+def _cancel_body(tmp_path, proc, seen):
     def browser_running():
         table = process_table()
         kids = descendants(proc.pid, table)
@@ -154,9 +160,16 @@ def test_cancelling_the_command_mid_run_ends_every_process_it_started_and_still_
 def test_killing_the_parent_without_warning_leaves_no_process_behind(tmp_path, which, marker, engine):
     """SIGKILL gives the parent no chance to clean up: the lane child, the engine (the Robot process or the browser) and the target must end by themselves."""
     env = child_env(str(tmp_path))
-    proc = subprocess.Popen([sys.executable, "-s", str(HERE / "slow_parent.py"), which], env=env, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen([sys.executable, "-s", str(HERE / "slow_parent.py"), which], env=env, cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
     seen = set()
+    try:
+        _kill_body(proc, seen, which, marker, engine)
+    finally:
+        reap(proc, seen)
 
+
+def _kill_body(proc, seen, which, marker, engine):
     def engine_running():
         table = process_table()
         kids = descendants(proc.pid, table)

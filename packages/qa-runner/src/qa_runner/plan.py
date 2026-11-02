@@ -31,9 +31,12 @@ from .errors import PlanError
 PLAN_KEYS = {"schema", "schema_version", "plan_id", "target", "lanes"}
 COMMON_LANE_KEYS = {"lane_id", "engine", "spec", "egress", "deadline_s", "requests", "probes"}
 LANE_KEYS = {K.ENGINE_PLAYWRIGHT: set(COMMON_LANE_KEYS), K.ENGINE_ROBOT: COMMON_LANE_KEYS | {"suite", "suite_sha256"}}
-OPTIONAL_LANE_KEYS = {"deadline_s", "probes"}
+OPTIONAL_LANE_KEYS = {"deadline_s"}
 REQUEST_RE = re.compile(r"^(GET|POST) (/[A-Za-z0-9._~/-]{0,100})$")
-PROBE_FACTS = ("discount-rule", "settings-persistence")
+#: what an assertion's verdict is checked against besides the engine's own record: a fact of the independent reference check of the target, or ``ui-only`` (the assertion is about what the browser shows;
+#: no server-side fact applies and nothing independent backs it). EVERY assertion of a lane names one: a lane cannot reach VERIFIED on a fixture-app assertion nobody said anything about.
+UI_ONLY = "ui-only"
+PROBE_FACTS = ("discount-rule", "settings-persistence", UI_ONLY)
 #: what traffic of an engine is controlled by: only the browser's traffic passes the egress gateway; a Robot library opens its own sockets, so a Robot lane says so
 EGRESS_PROFILES = {K.ENGINE_PLAYWRIGHT: ("origin-only",), K.ENGINE_ROBOT: ("not-enforced",)}
 TARGET_KINDS = ("fixture-app",)
@@ -95,7 +98,7 @@ class FrozenPlan:
         return assertion_set_digest(self.rows)
 
     def lock_document(self) -> Dict[str, Any]:
-        return {"schema": K.LOCK_SCHEMA, "schema_version": K.SCHEMA_VERSION, "plan_id": self.plan_id, "plan": self.plan, "plan_digest": self.plan_digest,
+        return {"schema": K.LOCK_SCHEMA, "schema_version": K.PLAN_SCHEMA_VERSION, "plan_id": self.plan_id, "plan": self.plan, "plan_digest": self.plan_digest,
                 "plan_sha256": digest_of(self.plan), "pins": dict(self.pins), "runner_version": self.runner_version,
                 "lanes": [{"lane_id": l.lane_id, "engine": l.engine, "egress": l.egress, "requests": l.requests, "probes": l.probes, "spec_digest": l.spec_digest,
                            "spec_contract_hash": l.spec_contract_hash, "suite": l.suite, "suite_files": dict(sorted(l.suite_files.items())), "harness_pin": l.harness_pin,
@@ -123,8 +126,9 @@ def _parse_structure(doc: Any) -> List[Mapping[str, Any]]:
     if not isinstance(doc, dict):
         raise PlanError("PLAN_NOT_AN_OBJECT", "a plan is a JSON object")
     _only(doc, PLAN_KEYS, "the plan")
-    if doc["schema"] != K.PLAN_SCHEMA or doc["schema_version"] != K.SCHEMA_VERSION:
-        raise PlanError("UNSUPPORTED_PLAN_VERSION", f"this runner reads {K.PLAN_SCHEMA} {K.SCHEMA_VERSION} only")
+    if doc["schema"] != K.PLAN_SCHEMA or doc["schema_version"] != K.PLAN_SCHEMA_VERSION:
+        raise PlanError("UNSUPPORTED_PLAN_VERSION", f"unsupported schema_version {str(doc['schema_version'])[:20]!r}: this runner reads {K.PLAN_SCHEMA} {K.PLAN_SCHEMA_VERSION} only"
+                        + (" (a plan written for an older runner: from 1.1 a lane names `requests` and a probe for every assertion; rewrite it)" if doc["schema_version"] == "1.0" else ""))
     if not isinstance(doc["plan_id"], str) or not K.ASSERTION_ID_RE.fullmatch(doc["plan_id"]):
         raise PlanError("BAD_PLAN_ID", "plan_id must look like an identifier")
     target = doc["target"]
@@ -139,7 +143,7 @@ def _parse_structure(doc: Any) -> List[Mapping[str, Any]]:
             raise PlanError("UNSUPPORTED_ENGINE", f"lane engine must be one of {list(K.ENGINES)} (R0 scope: Playwright Chromium and Robot Framework)")
         _only(lane, LANE_KEYS[lane["engine"]], f"lane {str(lane.get('lane_id'))[:20]!r}", OPTIONAL_LANE_KEYS)
         _check_requests(lane["requests"], str(lane.get("lane_id")))
-        _check_probes(lane.get("probes", {}), str(lane.get("lane_id")))
+        _check_probes(lane["probes"], str(lane.get("lane_id")))
         lid = lane["lane_id"]
         if not isinstance(lid, str) or not K.LANE_ID_RE.fullmatch(lid):
             raise PlanError("BAD_LANE_ID", "a lane id is 1 to 20 characters: a lower-case letter, then lower-case letters, digits and '-'")
@@ -156,6 +160,10 @@ def _parse_structure(doc: Any) -> List[Mapping[str, Any]]:
 
 
 def _check_requests(req: Any, lid: str) -> None:
+    for key in ("required", "allowed"):
+        for item in req.get(key, []) if isinstance(req, dict) and isinstance(req.get(key), list) else []:
+            if isinstance(item, str) and ".." in item.split(" ", 1)[-1].split("/"):
+                raise PlanError("BAD_REQUESTS", f"lane {lid[:20]}: requests.{key} may not contain a '..' segment")
     if not isinstance(req, dict) or set(req) != {"required", "allowed"}:
         raise PlanError("BAD_REQUESTS", f"lane {lid[:20]}: requests is {{\"required\": [...], \"allowed\": [...]}} of 'METHOD /path' entries")
     for key in ("required", "allowed"):
@@ -197,6 +205,8 @@ def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict
     if not isinstance(given_hashes, dict) or given_hashes != hashes:
         raise PlanError("SUITE_MISMATCH", f"lane {lid}: the plan pins the files of suite {suite!r} as {json.dumps(given_hashes, sort_keys=True)[:300]}, "
                         f"the files this runner ships hash as {json.dumps(hashes, sort_keys=True)}: a suite or library that is not the reviewed one is refused before anything runs")
+    if any(v == UI_ONLY for v in lane["probes"].values()):
+        raise PlanError("BAD_PROBES", f"lane {lid}: a Robot lane's assertions are about what the target's API says: each needs a fact of the reference check, not {UI_ONLY!r}")
     if spec.steps:
         raise PlanError("ROBOT_LANE_HAS_STEPS", f"lane {lid}: a Robot lane's spec carries assertions only; the suite is the engine's work")
     ref = evidence_program_ref()
@@ -243,20 +253,25 @@ def freeze_plan(up: Upstreams, plan_doc: Any) -> FrozenPlan:
             seen_ids[key] = (a["assertion_id"], lid)
         suite_name, suite_hashes = _lane_engine_rules(lane, spec, assertions)
         materialise_spec(lane["spec"], "http://127.0.0.1:1")                 # the rule for {origin} that the run applies: a plan the run would refuse is refused here, before anything starts
-        unknown_probe = sorted(set(lane.get("probes", {})) - {a["assertion_id"] for a in assertions})
+        ids = {a["assertion_id"] for a in assertions}
+        unknown_probe = sorted(set(lane["probes"]) - ids)
         if unknown_probe:
             raise PlanError("BAD_PROBES", f"lane {lid}: probes name assertions that are not in this lane: {[u[:40] for u in unknown_probe]}")
+        unprobed = sorted(ids - set(lane["probes"]))
+        if unprobed:
+            raise PlanError("BAD_PROBES", f"lane {lid}: assertion(s) {[u[:40] for u in unprobed]} name no probe: give each a fact of the reference check ({', '.join(f for f in PROBE_FACTS if f != UI_ONLY)}) "
+                            f"or {UI_ONLY!r} (what the browser shows, with nothing independent behind it)")
         # Everything the plan fixes about a lane besides the assertion itself is bound into the digest of every assertion of that lane, so the plan digest covers it:
         # what the target's request log must show, which independent facts may not contradict a verdict, the egress profile, the whole spec (steps included), the deadline,
         # the reviewed suite and the digests of its files (a Robot lane), and the plan's id and target.
-        binding = {"engine": lane["engine"], "egress": lane["egress"], "requests": lane["requests"], "probes": lane.get("probes", {}),
+        binding = {"engine": lane["engine"], "egress": lane["egress"], "requests": lane["requests"], "probes": lane["probes"],
                    "deadline_s": lane.get("deadline_s", int(K.DEFAULT_LANE_DEADLINE_S)), "spec_sha256": digest_of(lane["spec"]),
                    "plan": {"plan_id": plan_doc["plan_id"], "target": plan_doc["target"]}}
         if suite_name:
             binding.update(suite=suite_name, suite_files=suite_hashes)
         digests = {a["assertion_id"]: digest_of({"assertion": a, "binding": binding}) for a in assertions}
         frozen.append(FrozenLane(lane_id=lid, engine=lane["engine"], deadline_s=lane.get("deadline_s", int(K.DEFAULT_LANE_DEADLINE_S)), egress=lane["egress"],
-                                 requests=copy.deepcopy(lane["requests"]), probes=dict(lane.get("probes", {})), spec_template=copy.deepcopy(lane["spec"]),
+                                 requests=copy.deepcopy(lane["requests"]), probes=dict(lane["probes"]), spec_template=copy.deepcopy(lane["spec"]),
                                  spec_digest=digest_of(lane["spec"]), spec_contract_hash=spec.spec_hash, suite=suite_name, suite_files=suite_hashes,
                                  assertions=tuple(assertions), assertion_digests=digests, harness_pin=pin))
     return FrozenPlan(plan=copy.deepcopy(plan_doc), plan_id=plan_doc["plan_id"], lanes=tuple(frozen), pins=pin_summary(up), runner_version=K.RUNNER_VERSION)
@@ -266,8 +281,9 @@ def thaw_lock(up: Upstreams, lock_doc: Any) -> FrozenPlan:
     """Read a lock document: re-freeze the plan it carries and require every recorded digest and pin to be what that gives (no trust in the lock's own numbers)."""
     if not isinstance(lock_doc, dict) or lock_doc.get("schema") != K.LOCK_SCHEMA:
         raise PlanError("NOT_A_LOCK", f"this is not a {K.LOCK_SCHEMA} document")
-    if lock_doc.get("schema_version") != K.SCHEMA_VERSION:
-        raise PlanError("UNSUPPORTED_LOCK_VERSION", f"this runner reads {K.LOCK_SCHEMA} {K.SCHEMA_VERSION} only")
+    if lock_doc.get("schema_version") != K.PLAN_SCHEMA_VERSION:
+        raise PlanError("UNSUPPORTED_LOCK_VERSION", f"unsupported schema_version {str(lock_doc.get('schema_version'))[:20]!r}: this runner reads {K.LOCK_SCHEMA} {K.PLAN_SCHEMA_VERSION} only"
+                        + (" (a lock, or a bundle's plan lock, written by an older runner; run the plan again with this runner)" if lock_doc.get("schema_version") == "1.0" else ""))
     again = freeze_plan(up, lock_doc.get("plan"))
     if dumps_canonical(again.lock_document()) != dumps_canonical(lock_doc):
         raise PlanError("LOCK_MISMATCH", "the lock does not equal the freeze of the plan it carries (an edited expected value, digest, pin or tool version)")

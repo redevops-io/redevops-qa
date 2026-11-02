@@ -41,7 +41,7 @@ The summary `run` prints says in its second line that integrity against delibera
 **`demo`** is `freeze` and `run` on the built-in plan (browser lane, then Robot lane, one target, one run id) followed by the full report. It prints no plan digest comparison: a digest
 computed by the process that ran the plan would only match itself.
 
-**`report`** and **`inspect`** read a bundle (directory or archive) through `qa-evidence`: they check the bundle's own consistency (files, digests, accounting), never recompute a verdict and SAY SO at the top of what they print (text, the `verdicts_recomputed: false` field of the JSON, an HTML banner; `verify`, the next part, recomputes them), escape every string that came from the
+**`report`** and **`inspect`** read a bundle (directory or archive) through ONE snapshot taken by a killable child process (`isolated.snapshot_bundle`; REDEVOPS_QA_BUNDLE_READ_TIMEOUT, default 120 s; a cancel ends with exit 3), so the verification, the summary and the chain heads see the same bytes whatever happens to the files afterwards, and through `qa-evidence`: they check the bundle's own consistency (files, digests, accounting), never recompute a verdict and SAY SO at the top of what they print (text, the `verdicts_recomputed: false` field of the JSON, an HTML banner; `verify`, the next part, recomputes them), escape every string that came from the
 bundle, and exit 0 only if the bundle verified as internally consistent (1 if not, 2 if it cannot be opened). `report` renders text, JSON or one HTML file with no script and a
 content-security policy; `inspect` lists the files with roles and digests, the tool versions, the lanes and the heads of the chains inside each harness run record.
 
@@ -68,8 +68,10 @@ expected values. Freezing:
 * gives every assertion a digest (sha256 of its canonical JSON, expected value included) together with a binding to everything else that defines the lane: the
   whole spec (steps included), the egress profile, the deadline, the request expectations and probes below, the plan id and the target. The assertion lock and
   the plan digest follow the conventions of `qa-evidence`, so the plan digest covers all of it, and the contracts and the harness must agree on the assertion-set pin;
-* needs, per lane, the `requests` the target must have seen (`required`) and may see (`allowed`) as `METHOD /path` strings, and may name `probes`: assertions tied
-  to a fact of the independent reference check (`settings-persistence`, `discount-math`);
+* needs, per lane, the `requests` the target must have seen (`required`) and may see (`allowed`) as `METHOD /path` strings, and names, for EVERY assertion, a probe: a fact of the independent reference
+  check (`settings-persistence`, `discount-rule`) that must not contradict a verified verdict, or `ui-only` (the assertion is about what the browser shows; nothing independent backs it). A lane with an
+  assertion that names no probe is refused at freeze, so a plan cannot reach VERIFIED on a fixture-app assertion nobody said anything about; the assertions declared `ui-only` are listed in the report
+  (`extensions.no_independent_probe`) and in the summary `run` prints;
 * refuses an assertion id that appears in two lanes (every assertion is accounted exactly once).
 
 A step value may start with `{origin}`; the origin of this start of the target is substituted when the lane runs, so one frozen plan serves every start of
@@ -136,6 +138,29 @@ Every lane and every frozen assertion is accounted for whatever happens. A lane 
 native status that says so; its assertions are `INCONCLUSIVE`; the run is never `VERIFIED`. The engine's own status (`lanes[].native`) and the verdict
 (`accounting.results[].verdict`) are separate fields with disjoint vocabularies. For the browser lane the native status is the harness executor's outcome
 (`PASS` becomes `NATIVE_PASS`, `PRODUCT_FAIL` becomes `NATIVE_FAIL`, anything else `NATIVE_ERROR` or `NATIVE_TIMEOUT`); it is never converted into a verdict.
+
+## Bounded reads
+
+Two mechanisms, for two kinds of files.
+
+* **Paths a user supplies** (a plan or lock, a bundle to report or inspect, and from the next part a bundle to verify) are read by a child process (`isolated.py`, `read_worker.py`): the parent holds nothing but what
+  came through a pipe, stops taking bytes at the cap (and kills the child), stops waiting at a wall-clock deadline (`REDEVOPS_QA_READ_TIMEOUT`, default 30 s; bundles `REDEVOPS_QA_BUNDLE_READ_TIMEOUT`, default
+  120 s) and kills the child, and on SIGINT, SIGTERM or SIGHUP kills the child and ends with exit 3. The child opens the path without blocking (`O_NONBLOCK`), `fstat`s the same descriptor and refuses anything
+  that is not a regular file (a FIFO, a device, a directory: never read, `/dev/zero` included), refuses a file above the cap before reading, and reads with a running total (a growing file stops at the cap).
+* **Files a lane or the target wrote** (in the run's own temporary directory) are read in this process through `safe_read.read_regular` with the same rules (one descriptor, regular files only, no symbolic
+  link, byte cap, deadline checked between chunks) and under one **evidence budget** for the whole run (`REDEVOPS_QA_MAX_EVIDENCE_BYTES` or `RunOptions.max_evidence_bytes`, default 128 MiB, half the cap of
+  a bundle): a file that does not fit is neither read nor kept, its name is logged, the lane becomes an engine error `evidence-over-cap`, the report says `extensions.evidence_incomplete`, the run is never
+  VERIFIED (exit 3), and everything that fit is in the bundle. If the bundle format still refuses what was collected, the run is rebuilt without the blobs instead of ending as a crash.
+* The reference check of the target: no answer above 1 MiB, a total deadline of 30 s for the whole check (a watcher ends the connection; a server that sends a byte every few seconds does not stretch it),
+  and the run's cancel ends it.
+
+**Tested** (each in a child with a hard timeout and, where the platform enforces one, an address-space cap; none opens an unbounded source): a reading child that never answers is killed at the deadline and is
+gone; a child that writes without end is stopped at the byte cap; SIGINT, SIGTERM, SIGHUP end the wait and the child; refusals of a FIFO with no writer, a FIFO with a capped writer (nothing is consumed), a
+character device, a symlink, a sparse file of 300 MiB, a size that lies at the open and a growing file; the same for `run` and `doctor --plan`; the evidence budget and its fallback; the reference check against a
+capped 64 MiB answer, a one-byte-at-a-time body, dripped headers and a cancel during a stall.
+**Not tested, only inferred:** a child blocked in UNINTERRUPTIBLE kernel I/O on a hard-hung network or FUSE mount. SIGKILL is sent and the parent does not wait for the child past a short grace, but the
+process itself may stay until the kernel returns the I/O (a subprocess timeout does not guarantee that every blocked kernel operation ends). No test has a stalled mount; the "never answers" child is a stand-in.
+`RLIMIT_AS` is enforced on Linux and ignored by macOS; on macOS the hard timeouts and the capped writers are the protection.
 
 ## Bundle contents
 
