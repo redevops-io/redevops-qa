@@ -123,6 +123,36 @@ def test_a_swapped_library_that_never_asks_the_target_is_not_verified_even_when_
     assert s.outcome == "INCONCLUSIVE" and r["accounting"]["verified"] == 0 and r["accounting"]["results"][0]["verdict"]["reason_code"] == "EVIDENCE_UNUSABLE"
 
 
+IGNORES = '''
+_TOTALS = {"101": 9450, "102": 9999, "103": 9000, "104": 9005}
+'''
+
+
+def swapped_suite_that_asks_and_ignores(tmp_path, monkeypatch):
+    """A library that still calls GET /api/orders/<id> (so the request log is right) and returns constants instead of the answer."""
+    copy = tmp_path / "suite"
+    shutil.copytree(suites.SUITE_DIR, copy)
+    api = (copy / "OrderApi.py").read_text()
+    assert "    return total" in api
+    (copy / "OrderApi.py").write_text(api.replace("    return total", "    return _TOTALS[order_id]") + IGNORES)
+    monkeypatch.setattr(suites, "SUITE_DIR", copy)
+
+
+def test_a_library_that_asks_and_ignores_the_answers_is_not_verified_against_a_defective_target_and_the_plan_cannot_drop_its_probe(up, tmp_path, monkeypatch):
+    """Retest R2: with the plan regenerated for the edited files the committed probe vetoes it (INCONCLUSIVE); with the probe removed or declared ui-only the plan is refused at freeze, so there is no
+    plan under which the swapped library reaches VERIFIED on the discount-defective target."""
+    swapped_suite_that_asks_and_ignores(tmp_path, monkeypatch)
+    s = run(up, freeze_plan(up, robot_plan()), "discount")
+    assert s.outcome == "INCONCLUSIVE" and rep(s)["accounting"]["verified"] == 0
+    for edit, code in ((lambda p: p["lanes"][0].pop("probes"), "MISSING_FIELD"), (lambda p: p["lanes"][0].update(probes={}), "BAD_PROBES"),
+                       (lambda p: p["lanes"][0].update(probes={"A-ORDER-RULE": "ui-only"}), "BAD_PROBES")):
+        plan = robot_plan()
+        edit(plan)
+        with pytest.raises(PlanError) as exc:
+            freeze_plan(up, plan)
+        assert exc.value.code == code
+
+
 def test_a_suite_that_imports_a_library_nobody_reviewed_is_refused_by_the_adapter(up, tmp_path, monkeypatch):
     """The plan is frozen with this (edited) suite, so the hashes agree; the adapter still refuses a library that is not on the reviewed list."""
     copy = tmp_path / "suite"
@@ -154,6 +184,6 @@ def test_the_command_line_end_to_end_with_the_robot_plan(tmp_path):
         done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "run", str(plan), "--out", str(out), "--defect", defect], env=env, cwd=str(tmp_path),
                               capture_output=True, text=True, timeout=180)
         assert done.returncode == code and f": {outcome} (" in done.stdout, done.stdout + done.stderr
-        assert "independent verification (a separate process): ACCEPTED" in done.stdout
+        assert "re-verification in a fresh process (the same code as the run, not independent code): ACCEPTED" in done.stdout
         (bundle,) = list(out.iterdir())
         assert subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle)], env=env, capture_output=True, timeout=60).returncode == 0

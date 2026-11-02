@@ -9,9 +9,15 @@ import pytest
 from qa_evidence.canon import dumps_canonical
 from qa_runner import watchdog
 from qa_runner.bundle import LaneOutcome
-from qa_runner.lane_robot import _Lane, _read_outcome, _write_outcome
+from qa_runner import constants as K
+from qa_runner.lane_robot import _Lane, _read_outcome as _read, _write_outcome
+from qa_runner.safe_read import Budget
 
 LANE = _Lane(lane_id="robot", engine="robot-framework", suite="order-discount", suite_files={})
+
+
+def _read_outcome(lane, out, budget=None, limit=64 * 1024 * 1024):
+    return _read(lane, out, budget or Budget(K.DEFAULT_MAX_EVIDENCE_BYTES), limit=limit)
 
 
 def test_the_watchdog_calls_back_when_the_parent_is_not_the_one_it_was_told_about():
@@ -64,6 +70,59 @@ def test_a_file_the_child_names_outside_its_output_directory_is_refused(tmp_path
     assert _read_outcome(LANE, out) == (None, [])
 
 
-def test_an_oversize_file_is_refused(tmp_path):
+def test_an_oversize_file_is_not_kept_and_the_lane_is_an_engine_error_that_keeps_the_rest(tmp_path):
     _write_outcome(outcome(), [], tmp_path)
-    assert _read_outcome(LANE, tmp_path, limit=3) == (None, [])
+    back, _ = _read_outcome(LANE, tmp_path, limit=3)
+    assert back.native_status == "NATIVE_ERROR" and back.raw_status == "evidence-over-cap" and back.counts is None and not back.native_files.get("output.xml")
+
+
+def test_files_over_the_evidence_budget_are_not_kept_and_say_so(tmp_path):
+    _write_outcome(outcome(), [], tmp_path)
+    size = len((tmp_path / "outcome.json").read_bytes())
+    budget = Budget(size + 10)                            # the outcome file fits, the files it names do not
+    back, _ = _read_outcome(LANE, tmp_path, budget)
+    assert back.raw_status == "evidence-over-cap" and budget.dropped and budget.used <= size + 10
+
+
+def test_a_data_file_that_is_a_fifo_a_symlink_or_missing_is_never_waited_for_or_followed(tmp_path):
+    """Retest N1: the parent read what the child named with `is_file()` then `read_bytes()`: a FIFO swapped in after the check would block it for ever."""
+    import time
+    out = tmp_path / "out"
+    _write_outcome(outcome(), [], out)
+    doc = json.loads((out / "outcome.json").read_text())
+    ref = doc["native"]["output.xml"]
+    (out / ref).unlink()
+    os.mkfifo(out / ref)
+    other = doc["native"]["adapter-result.json"]
+    (out / other).unlink()
+    (out / other).symlink_to(tmp_path / "elsewhere")
+    t0 = time.monotonic()
+    back, _ = _read_outcome(LANE, out)
+    assert time.monotonic() - t0 < 5 and "output.xml" not in back.native_files and "adapter-result.json" not in back.native_files
+    assert back.files                                                                       # the files that are fine are kept
+
+
+@pytest.mark.parametrize("ref", ["data/../x.bin", "data/1.bin/", "other/1.bin", "data/abc.bin", "data/1.bin\n"])
+def test_only_numbered_data_files_can_be_named(tmp_path, ref):
+    out = tmp_path / "out"
+    _write_outcome(outcome(), [], out)
+    doc = json.loads((out / "outcome.json").read_text())
+    doc["native"]["output.xml"] = ref
+    (out / "outcome.json").write_bytes(dumps_canonical(doc))
+    assert _read_outcome(LANE, out) == (None, [])
+
+
+def test_an_outcome_that_names_more_files_than_a_lane_can_write_is_refused(tmp_path):
+    out = tmp_path / "out"
+    _write_outcome(outcome(), [], out)
+    doc = json.loads((out / "outcome.json").read_text())
+    doc["native"] = {f"f{i}": "data/1.bin" for i in range(600)}
+    (out / "outcome.json").write_bytes(dumps_canonical(doc))
+    assert _read_outcome(LANE, out) == (None, [])
+
+
+def test_an_outcome_json_that_is_a_fifo_is_no_outcome_and_is_not_waited_for(tmp_path):
+    import time
+    os.mkfifo(tmp_path / "outcome.json")
+    t0 = time.monotonic()
+    assert _read_outcome(LANE, tmp_path) == (None, []) and time.monotonic() - t0 < 5

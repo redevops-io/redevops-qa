@@ -6,7 +6,9 @@
       "engine": "playwright-chromium",
       "lane_id": "browser",
       "probes": {
-        "A-NOTIF-ON": "settings-persistence"
+        "A-NOTIF-ON": "settings-persistence",
+        "A-SAVED": "ui-only",
+        "A-URL": "ui-only"
       },
       "requests": {
         "allowed": [
@@ -273,7 +275,7 @@
   ],
   "plan_id": "golden-fixture",
   "schema": "redevops-qa/plan",
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "target": {
     "kind": "fixture-app"
   }

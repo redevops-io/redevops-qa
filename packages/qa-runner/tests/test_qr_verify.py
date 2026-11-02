@@ -13,7 +13,7 @@ from qa_runner.cli import main
 from qa_runner.procs import child_env
 from qr_tamper import GOLDEN, codes, golden, manifest_digest, verify_files_in
 
-PLAN_DIGEST = "sha256:6f960c30bb013f8a57bb83bc914918b809fa35d2d46e2848ad9d14ea4f55e0e3"
+PLAN_DIGEST = "sha256:3e53d5b170e6541bd7fb37188a17c99c766af1d161d5aed452af68a56e68b943"
 
 
 def cli(*argv):
@@ -150,7 +150,7 @@ def test_run_exits_5_when_the_separate_verification_rejects_what_it_just_wrote(m
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps(golden_plan()))
     code, out, err = cli("run", str(plan), "--out", str(tmp_path / "o"), "--run-id", "r0-double")
-    assert ": INCONCLUSIVE (" in out and "independent verification (a separate process): REJECTED" in out and "TEST_DOUBLE_BUNDLE" in out and code == K.EXIT_REJECTED
+    assert ": INCONCLUSIVE (" in out and "re-verification in a fresh process (the same code as the run, not independent code): REJECTED" in out and "TEST_DOUBLE_BUNDLE" in out and code == K.EXIT_REJECTED
 
 
 def test_a_robot_lane_that_never_started_has_no_suite_copy_to_compare_and_a_completed_one_must_have_it(up, tmp_path):
@@ -245,3 +245,43 @@ def test_demo_does_not_print_the_report_of_a_bundle_its_own_verification_rejecte
     monkeypatch.setattr(orch, "run_plan", with_doubles)
     code, out, err = cli("demo", "--out", str(tmp_path / "o"), "--run-id", "r0-double")
     assert code == K.EXIT_REJECTED and "REJECTED" in out and "the report is not printed" in out and "INDEPENDENT VERDICT" not in out
+
+
+# ---- retest of #32 and #33: one snapshot, nothing OK next to a rejection ---------------------------------------------------------------------------
+def test_verify_takes_one_snapshot_and_a_writer_that_swaps_the_files_afterwards_cannot_change_what_it_sees(tmp_path, up, monkeypatch):
+    """Retest N4: `verify_bundle(location)` and then `read_files(location)` read a directory bundle twice; a swap between the two reads checked bundle A with the evidence checks and bundle B with the
+    runner's checks. The bundle is now read ONCE (by a child, into a snapshot) and everything is computed from it."""
+    from qa_evidence.build import write_directory
+    from qr_tamper_cases import CASES
+    import qa_evidence.build as eb
+    from qa_runner import isolated
+    forged_case = next(c for c in CASES if c.name.startswith("forged PASS: the report recomputed by the library"))
+    forged, honest = forged_case.mutate(up, golden("discount")), golden("discount")
+    target = tmp_path / "b"
+    write_directory(forged, str(target))
+    alone = verify_files_in(tmp_path, forged)                                   # what the forged bundle gives when nothing is swapped
+    real, calls = isolated.snapshot_bundle, []
+
+    def snapshot_then_swap(location, **kw):
+        calls.append(1)
+        snap = real(location, **kw)
+        import shutil
+        shutil.rmtree(target)
+        write_directory(honest, str(target))                                     # the honest bundle is put in its place after the snapshot was taken
+        return snap
+    monkeypatch.setattr(isolated, "snapshot_bundle", snapshot_then_swap)
+    monkeypatch.setattr(eb, "read_files", lambda *a, **k: (_ for _ in ()).throw(AssertionError("the bundle was read a second time")))
+    from qa_runner.verify import verify_location
+    v = verify_location(str(target))
+    assert len(calls) == 1 and not v.accepted and codes(v) == codes(alone) and "VERDICT_RECOMPUTE_MISMATCH" in codes(v)
+
+
+def test_the_run_prints_the_re_verification_in_the_words_that_say_what_it_is(tmp_path, up):
+    """Retest N10: the verifier shares judge_lane, finalize_results and the native_from_* functions with the run: what the second pass adds is a fresh process and a re-read of the bundle, not independent code."""
+    from qa_runner.cli import _verify_in_a_new_process
+    from qa_evidence.build import write_directory
+    bundle = tmp_path / "b"
+    write_directory(golden("none"), str(bundle))
+    out = io.StringIO()
+    assert _verify_in_a_new_process(bundle, PLAN_DIGEST, 0, 0, out) == 0
+    assert "re-verification in a fresh process (the same code as the run, not independent code): ACCEPTED" in out.getvalue() and "independent verification" not in out.getvalue()

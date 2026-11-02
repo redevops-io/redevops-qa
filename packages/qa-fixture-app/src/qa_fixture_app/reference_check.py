@@ -15,14 +15,23 @@ from __future__ import annotations
 import http.client
 import ipaddress
 import json
+import socket
 import sys
-from typing import Dict, List, Optional, Tuple
+import threading
+import time
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 # The documented seed, restated here on purpose (README, "Seeded data"): order id -> list of (qty, unit_cents).
 DOCUMENTED_ORDERS = {"101": [(2, 4000), (1, 2500)], "102": [(1, 4999), (1, 5000)], "103": [(1, 10000)], "104": [(1, 10005)]}
 DOCUMENTED_EMAIL, DOCUMENTED_PASSWORD = "alice@example.test", "correct horse"
 CHECKS = ("discount-rule", "settings-persistence")
+MAX_RESPONSE_BYTES = 1024 * 1024          # one response of the app; the documented answers are a few hundred bytes
+DEADLINE_SECONDS = 30.0                   # the whole check, not one socket operation
+
+
+class CheckAborted(OSError):
+    """The check ran out of time, was cancelled, or an answer was larger than the cap: nothing it saw is a result."""
 
 
 def expected_totals(lines: List[Tuple[int, int]]) -> Dict[str, int]:
@@ -33,7 +42,7 @@ def expected_totals(lines: List[Tuple[int, int]]) -> Dict[str, int]:
 
 
 class _Client:
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, *, max_bytes: int = MAX_RESPONSE_BYTES, deadline_s: float = DEADLINE_SECONDS, cancelled: Optional[Callable[[], bool]] = None):
         parts = urlsplit(base_url)
         host = parts.hostname or ""
         try:
@@ -44,32 +53,91 @@ class _Client:
             raise ValueError("the reference check talks to a loopback http URL with a port only, got %r" % base_url)
         self.host, self.port = host, parts.port
         self.cookie = ""
+        self.max_bytes, self.cancelled = max_bytes, cancelled
+        self.end = time.monotonic() + deadline_s
+        self.stop_reason: Optional[str] = None
+        self._conn: Optional[http.client.HTTPConnection] = None
+        self._done = threading.Event()
+        threading.Thread(target=self._watch, name="reference-check-watch", daemon=True).start()
+
+    def _watch(self) -> None:
+        """Ends the connection in use when the total deadline passes or the run is cancelled: a blocked socket read cannot notice either by itself (a server that sends a byte every few seconds
+        would keep every per-operation timeout from firing)."""
+        while not self._done.wait(0.1):
+            if time.monotonic() > self.end:
+                self.stop_reason = "the total deadline passed"
+            elif self.cancelled is not None and self.cancelled():
+                self.stop_reason = "the run was cancelled"
+            if self.stop_reason:
+                conn = self._conn
+                try:
+                    if conn is not None and conn.sock is not None:
+                        conn.sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                return
+
+    def close(self) -> None:
+        self._done.set()
+
+    def _check(self) -> None:
+        if self.stop_reason or time.monotonic() > self.end or (self.cancelled is not None and self.cancelled()):
+            raise CheckAborted(self.stop_reason or "the total deadline passed or the run was cancelled")
 
     def request(self, method: str, target: str, form: Optional[str] = None) -> Tuple[int, Dict[str, str], bytes]:
-        conn = http.client.HTTPConnection(self.host, self.port, timeout=10)      # no proxy: http.client never reads proxy variables
+        self._check()
+        conn = http.client.HTTPConnection(self.host, self.port, timeout=max(0.1, min(10.0, self.end - time.monotonic())))      # no proxy: http.client never reads proxy variables
+        self._conn = conn
         try:
             headers = {"Cookie": self.cookie} if self.cookie else {}
             body = None
             if form is not None:
                 body = form.encode()
                 headers["Content-Type"] = "application/x-www-form-urlencoded"
-            conn.request(method, target, body=body, headers=headers)
-            resp = conn.getresponse()
-            data = resp.read()
+            try:
+                conn.request(method, target, body=body, headers=headers)
+                resp = conn.getresponse()
+                chunks, total = [], 0
+                while True:
+                    block = resp.read1(65536)
+                    if not block:
+                        break
+                    total += len(block)
+                    if total > self.max_bytes:
+                        raise CheckAborted("an answer is larger than %d bytes" % self.max_bytes)
+                    chunks.append(block)
+                    self._check()
+                self._check()                          # a connection ended by the watcher looks like a clean end of the answer: it is not one
+                if resp.length:
+                    raise CheckAborted("an answer ended before its declared length")
+                data = b"".join(chunks)
+            except (OSError, http.client.HTTPException):
+                self._check()                      # a connection ended by the watcher is reported as what it was
+                raise
             hdrs = {k.lower(): v for k, v in resp.getheaders()}
             if "set-cookie" in hdrs:
                 self.cookie = hdrs["set-cookie"].split(";")[0]
             return resp.status, hdrs, data
         finally:
             conn.close()
+            self._conn = None
 
     def json(self, target: str) -> Tuple[int, object]:
         status, _, data = self.request("GET", target)
         return status, json.loads(data)
 
 
-def run_checks(base_url: str) -> Dict[str, object]:
-    c = _Client(base_url)
+def run_checks(base_url: str, *, max_bytes: int = MAX_RESPONSE_BYTES, deadline_s: float = DEADLINE_SECONDS, cancelled: Optional[Callable[[], bool]] = None) -> Dict[str, object]:
+    """The check, bounded: no answer larger than ``max_bytes``, the whole run within ``deadline_s`` (not per socket operation), and ``cancelled()`` (when given) ends it between and during requests.
+    ``CheckAborted`` (an ``OSError``) is raised for any of the three."""
+    c = _Client(base_url, max_bytes=max_bytes, deadline_s=deadline_s, cancelled=cancelled)
+    try:
+        return _run(c)
+    finally:
+        c.close()
+
+
+def _run(c: "_Client") -> Dict[str, object]:
     deviations: List[Dict[str, object]] = []
 
     for order_id, lines in sorted(DOCUMENTED_ORDERS.items()):

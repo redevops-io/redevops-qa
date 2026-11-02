@@ -27,7 +27,7 @@ from qa_evidence.build import BuildError, read_files
 from qa_evidence.canon import CanonError, loads_strict, safe_text
 from qa_evidence.report import engine_verifier_disagreements
 from qa_evidence.sources import SourceError
-from qa_evidence.verify import verify_bundle
+from qa_evidence.verify import verify_bundle, verify_source
 
 from . import constants as K
 from .bundle import finalize_results
@@ -119,7 +119,13 @@ def _check_lock(up: Upstreams, files: Mapping[str, bytes], report: Mapping[str, 
     try:
         doc = _json(files, LOCK_PATH)
         frozen = thaw_lock(up, doc, for_verification=True)
-    except (CanonError, PlanError) as exc:
+    except PlanError as exc:
+        if exc.code == "UNSUPPORTED_LOCK_VERSION":
+            v.add("LOCK_UNSUPPORTED_VERSION", LOCK_PATH, safe_text(str(exc), 300))
+            return None
+        v.add("LOCK_REJECTED", LOCK_PATH, f"the plan lock does not re-freeze to itself with the pinned parsers ({getattr(exc, 'code', type(exc).__name__)})")
+        return None
+    except CanonError as exc:
         v.add("LOCK_REJECTED", LOCK_PATH, f"the plan lock does not re-freeze to itself with the pinned parsers ({getattr(exc, 'code', type(exc).__name__)})")
         return None
     pins = pin_summary(up)
@@ -192,6 +198,27 @@ def _check_verdicts(up: Upstreams, frozen: FrozenPlan, files: Mapping[str, bytes
             else:
                 v.add("VERDICT_RECOMPUTE_MISMATCH", r["assertion_id"], f"the report says {got['verdict']['state']} ({got['verdict']['reason_code']}); recomputed from the bundle: "
                       f"{r['state']} ({r['reason_code']})")
+
+
+def _check_report_fields(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification) -> None:
+    """Fields of the bundle that no verdict reads but that say something: they must be what the run writes (a reshaped reference check, a result that names another native status, a redaction note that
+    claims more), so that nothing in the bundle is free text a forger can change without notice."""
+    from .bundle import REDACTION
+    from .corroborate import REFERENCE_CHECK_PATH, reference_check_shape_ok
+    data = files.get(REFERENCE_CHECK_PATH)
+    if data is not None:
+        try:
+            ok = reference_check_shape_ok(loads_strict(data))
+        except CanonError:
+            ok = False
+        if not ok:
+            v.add("REFERENCE_CHECK_MALFORMED", REFERENCE_CHECK_PATH, "the reference check's document is not of the shape the runner writes")
+    status = {l["lane_id"]: l["native"]["status"] for l in report["lanes"]}
+    for r in report["accounting"]["results"]:
+        if r.get("native_status") != status.get(r.get("lane_id")):
+            v.add("REPORT_FIELD_MISMATCH", safe_text(str(r.get("assertion_id")), 64), "the result names another native status than its lane's")
+    if report.get("redaction") != REDACTION:
+        v.add("REPORT_FIELD_MISMATCH", "redaction", "the redaction note is not the one the runner writes")
 
 
 def _check_native(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification) -> None:
@@ -317,9 +344,18 @@ def _check_file_set(frozen: FrozenPlan, files: Mapping[str, bytes], v: Verificat
 
 
 def verify_location(location: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, require_anchor: bool = False,
+                    require_plan_digest: bool = False, up: Optional[Upstreams] = None, snapshot_seconds: Optional[float] = None) -> Verification:
+    """Verify the bundle at ``location``: ONE snapshot is taken by a child process that is killed at the deadline (``isolated``), and everything below is computed from that snapshot, never from the
+    files again (a writer that changes them while the verification runs cannot make two checks see two different bundles). Raises ``isolated.IsolatedReadError`` when no snapshot can be taken."""
+    from . import isolated
+    return verify_snapshot(isolated.snapshot_bundle(location, deadline_s=snapshot_seconds), anchor=anchor, plan_digest=plan_digest, require_anchor=require_anchor,
+                           require_plan_digest=require_plan_digest, up=up)
+
+
+def verify_snapshot(snapshot: Any, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, require_anchor: bool = False,
                     require_plan_digest: bool = False, up: Optional[Upstreams] = None) -> Verification:
     v = Verification()
-    qe = verify_bundle(location, anchor=anchor, plan_digest=plan_digest)
+    qe = verify_source(snapshot, anchor=anchor, plan_digest=plan_digest)[0]
     v.qe = qe
     for f in qe.findings:
         v.add(f.code, f.path, f.message)
@@ -332,7 +368,7 @@ def verify_location(location: str, *, anchor: Optional[str] = None, plan_digest:
         v.add("PLAN_DIGEST_REQUIRED", "plan", "a plan digest from outside the bundle was required and none matched")
     if qe.complete:
         try:
-            files = read_files(location)
+            files = snapshot.files
             report = loads_strict(files["report.json"])
             up = up or verified_bootstrap()
             frozen = _check_lock(up, files, report, v)
@@ -341,6 +377,7 @@ def verify_location(location: str, *, anchor: Optional[str] = None, plan_digest:
                 _check_native(frozen, files, report, v)
                 _check_run_record(up, frozen, files, report, v)
                 _check_file_set(frozen, files, v)
+                _check_report_fields(frozen, files, report, v)
             v.run_exit_code = exit_code_for(report)
         except EnvironmentFault as exc:
             v.unavailable = True

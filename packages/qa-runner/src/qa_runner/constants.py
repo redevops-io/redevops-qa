@@ -15,6 +15,7 @@ OBSERVATIONS_SCHEMA = "redevops-qa/observations"
 LANE_INPUT_SCHEMA = "redevops-qa/lane-input"
 LANE_RESULT_SCHEMA = "redevops-qa/lane-result"
 SCHEMA_VERSION = "1.0"
+PLAN_SCHEMA_VERSION = "1.1"        # plan and lock: 1.1 made `requests` and `probes` (every assertion) and, for a Robot lane, `suite_sha256` part of the plan; 1.0 documents are refused by name
 
 #: the engines this release can run (R0 scope: Linux x86_64, Playwright Chromium and Robot Framework; Selenium and Appium are excluded)
 ENGINE_PLAYWRIGHT = "playwright-chromium"
@@ -43,5 +44,6 @@ ASSERTION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 #: bounds on what a child process may send back
 MAX_CHILD_JSON_BYTES = 8 * 1024 * 1024
+DEFAULT_MAX_EVIDENCE_BYTES = 128 * 1024 * 1024      # what a run keeps of its lanes' output in total (half the cap of a bundle); REDEVOPS_QA_MAX_EVIDENCE_BYTES or RunOptions.max_evidence_bytes overrides it
 MAX_LOG_TAIL_BYTES = 64 * 1024
 DEFAULT_LANE_DEADLINE_S = 120.0

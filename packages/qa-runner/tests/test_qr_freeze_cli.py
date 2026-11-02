@@ -16,7 +16,7 @@ from qa_runner.orchestrate import RunOptions, run_plan
 from qa_runner.plan import freeze_plan, load_plan_or_lock
 from qr_support import fake, fake_robot
 
-DEMO_PLAN_DIGEST = "sha256:6f960c30bb013f8a57bb83bc914918b809fa35d2d46e2848ad9d14ea4f55e0e3"
+DEMO_PLAN_DIGEST = "sha256:3e53d5b170e6541bd7fb37188a17c99c766af1d161d5aed452af68a56e68b943"
 DEMO_EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "demo-plan.json"
 
 
@@ -218,7 +218,7 @@ def test_report_with_a_plan_digest_says_whether_it_matches(bundle_dir):
     good = cli("report", str(bundle_dir), "--plan-digest", DEMO_PLAN_DIGEST)
     bad = cli("report", str(bundle_dir), "--plan-digest", "sha256:" + "0" * 64)
     assert good[0] == 0 and "matches the supplied value" in good[1]
-    assert bad[0] == K.EXIT_REJECTED and "does NOT match" in bad[1] and "must not be relied on" in bad[2]
+    assert bad[0] == K.EXIT_REJECTED and "PLAN_DIGEST_MISMATCH" in bad[1] and "did not verify" in bad[2]
 
 
 def test_report_of_a_tampered_bundle_exits_one_and_warns(bundle_dir, tmp_path):
@@ -227,7 +227,7 @@ def test_report_of_a_tampered_bundle_exits_one_and_warns(bundle_dir, tmp_path):
     shutil.copytree(bundle_dir, copy)
     (copy / "lanes" / "robot" / "observations.json").write_bytes(b"{}\n")
     code, out, err = cli("report", str(copy))
-    assert code == K.EXIT_REJECTED and "FAILED" in out and "WARNING: this bundle FAILED verification" in out and "must not be relied on" in err
+    assert code == K.EXIT_REJECTED and out.startswith("Recomputation : REJECTED") and "Verification : OK" not in out and "did not verify" in err
 
 
 def test_report_and_inspect_of_something_that_is_not_a_bundle_are_usage_errors(tmp_path):
@@ -247,7 +247,7 @@ def test_inspect_exits_one_for_a_bundle_that_does_not_verify(bundle_dir, tmp_pat
     shutil.copytree(bundle_dir, copy)
     (copy / "plan.lock.json").write_bytes(b"{}\n")
     code, out, err = cli("inspect", str(copy))
-    assert code == K.EXIT_REJECTED and "verification: FAILED" in out
+    assert code == K.EXIT_REJECTED and "recomputation: REJECTED" in out and "verification: OK" not in out and "verdict:" not in out
 
 
 def test_chain_heads_are_read_from_the_run_record_as_stored():
@@ -286,11 +286,13 @@ def test_report_and_inspect_recompute_the_verdicts_and_do_not_print_ok_for_evide
     """Review finding H1: for a forged bundle `verify` exited 5 while `report` printed 'Verification : OK - internally consistent ... VERIFIED' and exited 0."""
     forged = forged_bundle(up, tmp_path)
     code, out, err = cli("report", str(forged))
-    assert code == K.EXIT_REJECTED and "REJECTED: the bundle does not verify" in out.splitlines()[0] and "VERDICT_RECOMPUTE_MISMATCH" in out.splitlines()[0] and "must not be relied on" in err
+    assert code == K.EXIT_REJECTED and "REJECTED: the bundle does not verify" in out.splitlines()[0] and "VERDICT_RECOMPUTE_MISMATCH" in out.splitlines()[0] and "did not verify" in err
+    assert "Verification : OK" not in out and "INDEPENDENT VERDICT" not in out and "ALL_ASSERTIONS" not in out          # retest N5: nothing of the forged body is shown next to the rejection
     code, out, err = cli("inspect", str(forged))
-    assert code == K.EXIT_REJECTED and "recomputation: REJECTED" in out.splitlines()[2]
+    assert code == K.EXIT_REJECTED and "recomputation: REJECTED" in out.splitlines()[1] and "verification: OK" not in out
     doc = json.loads(cli("report", str(forged), "--format", "json")[1])
     assert doc["recomputation"]["accepted"] is False and "VERDICT_RECOMPUTE_MISMATCH" in {f["code"] for f in doc["recomputation"]["findings"]}
+    assert doc["content_trusted"] is False and doc["verification"] == {"ok": False} and "summary" not in doc          # the old keys do not say OK next to a rejection
     html_file = tmp_path / "r.html"
     assert cli("report", str(forged), "--format", "html", "-o", str(html_file))[0] == K.EXIT_REJECTED
     assert 'banner bad">REJECTED' in html_file.read_text()
@@ -299,7 +301,8 @@ def test_report_and_inspect_recompute_the_verdicts_and_do_not_print_ok_for_evide
 def test_report_and_inspect_say_what_was_recomputed_for_a_bundle_that_verifies(bundle_dir):
     code, out, err = cli("report", str(bundle_dir))
     assert code == 0 and out.splitlines()[0] == "Recomputation : verdicts recomputed from the bundle alone: 4 of 4 agree with the report (ACCEPTED as internally consistent)"
-    assert json.loads(cli("report", str(bundle_dir), "--format", "json")[1])["verdicts_recomputed"] is True
+    doc = json.loads(cli("report", str(bundle_dir), "--format", "json")[1])
+    assert doc["verdicts_recomputed"] is True and doc["recomputation"]["accepted"] is True and doc["recomputation"]["recomputed_assertions"] == 4
     assert cli("inspect", str(bundle_dir))[1].splitlines()[2].startswith("recomputation: verdicts recomputed from the bundle alone: 4 of 4 agree")
 
 

@@ -20,7 +20,7 @@ from qa_runner.orchestrate import RunOptions, lane_input, run_plan
 from qa_runner.plan import freeze_plan
 from qa_runner.procs import child_env, make_workdir
 from hostile import CountingListener, PageServer
-from qr_support import alive, descendants, process_table, wait_gone
+from qr_support import alive, descendants, process_table, reap, wait_gone
 
 HERE = Path(__file__).resolve().parent
 
@@ -161,7 +161,7 @@ def test_a_page_that_tries_to_reach_another_origin_is_denied_by_the_gateway_and_
         spec["assertions"] = [_assertion("A-URL", {"kind": "URL", "pattern": r"/$"}, "MATCHES", r"/$")]
         plan = golden_plan()
         plan["lanes"][0]["spec"] = spec
-        plan["lanes"][0]["probes"] = {}
+        plan["lanes"][0]["probes"] = {"A-URL": "ui-only"}
         plan["lanes"][0]["requests"] = {"required": ["GET /"], "allowed": []}
         fl = freeze_plan(up, plan).lane("browser")
         doc = run_lane(lane_input(fl, run_id="r0-hostile", origin=page.origin, out_dir=str(tmp_path / "out")))
@@ -186,7 +186,7 @@ def test_the_command_line_end_to_end_in_a_scrubbed_environment(tmp_path):
                               capture_output=True, text=True, timeout=180)
         assert done.returncode == code, done.stdout + done.stderr
         assert f": {outcome} (" in done.stdout and "manifest digest: sha256:" in done.stdout and "plan digest: sha256:" in done.stdout
-        assert "independent verification (a separate process): ACCEPTED as internally consistent" in done.stdout
+        assert "re-verification in a fresh process (the same code as the run, not independent code): ACCEPTED as internally consistent" in done.stdout
         (bundle,) = list(out.iterdir())
         verify = subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle)], env=env, capture_output=True, text=True, timeout=60)
         assert verify.returncode == 0, verify.stdout + verify.stderr
@@ -219,8 +219,16 @@ def test_a_cancel_signal_ends_the_run_and_everything_it_started(tmp_path, sig_na
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps(golden_plan()))
     proc = subprocess.Popen([sys.executable, "-s", "-m", "qa_runner", "run", str(plan), "--out", str(tmp_path / "o")], env=child_env(str(tmp_path)), cwd=str(tmp_path),
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
     seen = set()
+    try:
+        _cancel_body(proc, seen, sig_name)
+    finally:
+        reap(proc, seen)
+
+
+def _cancel_body(proc, seen, sig_name):
+    import signal
 
     def lane_running():
         table = process_table()
@@ -237,8 +245,16 @@ def test_a_cancel_signal_ends_the_run_and_everything_it_started(tmp_path, sig_na
 
 def test_killing_the_parent_without_warning_leaves_no_process_behind(tmp_path):
     """Review finding M1: after SIGKILL of the parent the lane child used to be re-parented to PID 1 and keep running (nothing watched the parent)."""
-    proc = subprocess.Popen([sys.executable, "-s", str(HERE / "slow_parent.py")], env=child_env(str(tmp_path)), cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen([sys.executable, "-s", str(HERE / "slow_parent.py")], env=child_env(str(tmp_path)), cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
     seen = set()
+    try:
+        _kill_body(proc, seen)
+    finally:
+        reap(proc, seen)          # a failed assertion below leaves nothing running
+
+
+def _kill_body(proc, seen):
 
     def browser_running():
         table = process_table()

@@ -319,6 +319,13 @@ CASES = [
     Case("a second network allowed by the egress profile", "none", _edit_lane_file("browser", "lanes/browser/egress-profile.json", _record_edit(lambda d: d["private"][0]["networks"].append("10.0.0.0/8"))), ("EGRESS_PROFILE_MISSING",), "forged"),
     Case("a bundle that says a test double produced it", "none", lambda up, f: rechain(edit_json(f, "report.json", lambda r: r.update(extensions={**(r.get("extensions") or {}), "test_double": "lane-command"}))),
          ("TEST_DOUBLE_BUNDLE",), "rechained"),
+    # ---- retest of #32 and #33 ------------------------------------------------------------------------------------------------------------
+    Case("a lock of the older plan format", "none", lambda up, f: _edit_lock(f, lambda l: l.update(schema_version="1.0")), ("LOCK_UNSUPPORTED_VERSION",), "rechained"),
+    Case("the reference check's document reshaped (a key added)", "discount", lambda up, f: rechain(edit_json(f, "logs/reference-check.json", lambda d: d.update(note="x"))), ("REFERENCE_CHECK_MALFORMED",), "rechained"),
+    Case("the reference check's deviations dropped from its document", "discount", lambda up, f: rechain(edit_json(f, "logs/reference-check.json", lambda d: d.pop("deviations"))), ("REFERENCE_CHECK_MALFORMED",), "rechained"),
+    Case("a result that names another native status than its lane's", "none", lambda up, f: rechain(edit_json(f, "report.json", lambda r: r["accounting"]["results"][0].update(native_status="NATIVE_FAIL"))),
+         ("REPORT_FIELD_MISMATCH",), "rechained"),
+    Case("a redaction note that claims more than the runner does", "none", lambda up, f: rechain(edit_json(f, "report.json", lambda r: r["redaction"].update(applied=True))), ("REPORT_FIELD_MISMATCH",), "rechained"),
 ]
 
 
@@ -328,7 +335,7 @@ def _edited(doc, fn):
 
 
 # ---- the checks, shared by the offline suite (golden bundles) and the end-to-end suite (bundles written by the run under test) ------------------------------------------
-PLAN_DIGEST = "sha256:6f960c30bb013f8a57bb83bc914918b809fa35d2d46e2848ad9d14ea4f55e0e3"
+PLAN_DIGEST = "sha256:3e53d5b170e6541bd7fb37188a17c99c766af1d161d5aed452af68a56e68b943"
 CONSISTENT = [c for c in CASES if c.kind == "forged" and not c.expect]
 CLAIMS = [c for c in CASES if c.kind == "claim"]
 REJECTED = [c for c in CASES if c.expect]
