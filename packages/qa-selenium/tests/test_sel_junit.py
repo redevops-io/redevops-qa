@@ -117,3 +117,28 @@ def test_negative_or_absurd_durations_become_zero():
     got = parse_junit(xml('<testcase classname="c" name="a" time="-5"/>'))
     assert got[0].duration_s == 0.0
     assert parse_junit(xml('<testcase classname="c" name="a" time="abc"/>'))[0].duration_s == 0.0
+
+
+def test_a_fifo_where_the_report_should_be_is_refused_at_once_and_a_link_or_a_huge_file_is_refused_too(tmp_path):
+    """Retest round 2, L-R1: `stat` then `read_bytes` hung on a FIFO. The probe runs in a child with a hard timeout so a regression cannot hang the suite."""
+    import os
+    import subprocess
+    import sys
+    fifo = tmp_path / "report.xml"
+    os.mkfifo(fifo)
+    code = (f"import sys\nsys.path[:0] = {[p for p in sys.path if p]!r}\nfrom pathlib import Path\nfrom qa_adapter_kit import MalformedReport\nfrom qa_selenium import read_junit\n"
+            f"try:\n    read_junit(Path({str(fifo)!r}))\nexcept MalformedReport as e:\n    print('REFUSED')\n")
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
+    assert "REFUSED" in done.stdout, done.stderr[-300:]
+    real = tmp_path / "real.xml"
+    real.write_bytes((REC / "pytest-mixed.xml").read_bytes())
+    link = tmp_path / "link.xml"
+    link.symlink_to(real)
+    with pytest.raises(MalformedReport):
+        read_junit(link)
+    big = tmp_path / "big.xml"
+    with open(big, "wb") as fh:
+        fh.truncate(21 * 1024 * 1024)
+    with pytest.raises(MalformedReport):
+        read_junit(big)
+    assert read_junit(real)
