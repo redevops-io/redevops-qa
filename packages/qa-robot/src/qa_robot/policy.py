@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import FrozenSet, Iterable, List, Mapping, Set, Tuple
 
 from qa_adapter_kit import PathPolicy, PathRefused, PolicyRefused
+from qa_adapter_kit.boundedread import UnsafeRead, read_regular
 from qa_adapter_kit.status import ErrorCode
 
 STANDARD_LIBRARIES = frozenset({"BuiltIn", "Collections", "DateTime", "Dialogs", "OperatingSystem", "Process", "Remote", "Screenshot", "String",
@@ -92,9 +93,10 @@ def scan_suite(workspace: Path, suite: Path, config: RobotConfig) -> ScanResult:
         owners.add(path.stem)
         if path.stem in STANDARD_LIBRARIES and path.stem not in allowed:
             raise _refuse(f"{rel}: a file named like a library that is not allowed could be mistaken for it in a report")
-        data = path.read_bytes()
-        if len(data) > MAX_FILE_BYTES:
-            raise _refuse(f"{rel}: the file is larger than {MAX_FILE_BYTES} bytes")
+        try:
+            data = read_regular(str(path), max_bytes=MAX_FILE_BYTES, deadline_s=10.0, follow_symlinks=False, root=str(workspace))
+        except UnsafeRead as exc:
+            raise _refuse(f"{rel}: the file is larger than {MAX_FILE_BYTES} bytes" if exc.code == "TOO_LARGE" else f"{rel}: the file is not a regular file that can be read") from None
         text = data.decode("utf-8", errors="replace")
         if not config.allow_dynamic_python:
             flat = _norm(text)
@@ -165,7 +167,11 @@ def _check_library_file(workspace: Path, source: Path, target: str, config: Robo
     expected = config.allowed_library_files.get(key)
     if expected is None:
         raise _refuse(f"{rel}: library file {key} is not on the reviewed list")
-    if hashlib.sha256(real.read_bytes()).hexdigest() != expected:
+    try:
+        library = read_regular(str(real), max_bytes=MAX_FILE_BYTES, deadline_s=10.0, follow_symlinks=False, root=str(workspace))
+    except UnsafeRead:
+        raise _refuse(f"{rel}: library file {key} is not a regular file of a readable size") from None
+    if hashlib.sha256(library).hexdigest() != expected:
         raise _refuse(f"{rel}: library file {key} does not match its reviewed hash")
 
 

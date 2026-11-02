@@ -297,6 +297,9 @@ def test_assertion_ids_that_differ_only_in_case_are_refused_at_freeze_not_after_
     ("no probes at all", lambda l: l.pop("probes"), "MISSING_FIELD"),
     ("an empty set of probes", lambda l: l.update(probes={}), "BAD_PROBES"),
     ("one assertion that names no probe", lambda l: l["probes"].pop("A-SAVED"), "BAD_PROBES"),
+    ("the discount rule fact on the notification checkbox", lambda l: l["probes"].update({"A-NOTIF-ON": "discount-rule"}), "BAD_PROBES"),
+    ("the settings fact on the status text it does not read", lambda l: l["probes"].update({"A-SAVED": "settings-persistence"}), "BAD_PROBES"),
+    ("the settings fact on the URL", lambda l: l["probes"].update({"A-URL": "settings-persistence"}), "BAD_PROBES"),
 ])
 def test_the_requests_and_probes_of_a_lane_are_validated(up, name, edit, code):
     plan = golden_plan()
@@ -347,7 +350,7 @@ def test_a_library_that_is_not_the_pinned_one_is_refused_at_freeze(up, tmp_path,
 
 @pytest.mark.parametrize("name,edit", [
     ("a required request of the Robot lane", lambda p: p["lanes"][0]["requests"]["required"].pop()),
-    ("the probe of the Robot lane", lambda p: p["lanes"][0].update(probes={"A-ORDER-RULE": "settings-persistence"})),
+    ("an allowed request of the Robot lane", lambda p: p["lanes"][0]["requests"]["allowed"].append("GET /api/orders/105")),
     ("the deadline of the Robot lane", lambda p: p["lanes"][0].update(deadline_s=3600)),
 ])
 def test_everything_that_defines_the_robot_run_is_in_the_plan_digest(up, name, edit):
@@ -360,6 +363,7 @@ def test_everything_that_defines_the_robot_run_is_in_the_plan_digest(up, name, e
     ("no probes on a Robot lane", lambda l: l.pop("probes"), "MISSING_FIELD"),
     ("an empty set of probes on a Robot lane", lambda l: l.update(probes={}), "BAD_PROBES"),
     ("ui-only on a Robot lane", lambda l: l.update(probes={"A-ORDER-RULE": "ui-only"}), "BAD_PROBES"),
+    ("the browser's settings fact on the order assertion", lambda l: l.update(probes={"A-ORDER-RULE": "settings-persistence"}), "BAD_PROBES"),
 ])
 def test_a_robot_lane_needs_a_real_fact_of_the_reference_check_for_its_assertion(up, name, edit, code):
     """Retest R2: a library that calls the API but ignores the answers was VERIFIED against a discount-defective target once the plan's probes were removed."""
@@ -379,3 +383,16 @@ def test_a_plan_or_lock_of_the_older_format_is_refused_by_name(up, golden_frozen
     with pytest.raises(PlanError) as exc:
         thaw_lock(up, lock)
     assert exc.value.code == "UNSUPPORTED_LOCK_VERSION" and "unsupported schema_version '1.0'" in str(exc.value) and "older runner" in str(exc.value)
+
+
+def test_a_fact_of_the_reference_check_covers_only_the_assertion_it_speaks_for(up):
+    """Retest R2b: `_check_probes` only checked that the fact was one of the known names, so an order assertion labelled with the settings fact was 'backed' by a check that never looks at orders."""
+    err = refused(up, _with_probe(golden_plan(), "A-SAVED", "settings-persistence"), "BAD_PROBES")
+    assert "cannot cover assertion 'A-SAVED'" in str(err) and "Email notifications" in str(err)
+    frozen = freeze_plan(up, golden_plan())                                               # the right pairing, and ui-only for what the browser shows, freeze
+    assert frozen.lane("browser").probes == {"A-NOTIF-ON": "settings-persistence", "A-SAVED": "ui-only", "A-URL": "ui-only"}
+
+
+def _with_probe(plan, aid, fact):
+    plan["lanes"][0]["probes"][aid] = fact
+    return plan

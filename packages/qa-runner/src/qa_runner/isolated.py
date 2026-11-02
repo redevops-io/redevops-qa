@@ -23,11 +23,20 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from qa_evidence.constants import DEFAULT_LIMITS
 from qa_evidence.sources import SnapshotSource, SourceEntry
 
+from . import limits as env_limits
 from .procs import child_env
 
 WORKER = [sys.executable, "-s", "-m", "qa_runner.read_worker"]      # tests replace this to model a worker that never answers
-DEFAULT_READ_SECONDS = float(os.environ.get("REDEVOPS_QA_READ_TIMEOUT", "30"))
-DEFAULT_BUNDLE_SECONDS = float(os.environ.get("REDEVOPS_QA_BUNDLE_READ_TIMEOUT", "120"))
+DEFAULT_READ_SECONDS: Optional[float] = None          # tests set these; otherwise REDEVOPS_QA_READ_TIMEOUT / REDEVOPS_QA_BUNDLE_READ_TIMEOUT (strictly parsed, ``limits``), default 30 / 120 s
+DEFAULT_BUNDLE_SECONDS: Optional[float] = None
+
+
+def read_seconds() -> float:
+    return DEFAULT_READ_SECONDS if DEFAULT_READ_SECONDS is not None else env_limits.env_seconds("REDEVOPS_QA_READ_TIMEOUT", 30.0)
+
+
+def bundle_seconds() -> float:
+    return DEFAULT_BUNDLE_SECONDS if DEFAULT_BUNDLE_SECONDS is not None else env_limits.env_seconds("REDEVOPS_QA_BUNDLE_READ_TIMEOUT", 120.0)
 
 
 class IsolatedReadError(Exception):
@@ -108,7 +117,7 @@ def _run(args: Sequence[str], *, deadline_s: float, max_stdout: int, argv: Optio
 
 def read_file(path: str, *, max_bytes: int, deadline_s: Optional[float] = None, argv: Optional[Sequence[str]] = None) -> bytes:
     """The bytes of the regular file at ``path`` (at most ``max_bytes``), read by a child that is killed at the deadline."""
-    out = _run(["file", os.path.abspath(path), str(max_bytes)], deadline_s=DEFAULT_READ_SECONDS if deadline_s is None else deadline_s, max_stdout=max_bytes + 4096, argv=argv)
+    out = _run(["file", os.path.abspath(path), str(max_bytes)], deadline_s=read_seconds() if deadline_s is None else deadline_s, max_stdout=max_bytes + 4096, argv=argv)
     head, _, body = out.partition(b"\n")
     try:
         doc = json.loads(head.decode("utf-8"))
@@ -125,7 +134,7 @@ def snapshot_bundle(location: str, *, deadline_s: Optional[float] = None, argv: 
     """ONE immutable snapshot of a bundle directory or archive, taken by a child that is killed at the deadline. Everything the verifier, ``report`` and ``inspect`` look at afterwards comes from it."""
     limits = DEFAULT_LIMITS
     cap = limits.max_total_bytes + limits.max_file_bytes + 1 + (limits.max_files + 8) * 512 + 4 * 1024 * 1024
-    out = _run(["bundle", os.path.abspath(location)], deadline_s=DEFAULT_BUNDLE_SECONDS if deadline_s is None else deadline_s, max_stdout=cap, argv=argv)
+    out = _run(["bundle", os.path.abspath(location)], deadline_s=bundle_seconds() if deadline_s is None else deadline_s, max_stdout=cap, argv=argv)
     pos = out.find(b"\n")
     try:
         head = json.loads(out[:pos].decode("utf-8")) if pos >= 0 else None

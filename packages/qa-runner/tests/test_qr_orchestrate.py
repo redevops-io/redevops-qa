@@ -313,8 +313,6 @@ def test_the_evidence_budget_is_configurable_and_the_default_is_conservative(up,
     assert _evidence_cap(RunOptions()) == K.DEFAULT_MAX_EVIDENCE_BYTES == 128 * 1024 * 1024
     monkeypatch.setenv("REDEVOPS_QA_MAX_EVIDENCE_BYTES", "1000000")
     assert _evidence_cap(RunOptions()) == 1_000_000 and _evidence_cap(RunOptions(max_evidence_bytes=5)) == 5
-    monkeypatch.setenv("REDEVOPS_QA_MAX_EVIDENCE_BYTES", "-1")
-    assert _evidence_cap(RunOptions()) == K.DEFAULT_MAX_EVIDENCE_BYTES
 
 
 def test_a_bundle_the_format_refuses_is_rebuilt_without_the_blobs_not_thrown_away(up, golden_frozen, monkeypatch):
@@ -332,3 +330,10 @@ def test_a_bundle_the_format_refuses_is_rebuilt_without_the_blobs_not_thrown_awa
     s = run_plan(up, golden_frozen, RunOptions(lane_command=fake("bulk"), lane_deadline_s=30, run_id="r0-test"))
     assert len(calls) == 2 and s.lanes == (("browser", "NATIVE_ERROR"),) and not [p for p in s.bundle.files if "/blobs/" in p]
     assert "evidence_incomplete" in report(s)["extensions"] and verify_files(s.bundle.files).ok
+
+
+def test_a_blobs_directory_that_is_a_symlink_is_not_followed_and_nothing_in_it_is_kept(up, golden_frozen):
+    """Retest L-R4: O_NOFOLLOW on the last path component alone followed a `blobs` directory replaced by a link; every component below the run's directory is now refused if it is a link."""
+    s = run_plan(up, golden_frozen, RunOptions(lane_command=fake("blobs-symlink"), lane_deadline_s=30, run_id="r0-test"))
+    assert not [p for p in s.bundle.files if "/blobs/" in p]
+    assert s.lanes == (("browser", "NATIVE_PASS"),) and verify_files(s.bundle.files).ok

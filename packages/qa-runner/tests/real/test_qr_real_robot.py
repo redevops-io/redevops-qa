@@ -153,6 +153,17 @@ def test_a_library_that_asks_and_ignores_the_answers_is_not_verified_against_a_d
         assert exc.value.code == code
 
 
+def test_an_order_assertion_labelled_with_the_settings_fact_is_refused_at_freeze_so_a_library_that_ignores_the_answers_cannot_hide_behind_it(up, tmp_path, monkeypatch):
+    """Retest R2b: the library asks and ignores the answers; the plan is regenerated for it and the order assertion is labelled `settings-persistence` (a check that never looks at orders), so the
+    discount-defective target would have been VERIFIED. The pairing is refused at freeze, naming what the fact speaks for."""
+    swapped_suite_that_asks_and_ignores(tmp_path, monkeypatch)
+    plan = robot_plan()
+    plan["lanes"][0]["probes"] = {"A-ORDER-RULE": "settings-persistence"}
+    with pytest.raises(PlanError) as exc:
+        freeze_plan(up, plan)
+    assert exc.value.code == "BAD_PROBES" and "cannot cover assertion 'A-ORDER-RULE'" in str(exc.value)
+
+
 def test_a_suite_that_imports_a_library_nobody_reviewed_is_refused_by_the_adapter(up, tmp_path, monkeypatch):
     """The plan is frozen with this (edited) suite, so the hashes agree; the adapter still refuses a library that is not on the reviewed list."""
     copy = tmp_path / "suite"
