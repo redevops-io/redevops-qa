@@ -13,6 +13,6 @@ def exit_code_for(report: Mapping[str, Any], cancelled: bool = False) -> int:
         return K.EXIT_VERIFIED
     if outcome == "FAILED":
         return K.EXIT_FAILED
-    if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]):
-        return K.EXIT_ENVIRONMENT
+    if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]) or "evidence_incomplete" in (report.get("extensions") or {}):
+        return K.EXIT_ENVIRONMENT                  # incomplete evidence (the evidence cap) is a limit of the run, not a lane that completed with an unproven assertion
     return K.EXIT_INCONCLUSIVE

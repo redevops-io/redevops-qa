@@ -188,7 +188,7 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
     bundle_dir = reserved
-    _print_summary(summary, bundle_dir, out)
+    _print_summary(summary, bundle_dir, out, recomputed=True)          # the separate verification below recomputes the verdicts
     from .exits import exit_code_for
     # verify cannot know whether the run was cancelled (a SIGTERM after the last lane): it returns the status of the report alone, which is what it is compared with
     code = _verify_in_a_new_process(bundle_dir, summary.plan_digest, exit_code_for(json.loads(summary.bundle.files["report.json"])), summary.exit_code, out)
@@ -234,10 +234,12 @@ def _verify_in_a_new_process(bundle_dir: Path, plan_digest: str, expected_exit: 
     return run_exit
 
 
-def _print_summary(summary, bundle_dir: Path, out: TextIO) -> None:
+def _print_summary(summary, bundle_dir: Path, out: TextIO, *, recomputed: bool = False) -> None:
     report = json.loads(summary.bundle.files["report.json"])
     print(f"run {summary.run_id}: {report['verdict']['outcome']} ({report['verdict']['reason_code']})" + ("  [cancelled]" if summary.cancelled else ""), file=out)
     print(f"  external anchor: {ANCHOR_ABSENT_NOTICE} (a manifest digest published where this machine cannot rewrite it is an anchor)", file=out)
+    if not recomputed:
+        print(f"  {RUNNER_ONLY}", file=out)
     acc = report["accounting"]
     for lane in report["lanes"]:
         mine = [r for r in acc["results"] if r["lane_id"] == lane["lane_id"]]
@@ -292,6 +294,9 @@ def _bundle_read_error(exc: "isolated.IsolatedReadError") -> Exception:
     if exc.code == "CANCELLED":
         return EnvironmentFault("CANCELLED", "cancelled while reading the bundle")
     return PlanError("BUNDLE_READ_TIMEOUT" if exc.code == "TIMEOUT" else "BUNDLE_UNREADABLE", safe_text(str(exc), 200))
+
+#: ``run`` and ``demo`` print this right under the outcome: the verdicts come from the runner that ran the plan, and no command in this release recomputes them (retest R2-3)
+RUNNER_ONLY = "verdicts are the runner's own and are not recomputed by any command here (`verify`, in the next part, recomputes them); this is not an independent verification"
 
 
 def _snapshot(location: str):

@@ -38,6 +38,14 @@ REQUEST_RE = re.compile(r"^(GET|POST) (/[A-Za-z0-9._~/-]{0,100})$")
 #: no server-side fact applies and nothing independent backs it). EVERY assertion of a lane names one: a lane cannot reach VERIFIED on a fixture-app assertion nobody said anything about.
 UI_ONLY = "ui-only"
 PROBE_FACTS = ("discount-rule", "settings-persistence", UI_ONLY)
+#: what each fact of the reference check may speak for (retest R2b): a fact is tied to the engine and the subject of the assertion it covers, so that an assertion cannot borrow a fact that says
+#: nothing about it (an order total labelled with the settings fact would be "backed" by a check that never looks at orders).
+FACT_COVERS = {
+    "settings-persistence": {"engine": K.ENGINE_PLAYWRIGHT, "subject_kind": "UI_ELEMENT", "locator": {"role": "checkbox", "name": "Email notifications"},
+                             "says": "a browser assertion about the state of the 'Email notifications' checkbox (the saved notification setting)"},
+    "discount-rule": {"engine": K.ENGINE_ROBOT, "check_program": "evidence.robot-observations",
+                      "says": "a Robot lane's assertion read by the evidence.robot-observations program (the order totals the discount rule produces)"},
+}
 #: what traffic of an engine is controlled by: only the browser's traffic passes the egress gateway; a Robot library opens its own sockets, so a Robot lane says so
 EGRESS_PROFILES = {K.ENGINE_PLAYWRIGHT: ("origin-only",), K.ENGINE_ROBOT: ("not-enforced",)}
 TARGET_KINDS = ("fixture-app",)
@@ -175,6 +183,21 @@ def _check_requests(req: Any, lid: str) -> None:
         raise PlanError("BAD_REQUESTS", f"lane {lid[:20]}: a lane must name at least one request the target has to see")
 
 
+def _fact_covers(fact: str, lane: Mapping[str, Any], assertion: Mapping[str, Any]) -> bool:
+    rule = FACT_COVERS[fact]
+    if lane["engine"] != rule["engine"]:
+        return False
+    subject = assertion.get("subject") or {}
+    if "subject_kind" in rule and subject.get("kind") != rule["subject_kind"]:
+        return False
+    locator = subject.get("locator") or {}
+    if "locator" in rule and any(locator.get(k) != v for k, v in rule["locator"].items()):
+        return False
+    if "check_program" in rule and (assertion.get("check_program_ref") or {}).get("id") != rule["check_program"]:
+        return False
+    return True
+
+
 def _check_probes(probes: Any, lid: str) -> None:
     if not isinstance(probes, dict) or not all(isinstance(k, str) and v in PROBE_FACTS for k, v in probes.items()):
         raise PlanError("BAD_PROBES", f"lane {lid[:20]}: probes maps an assertion id to one of {list(PROBE_FACTS)}")
@@ -273,6 +296,10 @@ def freeze_plan(up: Upstreams, plan_doc: Any, *, for_verification: bool = False)
         if unprobed:
             raise PlanError("BAD_PROBES", f"lane {lid}: assertion(s) {[u[:40] for u in unprobed]} name no probe: give each a fact of the reference check ({', '.join(f for f in PROBE_FACTS if f != UI_ONLY)}) "
                             f"or {UI_ONLY!r} (what the browser shows, with nothing independent behind it)")
+        by_id = {a["assertion_id"]: a for a in assertions}
+        for aid, fact in lane["probes"].items():
+            if fact != UI_ONLY and not _fact_covers(fact, lane, by_id[aid]):
+                raise PlanError("BAD_PROBES", f"lane {lid}: the fact {fact!r} cannot cover assertion {aid[:40]!r}: it speaks for {FACT_COVERS[fact]['says']}")
         # Everything the plan fixes about a lane besides the assertion itself is bound into the digest of every assertion of that lane, so the plan digest covers it:
         # what the target's request log must show, which independent facts may not contradict a verdict, the egress profile, the whole spec (steps included), the deadline,
         # the reviewed suite and the digests of its files (a Robot lane), and the plan's id and target.

@@ -28,7 +28,7 @@ from qa_evidence.canon import CanonError, dumps_canonical, loads_strict
 from qa_robot import RobotConfig, RobotSuiteAdapter, observation_document, parse_observations, suite_manifest
 
 from . import constants as K, suites, watchdog
-from .bundle import LaneOutcome
+from .bundle import NATIVE_STATUSES, LaneOutcome
 from .judge import observation_path
 from .natives import native_from_adapter_result
 from .plan import FrozenLane
@@ -156,18 +156,28 @@ def _read_outcome(fl: Any, out: Path, budget: Budget, limit: int = 64 * 1024 * 1
     descriptor (regular file, no symlink, byte cap, deadline); a file that does not fit the budget is not kept and the lane is an engine error (``evidence-over-cap``)."""
     dropped_before = len(budget.dropped)
     try:
-        raw = budget.read(out / "outcome.json", K.MAX_CHILD_JSON_BYTES, "outcome.json")
-        if raw is None:
-            return None, []
+        # the lane's own control file is not evidence and is not kept: it is read with the byte and time caps but is not charged to the evidence budget (charged, it did not fit once the child had used what
+        # was left, and the lane was then labelled ``child-exit-0``, not ``evidence-over-cap``: retest R2-6)
+        raw = read_regular(str(out / "outcome.json"), max_bytes=K.MAX_CHILD_JSON_BYTES, deadline_s=30.0, follow_symlinks=False, root=budget.root)
         doc = loads_strict(raw)
         if not isinstance(doc, dict) or doc.get("schema") != K.LANE_RESULT_SCHEMA or doc.get("status") != "COMPLETED":
             return None, []
         native_refs, file_refs = doc["native"], doc["files"]
         if not isinstance(native_refs, dict) or not isinstance(file_refs, dict) or len(native_refs) + len(file_refs) > MAX_OUTCOME_FILES:
             return None, []
-        for ref in list(native_refs.values()) + [m["data"] for m in file_refs.values()]:
+        for ref in list(native_refs.values()) + [m["data"] for m in file_refs.values() if isinstance(m, dict)]:
             if not isinstance(ref, str) or not DATA_REF_RE.fullmatch(ref):
                 return None, []
+        if not all(isinstance(m, dict) and isinstance(m.get("data"), str) and isinstance(m.get("role"), str) for m in file_refs.values()):
+            return None, []
+        if not isinstance(doc.get("engine_version"), str) or doc.get("native_status") not in NATIVE_STATUSES or not isinstance(doc.get("raw_status"), str) or not isinstance(doc.get("log", []), list):
+            return None, []
+        counts = doc.get("counts")
+        if counts is not None and not (isinstance(counts, dict) and set(counts) <= {"passed", "failed", "errored", "skipped"}
+                                       and all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 1_000_000 for v in counts.values())):
+            return None, []
+        if doc.get("exit_code") is not None and (not isinstance(doc["exit_code"], int) or isinstance(doc["exit_code"], bool) or not -256 <= doc["exit_code"] <= 255):
+            return None, []
         native = {str(rel): budget.read(out / ref, limit, f"native/{rel}") for rel, ref in native_refs.items()}
         files = {str(p): (budget.read(out / m["data"], limit, p), str(m["role"])) for p, m in file_refs.items()}
         over = len(budget.dropped) > dropped_before
@@ -178,7 +188,7 @@ def _read_outcome(fl: Any, out: Path, budget: Budget, limit: int = 64 * 1024 * 1
                               files={k: (d, r) for k, (d, r) in files.items() if d is not None},
                               counts=doc["counts"] if isinstance(doc["counts"], dict) and not over else None)
         return outcome, [str(x)[:300] for x in doc.get("log", [])][:50]
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, CanonError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, CanonError, UnsafeRead):
         return None, []
 
 

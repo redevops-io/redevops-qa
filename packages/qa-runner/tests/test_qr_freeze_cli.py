@@ -340,3 +340,12 @@ def test_freeze_refuses_a_plan_the_run_would_refuse_for_its_origin_placeholder(u
     with pytest.raises(PlanError) as exc:
         freeze_plan(up, plan)
     assert exc.value.code == "BAD_ORIGIN_PLACEHOLDER"
+
+
+# ---- retest round 2, R2-3: at this part nothing recomputes a verdict, and nothing reads as if something had --------------------------------------------
+def test_run_and_demo_say_right_under_the_outcome_that_no_command_recomputes_the_verdicts(up, demo_frozen):
+    from qa_runner.cli import RUNNER_ONLY, _print_summary
+    buf = io.StringIO()
+    _print_summary(two(up, demo_frozen), Path("/x"), buf)
+    lines = buf.getvalue().splitlines()
+    assert lines[0].startswith("run r0-test:") and RUNNER_ONLY in lines[2] and "not an independent verification" in RUNNER_ONLY

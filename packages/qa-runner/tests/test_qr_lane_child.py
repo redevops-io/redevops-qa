@@ -78,10 +78,9 @@ def test_an_oversize_file_is_not_kept_and_the_lane_is_an_engine_error_that_keeps
 
 def test_files_over_the_evidence_budget_are_not_kept_and_say_so(tmp_path):
     _write_outcome(outcome(), [], tmp_path)
-    size = len((tmp_path / "outcome.json").read_bytes())
-    budget = Budget(size + 10)                            # the outcome file fits, the files it names do not
+    budget = Budget(10)                                   # the lane's control file is not charged (it is not kept); the files it names do not fit
     back, _ = _read_outcome(LANE, tmp_path, budget)
-    assert back.raw_status == "evidence-over-cap" and budget.dropped and budget.used <= size + 10
+    assert back.raw_status == "evidence-over-cap" and budget.dropped and budget.used <= 10 and "outcome.json" not in budget.dropped
 
 
 def test_a_data_file_that_is_a_fifo_a_symlink_or_missing_is_never_waited_for_or_followed(tmp_path):

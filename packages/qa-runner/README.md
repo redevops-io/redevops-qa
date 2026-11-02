@@ -157,12 +157,22 @@ Two mechanisms, for two kinds of files.
   came through a pipe, stops taking bytes at the cap (and kills the child), stops waiting at a wall-clock deadline (`REDEVOPS_QA_READ_TIMEOUT`, default 30 s; bundles `REDEVOPS_QA_BUNDLE_READ_TIMEOUT`, default
   120 s) and kills the child, and on SIGINT, SIGTERM or SIGHUP kills the child and ends with exit 3. The child opens the path without blocking (`O_NONBLOCK`), `fstat`s the same descriptor and refuses anything
   that is not a regular file (a FIFO, a device, a directory: never read, `/dev/zero` included), refuses a file above the cap before reading, and reads with a running total (a growing file stops at the cap).
+  The child never outlives its parent: it is told the parent's pid and its deadline, and a watchdog thread ends it (`os._exit`, which works while the main thread is blocked in a system call) when the
+  parent is gone (SIGKILL, a crash) or when the deadline plus a margin has passed. Memory: a bundle snapshot is held in the parent as the stream and again as the per-file copies; at the caps
+  (about 330 MB of bundle) that is about 1 GB of resident memory for `verify`, `report` and `inspect` (measured by the retest at 819 MB for a 240 MiB bundle), not a smaller number.
 * **Files a lane or the target wrote** (in the run's own temporary directory) are read in this process through `safe_read.read_regular` with the same rules (one descriptor, regular files only, no symbolic
-  link, byte cap, deadline checked between chunks) and under one **evidence budget** for the whole run (`REDEVOPS_QA_MAX_EVIDENCE_BYTES` or `RunOptions.max_evidence_bytes`, default 128 MiB, half the cap of
+  link, byte cap, deadline checked between chunks: a single system call blocked in the kernel, a temporary directory on a hung mount, is not interrupted; only the isolated path above is killable) and under one **evidence budget** for the whole run (`REDEVOPS_QA_MAX_EVIDENCE_BYTES` or `RunOptions.max_evidence_bytes`, default 128 MiB, half the cap of
   a bundle): a file that does not fit is neither read nor kept, its name is logged, the lane becomes an engine error `evidence-over-cap`, the report says `extensions.evidence_incomplete`, the run is never
   VERIFIED (exit 3), and everything that fit is in the bundle. If the bundle format still refuses what was collected, the run is rebuilt without the blobs instead of ending as a crash.
 * The reference check of the target: no answer above 1 MiB, a total deadline of 30 s for the whole check (a watcher ends the connection; a server that sends a byte every few seconds does not stretch it),
   and the run's cancel ends it.
+
+* The limits from the environment (`REDEVOPS_QA_READ_TIMEOUT`, `REDEVOPS_QA_BUNDLE_READ_TIMEOUT`: 1 to 3600 seconds; `REDEVOPS_QA_MAX_EVIDENCE_BYTES`: 1024 to 8 GiB) are parsed strictly: anything else (`abc`, `nan`,
+  `inf`, `0`, a negative or a huge number) is refused with exit 2 and a message that names the variable, before anything starts; never a traceback and never "no limit".
+* The core of the in-process read lives in the adapter kit (`qa_adapter_kit.boundedread`) so that the adapters use it too (the Robot adapter's `output.xml` and suite files, the kit's artifact collection). With a
+  root (the run's temporary directory) every component below it is opened with `O_NOFOLLOW` relative to its parent's descriptor: a `blobs` directory replaced by a symbolic link is refused, not followed.
+* A probe fact is tied to what it speaks for: `settings-persistence` only for the browser assertion on the 'Email notifications' checkbox, `discount-rule` only for a Robot lane's assertion read by the
+  evidence program; any other pairing is refused at freeze (`BAD_PROBES`).
 
 **Tested** (each in a child with a hard timeout and, where the platform enforces one, an address-space cap; none opens an unbounded source): a reading child that never answers is killed at the deadline and is
 gone; a child that writes without end is stopped at the byte cap; SIGINT, SIGTERM, SIGHUP end the wait and the child; refusals of a FIFO with no writer, a FIFO with a capped writer (nothing is consumed), a
