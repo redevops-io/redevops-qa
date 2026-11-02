@@ -167,6 +167,109 @@ jobs:
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/qa-evidence/src:packages/qa-evidence/tests \
             python -c "import hashlib; from qe_helpers import build_base; b = build_base(); print('manifest', b.manifest_digest); print('archive sha256:' + hashlib.sha256(b.archive_bytes()).hexdigest())"
 
+  runner:
+    name: runner (Python ${{ matrix.python }}; offline; exact pins; plan freezing, verdicts, bundle, supervision with a test-double lane, doctor, mutation suite; no skips, at least one test)
+    # The runner without a browser: the lane child process is a test double that lives in the tests (the product has no such mode), the target (the fixture app) is real.
+    # Offline, read-only, no secret. The pinned upstreams are fetched by exact commit and verified before anything runs.
+    runs-on: ubuntu-24.04
+    needs: pins
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Read the pinned commits
+        id: pins
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
+      - name: Fetch runtime-contracts at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.contracts_repo }}
+          ref: ${{ steps.pins.outputs.contracts_commit }}
+          path: ${{ steps.pins.outputs.contracts_path }}
+          persist-credentials: false
+      - name: Fetch agent-harness at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.harness_qa_repo }}
+          ref: ${{ steps.pins.outputs.harness_qa_commit }}
+          path: ${{ steps.pins.outputs.harness_qa_path }}
+          persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --verify-trees --require-git
+      - name: Install test tools (the pinned trees are imported from their paths, not installed)
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the runner tests in a scrubbed environment (no browser is installed)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q packages/qa-runner/tests --junitxml="$RUNNER_TEMP/junit-runner.xml"
+      - name: Fail if the suite left a reading child behind (the mutation suite blocks workers on purpose)
+        run: |
+          sleep 3
+          if pgrep -fa 'qa_runner[.]read_worker'; then echo "a read worker outlived the suite"; exit 1; fi
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner.xml"
+
+  runner-browser:
+    name: runner browser lane (real Chromium; Playwright pinned; the harness executor, the real adapter and the egress gateway against the fixture app; a missing Playwright or browser fails, never skips)
+    # Runs the command line and the orchestrated browser lane end to end for the clean target and the seeded settings defect, a forbidden navigation, a page that tries
+    # to reach another origin, a lane deadline and the doctor. Read-only, no secret; the browser is installed in its own prefetch step and nothing downloads at test time.
+    runs-on: ubuntu-24.04
+    needs: pins
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Read the pinned commits
+        id: pins
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
+      - name: Fetch runtime-contracts at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.contracts_repo }}
+          ref: ${{ steps.pins.outputs.contracts_commit }}
+          path: ${{ steps.pins.outputs.contracts_path }}
+          persist-credentials: false
+      - name: Fetch agent-harness at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.harness_qa_repo }}
+          ref: ${{ steps.pins.outputs.harness_qa_commit }}
+          path: ${{ steps.pins.outputs.harness_qa_path }}
+          persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --verify-trees --require-git
+      - name: Install the pinned test tools and Playwright
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "playwright==1.64.1"
+      - name: Browser install (prefetch; no credentials; the tests never download anything)
+        run: |
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/pw-browsers" >> "$GITHUB_ENV"
+          PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers" python -m playwright install --with-deps chromium
+      - name: Fail unless the pinned Playwright is importable
+        run: python -c "import importlib.metadata as m, playwright.sync_api; assert m.version('playwright') == '1.64.1', m.version('playwright')"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the runner browser lane (scrubbed environment; only tests marked browser)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" \
+            python -m pytest -q -m browser packages/qa-runner/tests/browser --junitxml="$RUNNER_TEMP/junit-runner-browser.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner-browser.xml"
+      - name: Fail if the tests left anything in the working tree
+        run: test -z "$(git status --porcelain)"
+
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
     runs-on: ubuntu-24.04

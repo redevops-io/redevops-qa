@@ -94,6 +94,11 @@ def _main(argv, out: TextIO, err: TextIO) -> int:
             print(f"external anchor: {v.anchor.notice}", file=out)
             if v.plan is not None:
                 print(f"frozen assertion set: {v.plan.notice}", file=out)
+            if v.run_outcome is not None:
+                print(f"run outcome: {safe_text(v.run_outcome['outcome'])} ({safe_text(v.run_outcome['reason_code'])})", file=out)
+            for d in v.disagreements or []:
+                print(f"  ENGINE_VERIFIER_DISAGREE lane {safe_text(d['lane_id'])}: native {safe_text(d['native_status'])}, "
+                      f"verdicts {safe_text(', '.join(d['verdict_states']) or 'none')}", file=out)
             for f in v.findings:
                 print(f"  {safe_text(f.code)} {safe_text(f.path)}: {safe_text(f.message)}", file=out)
     elif args.command == "inspect":

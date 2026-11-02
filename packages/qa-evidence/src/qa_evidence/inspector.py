@@ -7,6 +7,7 @@ from typing import Any, Dict, List, NamedTuple, Optional
 
 from .constants import DEFAULT_LIMITS, Limits
 from .model import VerifyResult
+from .report import engine_verifier_disagreements
 from .sources import open_source
 from .verify import Documents, verify_source
 
@@ -23,20 +24,7 @@ class Inspection(NamedTuple):
 
 
 def _disagreements(report) -> List[Dict[str, Any]]:
-    """Lanes whose native status and independent verdicts do not tell the same story. A lane with no assertion at all is shown too."""
-    out = []
-    for lane in report["lanes"]:
-        states = [r["verdict"]["state"] for r in report["accounting"]["results"] if r["lane_id"] == lane["lane_id"]]
-        native = lane["native"]["status"]
-        if not states:
-            out.append({"code": "ENGINE_VERIFIER_DISAGREE", "lane_id": lane["lane_id"], "native_status": native, "verdict_states": []})
-            continue
-        all_verified = all(s == "VERIFIED" for s in states)
-        if native == "NATIVE_PASS" and not all_verified:
-            out.append({"code": "ENGINE_VERIFIER_DISAGREE", "lane_id": lane["lane_id"], "native_status": native, "verdict_states": sorted(set(states))})
-        elif native != "NATIVE_PASS" and all_verified:
-            out.append({"code": "ENGINE_VERIFIER_DISAGREE", "lane_id": lane["lane_id"], "native_status": native, "verdict_states": sorted(set(states))})
-    return out
+    return engine_verifier_disagreements(report)
 
 
 def summarise(manifest: Optional[Dict[str, Any]], report: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -66,6 +54,15 @@ def summarise(manifest: Optional[Dict[str, Any]], report: Optional[Dict[str, Any
         "engine_verifier_disagreements": _disagreements(report),
         "redaction": report["redaction"], "limitations": report["limitations"],
     }
+
+
+def inspect_source(source, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> Inspection:
+    """``inspect_bundle`` over a source that is already open (a ``SnapshotSource`` taken once: the verification and the summary see the same bytes). Does not close the source."""
+    result, docs = verify_source(source, anchor=anchor, plan_digest=plan_digest, limits=limits)
+    files = []
+    if docs.manifest is not None:
+        files = [dict(f) for f in docs.manifest["files"]]
+    return Inspection(result, summarise(docs.manifest, docs.report), result.ok, files)
 
 
 def inspect_bundle(location: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, limits: Limits = DEFAULT_LIMITS) -> Inspection:

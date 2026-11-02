@@ -1,0 +1,192 @@
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
+"""Mutation tests: removing a guard of the runner makes the suite fail. Each case names the guard, the source it lives in and the tests that must catch its removal."""
+import re
+
+import pytest
+
+from qr_mutation import baseline_result, mutant_result
+
+PLAN = "test_qr_plan.py"
+JUDGE = "test_qr_judge.py"
+BUNDLE = "test_qr_bundle.py"
+ORCH = "test_qr_orchestrate.py"
+CLI = "test_qr_cli.py"
+PARTS = "test_qr_lane_parts.py"
+CORR = "test_qr_corroborate.py"
+
+
+def t(file, name):
+    return f"{file}::{name}"
+
+
+CASES = [
+    # ---- plan.py ---------------------------------------------------------------------------------------------------------------------
+    ("unknown plan and lane fields are refused", "plan.py", "    if unknown:\n", "    if False:\n", [t(PLAN, "test_an_unknown_field_is_refused_at_every_level")]),
+    ("only the declared engines are accepted", "plan.py", 'if not isinstance(lane, dict) or lane.get("engine") not in K.ENGINES:', "if not isinstance(lane, dict):",
+     [t(PLAN, "test_structural_refusals")]),
+    ("an assertion id may live in one lane only", "plan.py", "            if key in seen_ids:\n", "            if False:\n",
+     [t(PLAN, "test_an_assertion_id_in_two_lanes_is_refused_so_every_assertion_is_accounted_once")]),
+    ("a lock must equal the freeze of its own plan", "plan.py", "if dumps_canonical(again.lock_document()) != dumps_canonical(lock_doc):", "if False:", [t(PLAN, "test_an_edited_lock_is_refused")]),
+    ("the contracts parser refuses what the harness mirror tolerates", "plan.py", "        return c.TestSpec.from_json(copy.deepcopy(dict(doc)))", "        return None",
+     [t(PLAN, "test_an_unknown_field_is_refused_at_every_level")]),
+    ("the origin placeholder is replaced only at the start of a value", "plan.py", "if not value.startswith(K.ORIGIN_PLACEHOLDER) or value.count(K.ORIGIN_PLACEHOLDER) != 1:", "if False:",
+     [t(PLAN, "test_the_origin_replaces_the_placeholder_at_the_start_of_a_value_only")]),
+    # ---- corroborate.py: what a lane claims is checked against what the run itself recorded ------------------------------------------
+    ("a lane result must say completed, sealed and not cancelled", "corroborate.py", 'if result.get("status") != "COMPLETED" or result.get("sealed") is not True or result.get("cancelled") is not False:', "if False:",
+     [t(CORR, "test_a_lane_result_that_does_not_say_completed_sealed_and_not_cancelled_is_not_accepted")]),
+    ("the run record must be sealed and not cancelled", "corroborate.py", 'if rec.get("sealed") is not True or rec.get("cancelled") is not False:', "if False:",
+     [t(CORR, "test_a_run_record_that_does_not_stand_is_not_accepted")]),
+    ("the harness integrity check must find nothing", "corroborate.py", "    if found.findings:", "    if False:", [t(CORR, "test_a_run_record_that_does_not_stand_is_not_accepted")]),
+    ("the run record belongs to this run", "corroborate.py", 'if rec.get("run_id") != full or manifest.run_id != full:', "if False:",
+     [t(CORR, "test_the_run_record_of_another_run_of_the_same_plan_is_not_accepted"), t(CORR, "test_a_run_record_that_does_not_stand_is_not_accepted")]),
+    ("the record and the lane result agree on the outcome", "corroborate.py", 'if rec.get("classification", {}).get("outcome") != result.get("outcome") or rec.get("exit_code") != result.get("exit_code"):', "if False:",
+     [t(CORR, "test_a_run_record_that_does_not_stand_is_not_accepted")]),
+    ("the executed spec is the frozen one", "corroborate.py", "if manifest.spec_ref != h.records.TestSpec", "if False and manifest.spec_ref != h.records.TestSpec",
+     [t(CORR, "test_the_executed_spec_must_be_the_frozen_one")]),
+    ("an observation is what the record says was read", "corroborate.py", "if r is None or r.actual != row.get(\"value\") or r.actual_digest != row.get(\"value_digest\"):", "if False:",
+     [t(CORR, "test_an_observation_that_is_not_what_the_run_record_says_was_read_is_not_accepted")]),
+    ("a missing request log is not accepted", "corroborate.py", "    if data is None:\n        return \"the target's request log for this lane is missing\"", "    if data is None:\n        return None",
+     [t(CORR, "test_a_missing_request_log_is_not_accepted")]),
+    ("a required request must have been seen", "corroborate.py", "    if required - seen:", "    if False:", [t(CORR, "test_a_request_the_plan_requires_that_the_target_never_saw_is_not_accepted")]),
+    ("a request the plan does not allow is not accepted", "corroborate.py", "    if extra:", "    if False:", [t(CORR, "test_a_request_the_plan_does_not_allow_is_not_accepted")]),
+    ("a log line that cannot be read is not accepted", "corroborate.py", "        except (CanonError, KeyError, TypeError):\n            return \"the target's request log has a line", "        except ZeroDivisionError:\n            return \"the target's request log has a line",
+     [t(CORR, "test_a_log_line_that_cannot_be_read_is_not_accepted")]),
+    ("a fact the reference check found deviating vetoes the verdict", "corroborate.py", "if fact in deviating}", "if False}", [t(CORR, "test_a_verdict_the_reference_check_contradicts_is_not_verified")]),
+    ("a probed assertion needs the reference check", "corroborate.py", "    if data is None:\n        return {aid: \"missing\" for aid in facts}", "    if data is None:\n        return {}",
+     [t(CORR, "test_a_missing_reference_check_leaves_the_probed_assertion_unverified")]),
+    ("the digest of an assertion binds the lane's whole definition", "plan.py", 'digests = {a["assertion_id"]: digest_of({"assertion": a, "binding": binding})', 'digests = {a["assertion_id"]: digest_of({"assertion": a})',
+     [t(PLAN, "test_everything_that_defines_the_run_is_in_the_plan_digest")]),
+    ("probes may only name assertions of their lane", "plan.py", "        if unknown_probe:", "        if False:", [t(PLAN, "test_the_requests_and_probes_of_a_lane_are_validated")]),
+    ("assertion ids that differ only in case are refused", "plan.py", "key = a[\"assertion_id\"].lower()", "key = a[\"assertion_id\"]", [t(PLAN, "test_assertion_ids_that_differ_only_in_case_are_refused_at_freeze_not_after_the_run")]),
+    # ---- judge.py --------------------------------------------------------------------------------------------------------------------
+    ("an observation row carries no field but the known ones", "judge.py", "if not isinstance(row, dict) or set(row) != ROW_KEYS:", "if not isinstance(row, dict):",
+     [t(JUDGE, "test_a_verdict_or_expected_value_in_an_observation_row_makes_the_file_unusable")]),
+    ("an observation file carries no extra top-level field", "judge.py", "if not isinstance(doc, dict) or set(doc) != OBS_KEYS:", "if not isinstance(doc, dict):",
+     [t(JUDGE, "test_an_extra_top_level_field_makes_the_file_unusable")]),
+    ("an observation file belongs to its own run and lane", "judge.py", 'if doc["lane_id"] != lane_id or doc["run_id"] != run_id:', "if False:",
+     [t(JUDGE, "test_an_observation_file_recorded_for_another_run_lane_or_format_is_unusable"), t(JUDGE, "test_a_replay_from_another_run_is_unusable")]),
+    ("duplicate observation rows are refused", "judge.py", 'if not isinstance(row["assertion_id"], str) or row["assertion_id"] in out:', 'if not isinstance(row["assertion_id"], str):',
+     [t(JUDGE, "test_duplicate_rows_and_duplicate_keys_make_the_file_unusable")]),
+    ("the frozen assertions must hash to the pin they were frozen with", "judge.py", "        pin = lane.harness_pin\n",
+     "        pin = h.verifier.assertion_set_pin(tuple(h.records.AssertionSpec.from_json(copy.deepcopy(d)) for d in docs))\n",
+     [t(JUDGE, "test_a_pin_that_is_not_the_frozen_one_is_an_integrity_failure")]),
+    ("a missing observation file is missing evidence", "judge.py", "    if data is None:\n        return _all(lane, \"INCONCLUSIVE\", \"EVIDENCE_MISSING\")",
+     "    if data is None:\n        data = b''", [t(JUDGE, "test_no_observation_file_means_missing_evidence_never_a_pass")]),
+    ("the verdict comes from the harness comparison", "judge.py", "            result = verifier.verify_assertion(frozen, aid, session=None)\n",
+     "            class _R:\n                reason_code = None\n                class check:\n                    verdict = type('V', (), {'value': 'PASS'})()\n            result = _R()\n",
+     [t(JUDGE, "test_a_value_that_differs_from_the_frozen_one_fails_that_assertion_only")]),
+    # ---- bundle.py -------------------------------------------------------------------------------------------------------------------
+    ("the in-run verifier and the recomputation must agree", "bundle.py", 'if seen is not None and r["state"] in ("VERIFIED", "FAILED") and seen != _HARNESS_FOR_STATE[r["state"]]:',
+     "if False:", [t(BUNDLE, "test_when_the_in_run_verifier_and_the_recomputation_disagree_nothing_is_certified")]),
+    ("every lane of the plan has exactly one outcome", "bundle.py", 'if sorted(by_lane) != sorted(l.lane_id for l in frozen.lanes) or len(by_lane) != len(inputs.lanes):', "if False:",
+     [t(BUNDLE, "test_every_lane_of_the_plan_needs_exactly_one_outcome")]),
+    ("the native status of a result is the lane's", "bundle.py", '"native_status": lane.native_status,', '"native_status": "NATIVE_PASS",',
+     [t(BUNDLE, "test_each_result_carries_the_native_status_of_its_own_lane")]),
+    ("a test double never carries a verdict", "bundle.py", "        if double:\n", "        if False:\n", [t(BUNDLE, "test_a_lane_produced_by_a_test_double_never_carries_a_verdict"), t(ORCH, "test_a_lane_run_by_a_test_double_can_never_be_verified_or_failed_whatever_it_writes")]),
+    ("an engine that did not complete carries no verdict", "bundle.py", "if native_status not in COMPLETING_STATUSES and", "if False and",
+     [t(BUNDLE, "test_finalize_results_downgrades_verified_and_failed_for_an_engine_that_did_not_complete")]),
+    # ---- orchestrate.py --------------------------------------------------------------------------------------------------------------
+    ("an executor environment failure is an engine error", "orchestrate.py", '    return "NATIVE_ERROR", outcome\n', '    return "NATIVE_PASS", outcome\n',
+     [t(ORCH, "test_an_executor_environment_failure_is_an_engine_error_even_when_the_observations_look_right")]),
+    ("a product failure is a native failure", "orchestrate.py", '        return "NATIVE_FAIL", "PRODUCT_FAIL"\n', '        return "NATIVE_PASS", "PRODUCT_FAIL"\n',
+     [t(ORCH, "test_the_engine_status_comes_from_the_executors_own_outcome")]),
+    ("a lane past its deadline is a timeout", "orchestrate.py", "    if proc.error_code == ErrorCode.TIMEOUT:", "    if False:", [t(ORCH, "test_a_lane_that_outlives_its_deadline_is_a_timeout_never_verified")]),
+    ("a cancelled lane is an engine error", "orchestrate.py", "    elif proc.error_code == ErrorCode.CANCELLED:", "    elif False:",
+     [t(ORCH, "test_cancelling_during_a_lane_ends_the_lane_and_the_run_is_not_verified")]),
+    ("a lane that reports an error is an engine error", "orchestrate.py", '    elif result is not None and result.get("status") == "ERROR":\n        raw_status = "lane-error"', '    elif False:\n        raw_status = "lane-error"',
+     [t(ORCH, "test_a_gateway_that_cannot_start_fails_the_lane_closed_and_no_browser_is_started")]),
+    ("the target is stopped in every case", "orchestrate.py", "    finally:\n        app.stop()\n", "    finally:\n        pass\n", [t(ORCH, "test_the_target_is_stopped_when_the_run_ends")]),
+    ("a run cancelled before a lane skips it", "orchestrate.py", "    if opts.cancel is not None and opts.cancel.cancelled:\n        log.append(f\"lane {fl.lane_id}: not started: the run was cancelled\")",
+     "    if False:\n        log.append(f\"lane {fl.lane_id}: not started: the run was cancelled\")", [t(ORCH, "test_a_run_cancelled_before_the_lane_starts_skips_it_and_still_accounts_for_every_assertion")]),
+    ("a target that did not start leaves the lane unavailable", "orchestrate.py", "    if origin is None:\n        log.append", "    if False:\n        log.append",
+     [t(ORCH, "test_a_target_that_does_not_start_leaves_the_lane_unavailable_and_everything_inconclusive")]),
+    ("observation rows are recorded as returned, never repaired", "orchestrate.py", "if rows and all(isinstance(r, dict) and isinstance(r.get(\"assertion_id\"), str) for r in rows):",
+     "if rows:", [t(ORCH, "test_rows_that_are_not_rows_are_not_recorded_and_leave_everything_inconclusive")]),
+    ("a bad run id is refused", "orchestrate.py", "    if not K.RUN_ID_RE.fullmatch(run_id):", "    if False:", [t(ORCH, "test_a_bad_run_id_is_refused_before_anything_starts")]),
+    ("an unknown defect is refused", "orchestrate.py", "    if opts.defect not in K.DEFECTS:", "    if False:", [t(ORCH, "test_an_unknown_defect_is_refused")]),
+    ("the exit code of a failed run", "orchestrate.py", '    if outcome == "FAILED":\n        return K.EXIT_FAILED', '    if outcome == "FAILED":\n        return K.EXIT_INCONCLUSIVE', [t(ORCH, "test_the_exit_code_table")]),
+    ("a lane that did not complete is an environment exit", "orchestrate.py", 'if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]):',
+     "if False:", [t(ORCH, "test_the_exit_code_table")]),
+    ("a lane deadline outside 1 to 3600 is refused", "orchestrate.py", "if opts.lane_deadline_s is not None and not 1 <= opts.lane_deadline_s <= 3600:", "if False:",
+     [t(ORCH, "test_a_lane_deadline_outside_1_to_3600_is_refused_before_anything_starts")]),
+    ("a run id that could be read as a cut-off digest is not generated", "orchestrate.py", "base64.b32encode", "base64.b16encode",
+     [t(ORCH, "test_a_generated_run_id_has_64_random_bits_and_fits_the_lane_ids_and_is_not_read_as_a_cut_off_digest")]),
+    # ---- bounded reads (retest R1) and the bounded reference check (R3) -----------------------------------------------------------------------
+    ("a read refuses what is not a regular file", "kit/boundedread.py", "        if not stat.S_ISREG(info.st_mode):", "        if False:", [t("test_qr_safe_read.py", "test_a_fifo_with_no_writer_is_refused_at_once_and_nothing_hangs"), t("test_qr_safe_read.py", "test_a_fifo_fed_more_than_the_cap_is_refused_without_a_single_byte_being_read")]),
+    ("a read is opened without blocking", "kit/boundedread.py", "os.O_RDONLY | os.O_NONBLOCK |", "os.O_RDONLY |", [t("test_qr_safe_read.py", "test_a_fifo_with_no_writer_is_refused_at_once_and_nothing_hangs")]),
+    ("a read refuses a file larger than the cap at the open", "kit/boundedread.py", "        if info.st_size > max_bytes:", "        if False:", [t("test_qr_safe_read.py", "test_a_file_larger_than_the_cap_is_refused_before_a_single_read")]),
+    ("a read stops at the cap whatever the size said", "kit/boundedread.py", "            if total > max_bytes:", "            if False:", [t("test_qr_safe_read.py", "test_the_running_total_caps_a_read_whose_size_was_small_at_the_open")]),
+    ("a read has a deadline", "kit/boundedread.py", "            if time.monotonic() > end:", "            if False:", [t("test_qr_safe_read.py", "test_a_read_that_runs_out_of_time_is_stopped")]),
+    ("an internal read never follows a symlink", "kit/boundedread.py", " | getattr(os, \"O_NOFOLLOW\", 0)", "", [t("test_qr_safe_read.py", "test_an_internal_read_never_follows_a_symlink_and_never_opens_a_fifo_blocking")]),
+    ("under a root no component may be a link", "kit/boundedread.py", "            nxt = os.open(part, os.O_RDONLY | directory | nofollow | getattr(os, \"O_CLOEXEC\", 0), dir_fd=fd)", "            nxt = os.open(part, os.O_RDONLY | directory | getattr(os, \"O_CLOEXEC\", 0), dir_fd=fd)",
+     [t(ORCH, "test_a_blobs_directory_that_is_a_symlink_is_not_followed_and_nothing_in_it_is_kept")]),
+    ("the plan is read through the bounded read", "cli.py", "        return isolated.read_file(path, max_bytes=MAX_PLAN_BYTES)", "        return open(path, 'rb').read()", [t("test_qr_safe_read.py", "test_a_sparse_file_far_over_the_cap_is_refused_from_its_size_without_being_read")]),
+    ("the lane and target files are read through the bounded read", "orchestrate.py", "        return read_regular(str(path), max_bytes=limit, deadline_s=10.0, follow_symlinks=False, root=root)", "        return path.read_bytes() if path.is_file() and not path.is_symlink() else None", [t("test_qr_safe_read.py", "test_the_orchestrators_reads_of_lane_and_target_files_are_the_same_bounded_read")]),
+    ("the reference check is cancellable", "orchestrate.py", "cancelled=(lambda: cancel.cancelled) if cancel is not None else None)", "cancelled=None)", [t(ORCH, "test_the_reference_check_of_a_stalled_target_ends_when_the_run_is_cancelled")]),
+    ("every assertion of a lane names a probe", "plan.py", "        if unprobed:", "        if False:", [t(PLAN, "test_the_requests_and_probes_of_a_lane_are_validated")]),
+    ("ui-only is not a fact the reference check can contradict", "corroborate.py", '    facts = {aid: fact for aid, fact in lane.probes.items() if fact != "ui-only"}', "    facts = dict(lane.probes)",
+     [t(CORR, "test_an_assertion_the_plan_declares_ui_only_does_not_need_the_reference_check_and_the_others_still_do")]),
+    ("the report names the assertions with no independent probe", "orchestrate.py", '        extensions["no_independent_probe"] =', '        extensions["x_no_independent_probe"] =', [t(ORCH, "test_the_report_and_the_summary_name_the_assertions_that_have_no_independent_probe")]),
+    ("a file that does not fit the evidence budget is not read", "safe_read.py", "max_bytes=min(limit, self.remaining)", "max_bytes=limit", [t(ORCH, "test_a_run_over_its_evidence_budget_keeps_what_fits_says_so_and_is_never_a_crash")]),
+    ("a lane over the evidence budget is an engine error", "orchestrate.py", "and not too_many and not budget.dropped:", "and not too_many:", [t(ORCH, "test_a_run_over_its_evidence_budget_keeps_what_fits_says_so_and_is_never_a_crash")]),
+    ("a bundle the format refuses is rebuilt", "orchestrate.py", "    except BuildError as exc:", "    except ZeroDivisionError as exc:", [t(ORCH, "test_a_bundle_the_format_refuses_is_rebuilt_without_the_blobs_not_thrown_away")]),
+    ("the default evidence budget is conservative", "constants.py", "DEFAULT_MAX_EVIDENCE_BYTES = 128 * 1024 * 1024", "DEFAULT_MAX_EVIDENCE_BYTES = 4096 * 1024 * 1024", [t(ORCH, "test_the_evidence_budget_is_configurable_and_the_default_is_conservative")]),
+    ("a '..' segment in a request is refused", "plan.py", "            if isinstance(item, str) and \"..\" in item.split", "            if False and \"..\" in item.split", [t(PLAN, "test_the_requests_and_probes_of_a_lane_are_validated")]),
+    ("an older plan format is refused by name", "plan.py", "    if doc[\"schema\"] != K.PLAN_SCHEMA or doc[\"schema_version\"] != K.PLAN_SCHEMA_VERSION:", "    if doc[\"schema\"] != K.PLAN_SCHEMA:", [t(PLAN, "test_a_plan_or_lock_of_the_older_format_is_refused_by_name")]),
+    ("the reference check's document must have its shape", "corroborate.py", "    if not reference_check_shape_ok(doc):", "    if False:", [t(CORR, "test_a_reference_check_document_of_another_shape_is_missing_not_clean")]),
+    ("the isolated reader stops taking bytes at the cap", "isolated.py", "            if total > max_stdout:", "            if False:", [t("test_qr_isolated.py", "test_a_worker_that_writes_without_end_is_stopped_at_the_byte_cap")]),
+    ("the isolated reader ends on a cancel", "isolated.py", "                previous[sig] = signal.signal(sig, cancel)", "                pass", [t("test_qr_isolated.py", "test_a_cancel_ends_the_wait_and_kills_the_worker")]),
+    ("the isolated reader kills its worker", "isolated.py", "        if proc.poll() is None:\n            _kill(proc)", "        if False:\n            _kill(proc)", [t("test_qr_isolated.py", "test_a_worker_that_never_answers_is_killed_at_the_deadline_and_is_gone")]),
+    ("the isolated reader refuses an answer that is not what was declared", "isolated.py", "    if doc.get(\"len\") != len(body) or len(body) > max_bytes:", "    if False:", [t("test_qr_isolated.py", "test_a_worker_whose_answer_is_not_what_it_declared_is_refused")]),
+    ("the plan read maps a cancel to exit 3", "cli.py", "        if exc.code == \"CANCELLED\":", "        if False:", [t("test_qr_isolated.py", "test_the_cli_turns_a_cancel_during_the_plan_read_into_exit_3")]),
+    ("a fact covers only the assertion it speaks for", "plan.py", "            if fact != UI_ONLY and not _fact_covers(fact, lane, by_id[aid]):", "            if False:", [t(PLAN, "test_a_fact_of_the_reference_check_covers_only_the_assertion_it_speaks_for")]),
+    ("the settings fact is tied to the notification checkbox", "plan.py", '    if "locator" in rule and any(locator.get(k) != v for k, v in rule["locator"].items()):', '    if False:', [t(PLAN, "test_the_requests_and_probes_of_a_lane_are_validated")]),
+    ("a read worker ends when its parent is gone", "read_worker.py", "            if os.getppid() != parent or time.monotonic() > until:", "            if time.monotonic() > until:", [t("test_qr_isolated.py", "test_a_worker_ends_itself_when_the_process_that_started_it_is_killed")]),
+    ("a read worker ends at the deadline it was given", "read_worker.py", "            if os.getppid() != parent or time.monotonic() > until:", "            if os.getppid() != parent:", [t("test_qr_isolated.py", "test_a_worker_ends_itself_when_the_deadline_it_was_given_has_passed_even_if_nobody_kills_it")]),
+    ("the parent tells the worker which process to watch", "isolated.py", '    env["REDEVOPS_QA_READ_PARENT"] = str(os.getpid())', "    pass", [t("test_qr_isolated.py", "test_the_worker_is_given_the_deadline_and_the_parent_it_must_watch")]),
+    ("the parent tells the worker its deadline", "isolated.py", 'str(max_bytes), f"{seconds:.3f}"]', 'str(max_bytes)]', [t("test_qr_isolated.py", "test_the_worker_is_given_the_deadline_and_the_parent_it_must_watch")]),
+    ("limits are parsed strictly", "limits.py", "    if value is None or not math.isfinite(value) or not 1.0 <= value <= MAX_SECONDS:", "    if value is None:", [t("test_qr_limits.py", "test_a_bad_timeout_is_refused_by_name")]),
+    ("byte limits are parsed strictly", "limits.py", "    if value is None or not MIN_BYTES <= value <= MAX_BYTES:", "    if value is None:", [t("test_qr_limits.py", "test_a_bad_byte_limit_is_refused_by_name")]),
+    ("a bad evidence limit is refused before anything starts", "orchestrate.py", "    _evidence_cap(opts)                                   # a bad", "    pass                                   # a bad", [t("test_qr_limits.py", "test_a_bad_evidence_limit_is_refused_before_a_directory_is_made_or_anything_starts")]),
+    ("the run's budget refuses a symlink at any component", "orchestrate.py", "    budget = Budget(_evidence_cap(opts), root=workdir)         # one budget", "    budget = Budget(_evidence_cap(opts))         # one budget", [t(ORCH, "test_a_blobs_directory_that_is_a_symlink_is_not_followed_and_nothing_in_it_is_kept")]),
+    # ---- lane_browser.py -------------------------------------------------------------------------------------------------------------
+    ("declared preconditions cannot be attested", "lane_browser.py", "        return True if not spec.preconditions else None", "        return True",
+     [t(PARTS, "test_preconditions_and_fixtures_nothing_here_can_attest_are_unknown_never_true")]),
+    ("declared fixtures cannot be attested", "lane_browser.py", "        return True if not spec.fixtures else None", "        return True",
+     [t(PARTS, "test_preconditions_and_fixtures_nothing_here_can_attest_are_unknown_never_true")]),
+    ("an unhealthy target is reported unhealthy", "lane_browser.py", '        except Exception:\n            return False', '        except Exception:\n            return True',
+     [t(PARTS, "test_a_target_that_does_not_answer_is_unhealthy")]),
+    ("the guard decisions are kept before the session closes", "lane_browser.py", "            self.guard_decisions.extend(self._inner.egress_decisions(handle))\n", "            pass\n",
+     [t(PARTS, "test_the_recording_adapter_drains_the_guard_decisions_before_the_session_closes")]),
+    # ---- egress.py -------------------------------------------------------------------------------------------------------------------
+    ("only the http loopback origin is allowed", "egress.py", 'if parts.scheme != "http" or parts.hostname not in ("127.0.0.1",) or parts.port is None:', "if False:",
+     [t(PARTS, "test_the_origin_only_profile_refuses_anything_else")]),
+    # ---- cli.py and doctor.py --------------------------------------------------------------------------------------------------------
+    ("an existing bundle is never overwritten", "cli.py", "    except FileExistsError:\n        raise PlanError(\"OUTPUT_EXISTS\"", "    except ZeroDivisionError:\n        raise PlanError(\"OUTPUT_EXISTS\"",
+     [t(CLI, "test_an_existing_bundle_directory_is_never_overwritten"), t(CLI, "test_a_second_run_with_the_same_id_fails_fast_before_it_executes")]),
+    ("a bundle appears whole or not at all", "cli.py", "    partial = reserved.parent / f\".{reserved.name}.partial\"\n", "    partial = reserved\n",
+     [t(CLI, "test_the_bundle_appears_whole_or_not_at_all")]),
+    ("a reservation that produced no bundle is removed", "cli.py", "        shutil.rmtree(reserved, ignore_errors=True)       #", "        pass       #",
+     [t(CLI, "test_the_reservation_is_removed_when_the_run_does_not_produce_a_bundle")]),
+    ("a crash is not a product failure", "cli.py", "    except Exception as exc:\n        print(f\"internal error", "    except ZeroDivisionError as exc:\n        print(f\"internal error", [t(CLI, "test_a_crash_of_the_runner_has_its_own_exit_status_and_leaks_nothing")]),
+    ("doctor fails on a playwright of another version", "doctor.py", "    if have != PLAYWRIGHT_PIN:", "    if False:", [t(CLI, "test_another_playwright_version_fails")]),
+    ("doctor fails when playwright is missing", "doctor.py", "    if have is None:\n        return Check(\"playwright\"", "    if False:\n        return Check(\"playwright\"",
+     [t(CLI, "test_a_missing_playwright_fails_with_the_remedy_and_installs_nothing")]),
+    ("doctor fails on a chromium that does not launch", "doctor.py", '    if done.returncode != 0 or not done.stdout.startswith("chromium "):', "    if False:",
+     [t(CLI, "test_a_playwright_without_a_launchable_chromium_fails_with_the_install_command")]),
+    ("doctor warns outside linux x86_64", "doctor.py", "    if (system, machine) == SUPPORTED_PLATFORM:", "    if True:", [t(CLI, "test_only_linux_x86_64_is_the_supported_platform")]),
+    ("doctor fails when the pins do not verify", "doctor.py", "        up = verified_bootstrap()\n    except EnvironmentFault as exc:\n        return Check(\"pinned dependencies\"",
+     "        up = bootstrap()\n    except EnvironmentFault as exc:\n        return Check(\"pinned dependencies\"", [t(CLI, "test_pins_that_are_not_the_pinned_trees_fail_and_say_what_to_fetch")]),
+]
+
+@pytest.mark.parametrize("name,rel,old,new,tests", CASES, ids=[c[0] for c in CASES])
+def test_removing_the_guard_makes_the_tests_fail(tmp_path, name, rel, old, new, tests):
+    result = mutant_result(tmp_path, rel, old, new, tests)
+    assert result.returncode == 1, f"mutant not killed by a failing test (exit {result.returncode}): {name}\n{result.stdout[-1500:]}"
+    assert re.search(r"\b[1-9][0-9]* failed\b", result.stdout), result.stdout[-1500:]
+
+
+def test_the_selected_tests_pass_on_an_unmodified_copy(tmp_path):
+    tests = sorted({x for c in CASES for x in c[4]})
+    result = baseline_result(tmp_path, tests)
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-1500:]

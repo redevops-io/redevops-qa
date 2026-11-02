@@ -220,9 +220,9 @@ CASES += [
     ("the capped outcome has its own reason", "report.py", 'if outcome == "INCONCLUSIVE" and frozen > 0 and len(states) == frozen and all(s == "VERIFIED" for s in states):', "if False:",
      [rv("test_h1_a_lane_that_did_not_complete_caps_the_outcome_at_inconclusive")]),
     ("a lane without assertions is a finding", "report.py", 'if not any(a["lane_id"] == x["lane_id"] for a in frozen):', "if False:", [rv("test_h1_a_lane_with_no_frozen_assertion_is_a_finding")]),
-    ("a lane that did not complete but whose assertions all verified is shown", "inspector.py", 'elif native != "NATIVE_PASS" and all_verified:', "elif False:",
+    ("a lane that did not complete but whose assertions all verified is shown", "report.py", 'elif native != "NATIVE_PASS" and all_verified:', "elif False:",
      [rv("test_h1_the_inspection_surfaces_every_lane_whose_native_status_and_verdicts_disagree")]),
-    ("a lane without assertions is shown by the inspection", "inspector.py", "        if not states:\n", "        if False:\n",
+    ("a lane without assertions is shown by the inspection", "report.py", "        if not states:\n", "        if False:\n",
      [rv("test_h1_the_inspection_shows_a_lane_without_assertions")]),
     # H2: evidence is never what the engine wrote
     ("evidence with the bytes of a native artifact", "verify.py", 'if ev["digest"] in native_digests:', "if False:", [rv("test_h2_evidence_with_the_bytes_of_a_native_artifact_is_refused")]),
@@ -288,6 +288,12 @@ CASES += [
      [rv("test_m7_the_run_level_reason_code_must_belong_to_the_outcome")]),
     ("the manifest names the verifier the report names", "verify.py", 'if man["tools"].get(verifier["id"]) != verifier["version"]:', "if False:", [rv("test_m7_the_manifest_tools_must_name_the_verifier_the_report_names")]),
     ("redaction rules need redaction", "report.py", 'if not report["redaction"]["applied"] and report["redaction"]["rules"]:', "if False:", [rv("test_m7_redaction_cannot_claim_rules_that_were_not_applied")]),
+    # R1
+    ("a NATIVE_FAIL lane is not a verified run", "report.py", '    if any(s == "NATIVE_FAIL" for s in lane_statuses):\n        return "INCONCLUSIVE"\n', '    if False:\n        return "INCONCLUSIVE"\n',
+     [t("test_qe_r1.py", "test_the_rule_in_the_outcome_functions"), t("test_qe_r1.py", "test_a_native_fail_lane_with_verified_assertions_builds_as_inconclusive_with_the_named_reason")]),
+    ("verify prints the run outcome", "cli.py", "            if v.run_outcome is not None:", "            if False:", [t("test_qe_r1.py", "test_verify_text_and_json_surface_the_disagreement")]),
+    ("verify carries the disagreements", "verify.py", "disagreements=rpt.engine_verifier_disagreements(docs.report) if docs.report is not None else None)",
+     "disagreements=None)", [t("test_qe_r1.py", "test_verify_text_and_json_surface_the_disagreement")]),
     # L1 - L9
     ("a $ref has no sibling keyword", "minischema.py", "        if beside:\n", "        if False:\n", [rv("test_l1_a_ref_with_a_sibling_keyword_or_pointing_at_another_ref_is_refused")]),
     ("a $ref does not point at a $ref", "minischema.py", 'if "$ref" in root["$defs"][ref[8:]]:', "if False:", [rv("test_l1_a_ref_with_a_sibling_keyword_or_pointing_at_another_ref_is_refused")]),

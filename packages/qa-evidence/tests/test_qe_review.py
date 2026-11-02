@@ -93,7 +93,7 @@ def test_h1_a_lane_that_did_not_complete_caps_the_outcome_at_inconclusive(status
 
 def test_h1_compute_outcome_knows_the_lane_statuses():
     assert compute_outcome(["VERIFIED"], 1, ["NATIVE_PASS"]) == "VERIFIED"
-    assert compute_outcome(["VERIFIED"], 1, ["NATIVE_PASS", "NATIVE_FAIL"]) == "VERIFIED"      # the engine said fail, the verifier verified: shown as a disagreement
+    assert compute_outcome(["VERIFIED"], 1, ["NATIVE_PASS", "NATIVE_FAIL"]) == "INCONCLUSIVE"   # the engine said fail, the verifier verified (see test_qe_r1.py)
     for status in ("NATIVE_ERROR", "NATIVE_TIMEOUT", "NATIVE_UNAVAILABLE", "NATIVE_SKIPPED"):
         assert compute_outcome(["VERIFIED"], 1, ["NATIVE_PASS", status]) == "INCONCLUSIVE"
         assert compute_outcome(["FAILED"], 1, ["NATIVE_PASS", status]) == "FAILED"
@@ -204,7 +204,8 @@ def test_h3_a_hostile_name_cannot_forge_an_ok_line(tmp_path):
     write_archive(files, str(tmp_path / "h.tar"))
     out = run("verify", str(tmp_path / "h.tar"))[1]
     lines = [ln for ln in out.split("\n") if ln]
-    assert len(lines) == 4 and lines[0].startswith("FAILED") and lines[3].startswith("  PATH_UNSAFE")      # headline, anchor, plan, one finding
+    # headline, anchor, plan, run outcome, the engine/verifier disagreement of the base bundle, one finding
+    assert len(lines) == 6 and lines[0].startswith("FAILED") and lines[5].startswith("  PATH_UNSAFE")
     assert [ln for ln in lines if ln.strip().startswith("OK")] == []
 
 

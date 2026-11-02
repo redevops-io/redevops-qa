@@ -47,13 +47,17 @@ def compute_outcome(states: Sequence[str], frozen: int, lane_statuses: Sequence[
     """The run-level outcome from per-assertion verdict states and the lanes' native statuses.
 
     Any FAILED fails. Anything not VERIFIED (or nothing frozen) is inconclusive. A lane whose engine did not run to completion (error,
-    timeout, unavailable, skipped) also makes the run inconclusive, whatever its assertions say; only NATIVE_PASS and NATIVE_FAIL count as
-    completed (a NATIVE_FAIL lane whose assertions are all verified is shown as an engine/verifier disagreement)."""
+    timeout, unavailable, skipped) also makes the run inconclusive, whatever its assertions say. A lane whose engine reported a failure
+    (NATIVE_FAIL) while every assertion is VERIFIED is a disagreement between the engine and the verifier that nothing in the bundle can
+    settle: the run is INCONCLUSIVE (reason NATIVE_FAIL_VERIFIED_ASSERTIONS), never VERIFIED. Only when every lane is NATIVE_PASS and every
+    frozen assertion is VERIFIED is the run VERIFIED."""
     if "FAILED" in states:
         return "FAILED"
     if frozen == 0 or any(s != "VERIFIED" for s in states) or len(states) != frozen:
         return "INCONCLUSIVE"
     if any(s not in COMPLETING_STATUSES for s in lane_statuses):
+        return "INCONCLUSIVE"
+    if any(s == "NATIVE_FAIL" for s in lane_statuses):
         return "INCONCLUSIVE"
     return "VERIFIED"
 
@@ -61,8 +65,28 @@ def compute_outcome(states: Sequence[str], frozen: int, lane_statuses: Sequence[
 def run_reason(outcome: str, states: Sequence[str], frozen: int, lane_statuses: Sequence[str] = ()) -> str:
     """The one reason code the run-level verdict must carry."""
     if outcome == "INCONCLUSIVE" and frozen > 0 and len(states) == frozen and all(s == "VERIFIED" for s in states):
-        return "ENGINE_DID_NOT_COMPLETE"
+        if not all(s in COMPLETING_STATUSES for s in lane_statuses):
+            return "ENGINE_DID_NOT_COMPLETE"
+        return "NATIVE_FAIL_VERIFIED_ASSERTIONS"
     return RUN_REASONS[outcome][0]
+
+
+def engine_verifier_disagreements(report: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Lanes whose native status and independent verdicts do not tell the same story (a lane with no assertion at all is listed too).
+    Computed from the report as stored; ``verify`` and ``inspect`` both print it, so a script that only reads ``verify`` sees it."""
+    out: List[Dict[str, Any]] = []
+    for lane in report["lanes"]:
+        states = [r["verdict"]["state"] for r in report["accounting"]["results"] if r["lane_id"] == lane["lane_id"]]
+        native = lane["native"]["status"]
+        if not states:
+            out.append({"code": "ENGINE_VERIFIER_DISAGREE", "lane_id": lane["lane_id"], "native_status": native, "verdict_states": []})
+            continue
+        all_verified = all(s == "VERIFIED" for s in states)
+        if native == "NATIVE_PASS" and not all_verified:
+            out.append({"code": "ENGINE_VERIFIER_DISAGREE", "lane_id": lane["lane_id"], "native_status": native, "verdict_states": sorted(set(states))})
+        elif native != "NATIVE_PASS" and all_verified:
+            out.append({"code": "ENGINE_VERIFIER_DISAGREE", "lane_id": lane["lane_id"], "native_status": native, "verdict_states": sorted(set(states))})
+    return out
 
 
 def standard_limitations() -> List[Dict[str, str]]:

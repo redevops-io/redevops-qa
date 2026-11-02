@@ -85,6 +85,9 @@ class VerifyResult(NamedTuple):
     form: str
     complete: bool                                  # the manifest AND the report were read, parsed as objects and schema-valid
     plan: Optional[PlanResult] = None
+    #: the run outcome and reason the report states (None when the report could not be read) and every engine/verifier disagreement
+    run_outcome: Optional[Dict[str, str]] = None
+    disagreements: Optional[List[Dict[str, Any]]] = None
 
     @property
     def internally_consistent(self) -> bool:
@@ -112,5 +115,6 @@ class VerifyResult(NamedTuple):
         return {"schema": "qa-evidence/verify-result", "schema_version": "1.0", "form": self.form, "ok": self.ok, "complete": self.complete,
                 "internally_consistent": self.internally_consistent, "assurance": self.assurance, "assurance_notice": self.assurance_notice,
                 "anchor": self.anchor.to_json(), "plan": self.plan.to_json() if self.plan is not None else None,
+                "run_outcome": self.run_outcome, "engine_verifier_disagreements": list(self.disagreements or []),
                 "manifest_digest": self.manifest_digest, "file_count": self.file_count,
                 "findings": [f.to_json() for f in self.findings], "informational_fields": list(self.informational), "notes": list(self.notes)}
