@@ -211,3 +211,22 @@ def test_freeze_then_run_the_lock_end_to_end(tmp_path):
     (bundle,) = list((tmp_path / "o").iterdir())
     verify = subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle), "--plan-digest", digest], env=env, capture_output=True, text=True, timeout=60)
     assert verify.returncode == 0 and "matches the supplied value" in verify.stdout
+
+
+@pytest.mark.parametrize("cap", list(range(196_000, 210_001, 1_000)))
+def test_around_the_cap_that_drops_only_the_run_level_log_the_run_is_complete_or_not_verified_never_both(tmp_path, cap):
+    """Retest round 4, R4-1: at caps of about 205000 to 208000 the budget kept out only `logs/target-requests.jsonl`, which belongs to no lane: no lane was an engine error, the report said
+    `evidence_incomplete` and the run was VERIFIED with exit 0 (and, with `verify`, rejected as EVIDENCE_INCOMPLETE_BUT_VERIFIED). Every cap gives either the complete VERIFIED run (exit 0, nothing
+    declared) or an INCONCLUSIVE run with exit 3 (and, where the command exists, a re-verification that accepts it)."""
+    env = {**child_env(str(tmp_path)), "REDEVOPS_QA_MAX_EVIDENCE_BYTES": str(cap)}
+    done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "demo", "--out", str(tmp_path / "out")], env=env, cwd=str(tmp_path), capture_output=True, text=True, timeout=240)
+    (bundle,) = list((tmp_path / "out").iterdir())
+    report = json.loads((bundle / "report.json").read_text())
+    incomplete = "evidence_incomplete" in report["extensions"]
+    if incomplete:
+        assert (report["verdict"]["outcome"], done.returncode) == ("INCONCLUSIVE", K.EXIT_ENVIRONMENT), (cap, done.stdout[-600:])
+        assert report["accounting"]["verified"] == 0
+    else:
+        assert (report["verdict"]["outcome"], done.returncode) == ("VERIFIED", 0), (cap, done.stdout[-600:])
+    if "re-verification in a fresh process" in done.stdout:             # the part that has `verify`
+        assert "ACCEPTED as internally consistent" in done.stdout and "REJECTED" not in done.stdout, done.stdout

@@ -127,7 +127,7 @@ non-canonical bytes are refused.
 * `accounting`: `frozen = verified + failed + inconclusive + unaccounted`, and `results[]`, one per frozen assertion exactly once, each with the
   engine's `native_status` (or null) and a `verdict {state, reason_code, provenance}`. The reason code comes from a closed list per state
   (`VERIFIED`: `EQUALS_EXPECTED`, `PREDICATE_HOLDS`; `FAILED`: `EXPECTED_VALUE_DIFFERS`, `PREDICATE_VIOLATED`; `INCONCLUSIVE`:
-  `EVIDENCE_MISSING`, `EVIDENCE_UNUSABLE`, `ASSERTION_INTEGRITY`, `VERIFIER_ERROR`, `TEST_DOUBLE` (a lane produced by a test double: never a verdict); `UNACCOUNTED`: `NO_RESULT_RECORDED`). Provenance names
+  `EVIDENCE_MISSING`, `EVIDENCE_UNUSABLE`, `ASSERTION_INTEGRITY`, `VERIFIER_ERROR`, `TEST_DOUBLE` (a lane produced by a test double: never a verdict), `EVIDENCE_INCOMPLETE` (the producer says its evidence is incomplete: never VERIFIED); `UNACCOUNTED`: `NO_RESULT_RECORDED`). Provenance names
   the verifier (id and version), the assertion digest and the evidence (`path`, `digest`); it is null only for `UNACCOUNTED`, and a
   `VERIFIED` verdict must name its evidence.
 * `verdict`: the run outcome, which must equal what the accounting and the lanes give (any `FAILED` fails; anything not `VERIFIED`, nothing

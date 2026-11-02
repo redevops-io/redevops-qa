@@ -130,6 +130,9 @@ loads code at run time). The suite runs under the kit supervisor with `QA_BASE_U
    log for the lane shows the required requests and none the plan does not allow; and an assertion tied to a probe is not verified when the independent reference
    check (run against the target after the lanes) finds that fact deviating, or when there is no reference check. Anything that does not hold leaves the lane's
    assertions `INCONCLUSIVE` (`EVIDENCE_UNUSABLE`). The in-run verifier's verdicts are a cross-check: a disagreement certifies nothing.
+   One rule for incomplete evidence (`bundle.finalize_results`, used by the builder here and by `verify` in the next part): when the evidence budget kept ANYTHING out, a run-level file included (the
+   target's own request log belongs to no lane), the report says `extensions.evidence_incomplete` and every VERIFIED assertion becomes `INCONCLUSIVE` with the reason `EVIDENCE_INCOMPLETE`; the run is
+   never VERIFIED and exits 3. A FAILED assertion rests on evidence that was kept and stays.
    A lane produced by a test double (`RunOptions.lane_command`, used by tests only) carries only `INCONCLUSIVE` with the reason `TEST_DOUBLE` and the report says so
    (`extensions.test_double`).
 7. The bundle is built by a pure function (`bundle.build_run_bundle`, no clock, no environment, no file system) with `qa-evidence`, which checks its own output.
