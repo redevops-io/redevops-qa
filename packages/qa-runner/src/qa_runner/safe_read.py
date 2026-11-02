@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """The one way this package reads a file it did not write itself (a plan, a lock, a lane's output, a log of the target): ``qa_adapter_kit.boundedread`` (one descriptor, regular files only, byte and
-time caps, no symbolic link at any component under a root), and the run's evidence budget on top of it. See the kit module for the rules."""
+time caps, no symbolic link at any component under a root), and the run's evidence budget on top of it. See the kit module for the rules.
+
+What the deadline guarantees: this read happens IN THIS PROCESS, so the deadline is checked between chunks. It bounds a slow or growing file, never a single system call that blocks in the kernel (a
+temporary directory on a hung mount): that case is not interrupted here. The guarantee that a read cannot hold the process holds only for the isolated path (``isolated.py``: a child that is killed at
+the deadline), which is what reads every path a user supplies."""
 from __future__ import annotations
 
 from typing import Optional

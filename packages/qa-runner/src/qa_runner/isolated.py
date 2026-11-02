@@ -64,6 +64,7 @@ def _kill(proc: subprocess.Popen) -> None:
 
 def _run(args: Sequence[str], *, deadline_s: float, max_stdout: int, argv: Optional[Sequence[str]] = None) -> bytes:
     env = child_env(tempfile.gettempdir())
+    env["REDEVOPS_QA_READ_PARENT"] = str(os.getpid())          # the worker ends itself when this process is gone (retest R2-8)
     end = time.monotonic() + deadline_s
     proc = subprocess.Popen(list(argv or WORKER) + list(args), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, cwd=tempfile.gettempdir(),
                             start_new_session=True, close_fds=True)
@@ -117,7 +118,8 @@ def _run(args: Sequence[str], *, deadline_s: float, max_stdout: int, argv: Optio
 
 def read_file(path: str, *, max_bytes: int, deadline_s: Optional[float] = None, argv: Optional[Sequence[str]] = None) -> bytes:
     """The bytes of the regular file at ``path`` (at most ``max_bytes``), read by a child that is killed at the deadline."""
-    out = _run(["file", os.path.abspath(path), str(max_bytes)], deadline_s=read_seconds() if deadline_s is None else deadline_s, max_stdout=max_bytes + 4096, argv=argv)
+    seconds = read_seconds() if deadline_s is None else deadline_s
+    out = _run(["file", os.path.abspath(path), str(max_bytes), f"{seconds:.3f}"], deadline_s=seconds, max_stdout=max_bytes + 4096, argv=argv)
     head, _, body = out.partition(b"\n")
     try:
         doc = json.loads(head.decode("utf-8"))
@@ -134,7 +136,8 @@ def snapshot_bundle(location: str, *, deadline_s: Optional[float] = None, argv: 
     """ONE immutable snapshot of a bundle directory or archive, taken by a child that is killed at the deadline. Everything the verifier, ``report`` and ``inspect`` look at afterwards comes from it."""
     limits = DEFAULT_LIMITS
     cap = limits.max_total_bytes + limits.max_file_bytes + 1 + (limits.max_files + 8) * 512 + 4 * 1024 * 1024
-    out = _run(["bundle", os.path.abspath(location)], deadline_s=bundle_seconds() if deadline_s is None else deadline_s, max_stdout=cap, argv=argv)
+    seconds = bundle_seconds() if deadline_s is None else deadline_s
+    out = _run(["bundle", os.path.abspath(location), f"{seconds:.3f}"], deadline_s=seconds, max_stdout=cap, argv=argv)
     pos = out.find(b"\n")
     try:
         head = json.loads(out[:pos].decode("utf-8")) if pos >= 0 else None
