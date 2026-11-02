@@ -180,7 +180,7 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
     _print_summary(summary, bundle_dir, out)
     if report_text:
         print("", file=out)
-        out.write(render_text(inspect_source(_snapshot(str(bundle_dir)))))          # no plan digest supplied: the one this process computed would only match itself
+        out.write(render_text(inspect_source(_snapshot(str(bundle_dir))), verdicts_recomputed=False))          # no plan digest supplied: the one this process computed would only match itself
     return summary.exit_code
 
 
@@ -188,6 +188,7 @@ def _print_summary(summary: RunSummary, bundle_dir: Path, out: TextIO) -> None:
     report = json.loads(summary.bundle.files["report.json"])
     print(f"run {summary.run_id}: {report['verdict']['outcome']} ({report['verdict']['reason_code']})" + ("  [cancelled]" if summary.cancelled else ""), file=out)
     print(f"  external anchor: {ANCHOR_ABSENT_NOTICE} (a manifest digest published where this machine cannot rewrite it is an anchor)", file=out)
+    print(f"  {RUNNER_ONLY}", file=out)
     acc = report["accounting"]
     for lane in report["lanes"]:
         mine = [r for r in acc["results"] if r["lane_id"] == lane["lane_id"]]
@@ -228,6 +229,9 @@ def _demo(args, out: TextIO, err: TextIO) -> int:
     return _execute(freeze_plan(up, demo_plan()), args, out, err, report_text=True)
 
 
+#: ``run`` and ``demo`` print this right under the outcome: the verdicts come from the runner that ran the plan, and no command in this release recomputes them (retest R2-3)
+RUNNER_ONLY = "verdicts are the runner's own and are not recomputed by any command here (`verify`, in the next part, recomputes them); this is not an independent verification"
+
 #: ``report`` and ``inspect`` check a bundle's own consistency (files, digests, accounting) and show what it says; they never recompute a verdict, so what they print is not a verification of the verdicts
 NOT_RECOMPUTED = "verdicts NOT recomputed by this command: only the bundle's files, digests and accounting were checked; what the bundle says is not shown to be true"
 
@@ -250,11 +254,11 @@ def _report(args, out: TextIO, err: TextIO) -> int:
     ins = _inspection(args)
     ok = ins.verification.ok
     if args.format == "json":
-        text = json.dumps({**ins.to_json(), "verdicts_recomputed": False, "notice": NOT_RECOMPUTED}, sort_keys=True, indent=2) + "\n"
+        text = json.dumps({**ins.to_json(), "content_trusted": False, "verdicts_recomputed": False, "notice": NOT_RECOMPUTED}, sort_keys=True, indent=2) + "\n"
     elif args.format == "html":
-        text = render_html(ins).replace("<body>", '<body><div class="banner warn">' + NOT_RECOMPUTED + "</div>", 1)
+        text = render_html(ins, verdicts_recomputed=False).replace("<body>", '<body><div class="banner warn">' + NOT_RECOMPUTED + "</div>", 1)
     else:
-        text = f"Verdicts      : {NOT_RECOMPUTED}\n" + render_text(ins)
+        text = f"Verdicts      : {NOT_RECOMPUTED}\n" + render_text(ins, verdicts_recomputed=False)
     if args.output:
         try:
             with open(args.output, "x", encoding="utf-8", newline="\n") as fh:
@@ -269,9 +273,9 @@ def _report(args, out: TextIO, err: TextIO) -> int:
 
 
 def _inspect(args, out: TextIO, err: TextIO) -> int:
-    text = inspect_text(_snapshot(args.bundle), args.bundle, anchor=args.anchor, plan_digest=args.plan_digest)
+    text = inspect_text(_snapshot(args.bundle), args.bundle, anchor=args.anchor, plan_digest=args.plan_digest, verdicts_recomputed=False)
     out.write(text)
-    return 0 if text.splitlines()[1].startswith("verification: OK") else 1
+    return 0 if not text.splitlines()[1].startswith("verification: FAILED") else 1
 
 
 def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Optional[TextIO] = None) -> int:

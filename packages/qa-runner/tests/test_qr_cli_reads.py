@@ -147,5 +147,5 @@ def test_report_and_inspect_read_the_bundle_once_into_a_snapshot_that_later_chan
     monkeypatch.setattr(isolated, "snapshot_bundle", snapshot_then_swap)
     out, err = io.StringIO(), io.StringIO()
     code = main(["inspect", str(copy)], out, err)
-    assert len(taken) == 1 and "verification: OK, internally consistent" in out.getvalue()      # the snapshot verifies; the changed file on disk would not
+    assert len(taken) == 1 and "verification: files, digests and accounting consistent" in out.getvalue()      # the snapshot verifies; the changed file on disk would not
     assert "verdict: INCONCLUSIVE" in out.getvalue() and "lane browser:" in out.getvalue()      # the summary of the snapshot, not of the changed file

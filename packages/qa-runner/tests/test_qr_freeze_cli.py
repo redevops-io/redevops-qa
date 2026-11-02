@@ -195,7 +195,7 @@ def bundle_dir(up, demo_frozen, tmp_path_factory):
 
 def test_report_text_is_the_evidence_report_and_exits_zero_for_a_bundle_that_verifies(bundle_dir):
     code, out, err = cli("report", str(bundle_dir))
-    assert code == 0 and "INDEPENDENT VERDICT" in out and "A-ORDER-RULE [robot] native=NATIVE_FAIL verdict=INCONCLUSIVE" in out and "does not mean the" in out and err == ""
+    assert code == 0 and "VERDICT AS RECORDED" in out and "INDEPENDENT VERDICT" not in out and "Verification : OK" not in out and "A-ORDER-RULE [robot] native=NATIVE_FAIL verdict=INCONCLUSIVE" in out and "does not mean the" in out and err == ""
 
 
 def test_report_json_carries_the_verification_and_the_summary(bundle_dir):
@@ -234,7 +234,7 @@ def test_report_and_inspect_of_something_that_is_not_a_bundle_are_usage_errors(t
 
 def test_inspect_lists_the_files_the_tools_the_lanes_and_the_verdict_and_never_recomputes(bundle_dir):
     code, out, err = cli("inspect", str(bundle_dir))
-    assert code == 0 and "verification: OK, internally consistent" in out
+    assert code == 0 and "verification: files, digests and accounting consistent; NOT independently verified" in out and "verification: OK" not in out
     assert "tools: " in out and "redevops-qa-verify" in out and "lane browser:" in out and "lane robot:" in out and "verdict: INCONCLUSIVE (" in out
     assert "native-artifact" in out and "lanes/robot/native/output.xml" in out and "plan.lock.json" in out and "files:" in out
 
@@ -315,3 +315,39 @@ def test_freeze_refuses_a_plan_the_run_would_refuse_for_its_origin_placeholder(u
     with pytest.raises(PlanError) as exc:
         freeze_plan(up, plan)
     assert exc.value.code == "BAD_ORIGIN_PLACEHOLDER"
+
+
+# ---- retest round 2, R2-3: at this part nothing recomputes a verdict, and nothing reads as if something had --------------------------------------------
+def test_run_and_demo_say_right_under_the_outcome_that_no_command_recomputes_the_verdicts(up, demo_frozen):
+    from qa_runner.cli import RUNNER_ONLY, _print_summary
+    buf = io.StringIO()
+    _print_summary(two(up, demo_frozen), Path("/x"), buf)
+    lines = buf.getvalue().splitlines()
+    assert lines[0].startswith("run r0-test:") and RUNNER_ONLY in lines[2] and "not an independent verification" in RUNNER_ONLY
+
+
+def test_report_and_inspect_do_not_show_a_verification_ok_or_a_trusted_content_before_verify_exists(bundle_dir, tmp_path):
+    """Round 2 R2-3: below the first-line caveat the body still said `Verification : OK`, JSON `content_trusted: true`, and the HTML had a green `Verification: OK` banner."""
+    out = cli("report", str(bundle_dir))[1]
+    assert "Verification : OK" not in out and "Verification : files, digests and accounting are consistent; the verdicts were NOT recomputed" in out and "INDEPENDENT VERDICT" not in out
+    assert "Verified means the assertions were evaluated by an independent verifier" not in out
+    doc = json.loads(cli("report", str(bundle_dir), "--format", "json")[1])
+    assert doc["content_trusted"] is False and doc["verdicts_recomputed"] is False
+    html_file = tmp_path / "r.html"
+    assert cli("report", str(bundle_dir), "--format", "html", "-o", str(html_file))[0] == 0
+    page = html_file.read_text()
+    assert 'banner ok">Verification' not in page and "Verification: OK" not in page and "Independent verdict" not in page and "Verification: files, digests and accounting are consistent" in page
+    assert "OK" not in cli("inspect", str(bundle_dir))[1].splitlines()[1]
+
+
+def test_a_demo_report_is_not_labelled_independent_before_verify_exists(up, demo_frozen, tmp_path, monkeypatch):
+    """Round 2 R2-3: the report `demo` prints after the run said `INDEPENDENT VERDICT` and `Verified means ... an independent verifier`."""
+    import argparse
+    from qa_runner import cli as cli_module
+    s = two(up, demo_frozen)
+    monkeypatch.setattr(cli_module, "run_plan", lambda *a, **k: s)
+    out, err = io.StringIO(), io.StringIO()
+    args = argparse.Namespace(out=str(tmp_path / "o"), run_id="r0-test", defect="none", lane_deadline=None)
+    cli_module._execute(demo_frozen, args, out, err, report_text=True)
+    text = out.getvalue()
+    assert "VERDICT AS RECORDED" in text and "INDEPENDENT VERDICT" not in text and "Verified means" not in text and "Verification : OK" not in text and cli_module.RUNNER_ONLY in text

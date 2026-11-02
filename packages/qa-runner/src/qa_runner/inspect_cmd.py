@@ -30,15 +30,19 @@ def chain_heads(files: Dict[str, bytes]) -> List[Dict[str, Any]]:
     return out
 
 
-def inspect_text(snapshot: Any, label: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None) -> str:
+VERIFICATION_OK = "verification: OK"
+
+
+def inspect_text(snapshot: Any, label: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, verdicts_recomputed: bool = True) -> str:
     """The listing of a bundle, from ONE snapshot of it (``isolated.snapshot_bundle``): the verification, the summary and the chain heads all see the same bytes."""
     location = label
     ins = inspect_source(snapshot, anchor=anchor, plan_digest=plan_digest)
     v = ins.verification
     t = lambda x, n=200: safe_text(x, n)         # noqa: E731
     lines = [f"bundle {t(location)}: {v.form}, {v.file_count} file(s), manifest digest {t(v.manifest_digest)}",
-             "verification: " + ("OK, internally consistent" if v.ok else f"FAILED, {len(v.findings)} finding(s): " + ", ".join(sorted({t(f.code) for f in v.findings}))),
-             "verdicts: NOT recomputed by this command (only the bundle's files, digests and accounting were checked)",
+             "verification: " + (("OK, internally consistent" if verdicts_recomputed else "files, digests and accounting consistent; NOT independently verified") if v.ok
+                                 else f"FAILED, {len(v.findings)} finding(s): " + ", ".join(sorted({t(f.code) for f in v.findings}))),
+             *([] if verdicts_recomputed else ["verdicts: NOT recomputed by this command (only the bundle's files, digests and accounting were checked); the verdict below is the runner's own"]),
              f"anchor: {v.anchor.notice}"]
     if v.plan is not None:
         lines.append(f"plan digest: {v.plan.notice}")

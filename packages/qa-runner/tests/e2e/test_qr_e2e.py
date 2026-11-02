@@ -192,7 +192,7 @@ def test_the_command_line_demo_end_to_end_in_a_scrubbed_environment(tmp_path):
         out = tmp_path / f"out-{defect}"
         done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "demo", "--out", str(out), "--defect", defect], env=env, cwd=str(tmp_path), capture_output=True, text=True, timeout=240)
         assert done.returncode == code and f": {outcome} (" in done.stdout, done.stdout + done.stderr
-        assert "INDEPENDENT VERDICT" in done.stdout and "lane browser:" in done.stdout and "lane robot:" in done.stdout
+        assert "VERDICT AS RECORDED" in done.stdout and "INDEPENDENT VERDICT" not in done.stdout and "not recomputed by any command" in done.stdout and "lane browser:" in done.stdout and "lane robot:" in done.stdout
         (bundle,) = list(out.iterdir())
         assert subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle)], env=env, capture_output=True, timeout=60).returncode == 0
         report = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "report", str(bundle)], env=env, capture_output=True, text=True, timeout=60)
