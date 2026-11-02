@@ -259,3 +259,33 @@ def test_the_names_the_run_lists_are_bundle_paths_and_their_count_is_the_one_the
     files = golden("overcap")
     names = loads_strict(files[K.NOT_KEPT_PATH])["names"]
     assert names == sorted(set(names)) and load(files, "report.json")["extensions"]["evidence_incomplete"].startswith(f"{len(names)} file(s) not kept")
+
+
+# ---- round 4 -----------------------------------------------------------------------------------------------------------------------------------
+def test_a_run_that_lost_only_a_run_level_file_is_accepted_as_an_incomplete_not_verified_result(up, tmp_path):
+    """R4-1: no lane is an engine error here (the target's own request log belongs to no lane); the builder downgrades every VERIFIED assertion (EVIDENCE_INCOMPLETE) and `verify` recomputes the
+    same with the same rule: accepted, never VERIFIED, exit 3. Before, the honest run was rejected as EVIDENCE_INCOMPLETE_BUT_VERIFIED."""
+    lost = "logs/target-requests.jsonl"
+    files = forge_consistently(up, golden("none"), edit_lane=lambda lid, o: o, extensions=declared(1), logs_extra={**not_kept([lost]), lost: b""})
+    report = load(files, "report.json")
+    assert report["verdict"]["outcome"] == "INCONCLUSIVE" and {x["verdict"]["reason_code"] for x in report["accounting"]["results"]} == {"EVIDENCE_INCOMPLETE"}
+    v = verify_files_in(tmp_path, files)
+    assert v.accepted and v.exit_code == K.EXIT_ENVIRONMENT and v.outcome["outcome"] == "INCONCLUSIVE", codes(v)
+    assert verify_files_in(tmp_path, golden("none")).accepted                                    # the complete run is unchanged
+
+
+def test_a_forger_cannot_keep_verified_verdicts_in_a_report_that_declares_incomplete_evidence(up, tmp_path):
+    """The report says VERIFIED for every assertion and also `evidence_incomplete` (no lane over the cap): rejected, by the finding and by the recomputation."""
+    forged = rechain(edit_json(golden("none"), "report.json", lambda r: r["extensions"].update(declared(1))))
+    v = verify_files_in(tmp_path, forged)
+    assert not v.accepted and "EVIDENCE_INCOMPLETE_BUT_VERIFIED" in codes(v)
+
+
+@pytest.mark.parametrize("name,ok", [("lanes/browser/native/blobs/" + "a" * 64, True), ("lanes/robot/native/blobs/" + "a" * 64, False), ("lanes/nowhere/target-requests.jsonl", False),
+                                     ("logs/anything-else.txt", False), ("lanes/browser/native/blobs/short", False), ("lanes/robot/suite/OrderApi.py", True)])
+def test_a_listed_name_must_be_one_a_run_of_the_plan_can_write(up, tmp_path, name, ok):
+    """R4-2: a fabricated name used to be accepted in the list."""
+    files = forge_consistently(up, golden("overcap"), edit_lane=lambda lid, o: o, extensions=declared(len(sorted(set(loads_strict(golden("overcap")[K.NOT_KEPT_PATH])["names"] + [name])))),
+                               logs_extra=not_kept(sorted(set(loads_strict(golden("overcap")[K.NOT_KEPT_PATH])["names"] + [name]))))
+    v = verify_files_in(tmp_path, files)
+    assert (v.accepted or "NOT_KEPT_MALFORMED" not in codes(v)) if ok else (not v.accepted and "NOT_KEPT_MALFORMED" in codes(v)), codes(v)

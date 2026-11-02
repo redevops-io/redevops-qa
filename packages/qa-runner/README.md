@@ -140,6 +140,9 @@ loads code at run time). The suite runs under the kit supervisor with `QA_BASE_U
    log for the lane shows the required requests and none the plan does not allow; and an assertion tied to a probe is not verified when the independent reference
    check (run against the target after the lanes) finds that fact deviating, or when there is no reference check. Anything that does not hold leaves the lane's
    assertions `INCONCLUSIVE` (`EVIDENCE_UNUSABLE`). The in-run verifier's verdicts are a cross-check: a disagreement certifies nothing.
+   One rule for incomplete evidence (`bundle.finalize_results`, used by the builder here and by `verify` in the next part): when the evidence budget kept ANYTHING out, a run-level file included (the
+   target's own request log belongs to no lane), the report says `extensions.evidence_incomplete` and every VERIFIED assertion becomes `INCONCLUSIVE` with the reason `EVIDENCE_INCOMPLETE`; the run is
+   never VERIFIED and exits 3. A FAILED assertion rests on evidence that was kept and stays.
    A lane produced by a test double (`RunOptions.lane_command`, used by tests only) carries only `INCONCLUSIVE` with the reason `TEST_DOUBLE` and the report says so
    (`extensions.test_double`).
 7. The bundle is built by a pure function (`bundle.build_run_bundle`, no clock, no environment, no file system) with `qa-evidence`, which checks its own output.
@@ -265,6 +268,18 @@ it is incomplete are findings. Round 3 tightened the tolerance: a lane declared 
 plan always writes must be in the bundle or listed (`EXPECTED_FILE_MISSING`): the orchestrator's log and the target's request log; for a lane that completed or is over the cap, its egress profile, its
 request-log window, the browser lane's gateway and guard logs, the Robot lane's suite copies (and, for a completed lane, the engine's own files). A lane that did not complete for another reason (a
 timeout, a cancel, a target that never started) wrote whatever it got to: nothing is required of it.
+Round 4: ONE rule covers every way the budget can keep something out. `bundle.finalize_results` (the builder and `verify` call the same function) turns every VERIFIED assertion into `INCONCLUSIVE`
+with the reason `EVIDENCE_INCOMPLETE` whenever the report says `evidence_incomplete`, so a cap that drops only a run-level file (the target's own request log belongs to no lane) gives an INCONCLUSIVE run with
+exit 3, never VERIFIED; `verify` recomputes the same downgrade and accepts it. A name in the list must be a file a run of the plan can write (the expected set, or a blob of a browser lane); a fabricated
+name is `NOT_KEPT_MALFORMED`.
+
+Limits of this tolerance, stated plainly (none needs more than a rewrite of the whole bundle, and `--anchor` / `--plan-digest` from outside reject all of them):
+* A bundle that is rebuilt consistently by the product's own builder can declare a lane `evidence-over-cap` (or any non-complete status) with a matching list and thereby lower a FAILED or VERIFIED run to
+  INCONCLUSIVE, exit 3, without an anchor. The result can only be lower; the orchestrator's log is not used to corroborate it (the Robot lane's over-cap label can come from the parent's budget, which the
+  child's log lines do not carry), so it is documented rather than checked.
+* Files an over-cap lane's own run wrote and that are not in the required set can be deleted without being listed: the browser lane's `lane-result.json` and `run-record.json`, the stdout and stderr tails
+  (`logs/<lane>.stdout.txt`, `.stderr.txt`) and `observations.json`. A missing `lane-result.json` or `run-record.json` makes the lane's assertions inconclusive anyway; the tails and the observations
+  are not read by a verdict of an incomplete lane.
 The list is written by the same run as everything else: without an anchor it shows nothing a forger could not also write, but with it a forger gains no higher status.
 
 ## Reading limits: tested and inferred (summary)

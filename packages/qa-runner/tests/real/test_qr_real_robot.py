@@ -198,3 +198,23 @@ def test_the_command_line_end_to_end_with_the_robot_plan(tmp_path):
         assert "re-verification in a fresh process (the same code as the run, not independent code): ACCEPTED" in done.stdout
         (bundle,) = list(out.iterdir())
         assert subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle)], env=env, capture_output=True, timeout=60).returncode == 0
+
+
+def test_a_real_run_whose_budget_drops_only_the_run_level_log_is_not_verified_and_exits_3(up, frozen, monkeypatch):
+    """Retest round 4, R4-1: at a cap that drops only `logs/target-requests.jsonl` (it belongs to no lane) no lane was an engine error, and the run was VERIFIED with `evidence_incomplete`, exit 0."""
+    from qa_runner.safe_read import Budget
+    real_read = Budget.read
+
+    def read(self, path, limit, name):
+        if name == "logs/target-requests.jsonl":
+            self.dropped.append(name)
+            return None
+        return real_read(self, path, limit, name)
+    monkeypatch.setattr(Budget, "read", read)
+    s = run(up, frozen)
+    r = rep(s)
+    assert "evidence_incomplete" in r["extensions"] and r["lanes"][0]["native"]["status"] == "NATIVE_PASS"
+    assert (s.outcome, s.exit_code) == ("INCONCLUSIVE", K.EXIT_ENVIRONMENT) and r["accounting"]["verified"] == 0
+    assert {x["verdict"]["reason_code"] for x in r["accounting"]["results"]} == {"EVIDENCE_INCOMPLETE"} and verify_files(s.bundle.files).ok
+    monkeypatch.undo()
+    assert run(up, frozen).outcome == "VERIFIED"

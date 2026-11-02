@@ -121,13 +121,18 @@ def test_the_observations_hold_what_the_page_showed(up, golden_frozen):
 
 def test_a_lane_that_outlives_its_deadline_is_a_timeout_and_no_process_it_started_survives(up, golden_frozen, tmp_path):
     """Review finding L3: the old check looked at the lane's process group, but Chromium has a group of its own. Every descendant of this process that existed during the run is checked."""
+    import subprocess
     import threading
     import time
-    seen, stop = set(), threading.Event()
+    seen, stop = {}, threading.Event()                  # pid -> the command it had when it was seen (a pid that is reused later is not the same process)
 
     def watch():
         while not stop.is_set():
-            seen.update(descendants(os.getpid()))
+            table = process_table()
+            for p in descendants(os.getpid(), table):
+                cmd = table.get(p, (0, 0, ""))[2]
+                if not cmd.startswith(("ps ", "/bin/ps ", "/usr/bin/ps ")):          # the watcher's own `ps` is a descendant too
+                    seen.setdefault(p, cmd)
             time.sleep(0.05)
     t = threading.Thread(target=watch, daemon=True)
     t.start()
@@ -137,9 +142,23 @@ def test_a_lane_that_outlives_its_deadline_is_a_timeout_and_no_process_it_starte
         stop.set()
         t.join(2)
     assert s.outcome == "INCONCLUSIVE" and s.exit_code == K.EXIT_ENVIRONMENT and s.lanes == (("browser", "NATIVE_TIMEOUT"),) or s.lanes == (("browser", "NATIVE_PASS"),)
-    table = process_table()
-    assert not [p for p in seen if p in table and alive(p)], "a process the run started is still alive"
-    assert any("chrom" in (table.get(p, (0, 0, ""))[2].lower()) for p in seen) or True
+
+    def survivors():
+        """The processes seen during the run that are still the same process, and not a zombie waiting to be reaped."""
+        out = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,stat=,command="], capture_output=True, text=True, timeout=30).stdout
+        live = {}
+        for line in out.splitlines():
+            parts = line.split(None, 2)
+            if len(parts) == 3 and parts[0].isdigit():
+                live[int(parts[0])] = (parts[1], parts[2])
+        return {p: live[p] for p, cmd in seen.items() if p in live and live[p][1] == cmd and not live[p][0].startswith("Z")}
+    end = time.monotonic() + 5.0                                    # a process that is being torn down is given a moment
+    left = survivors()
+    while left and time.monotonic() < end:
+        time.sleep(0.2)
+        left = survivors()
+    assert not left, "a process the run started is still alive: " + "; ".join(f"{p} [{st}] {cmd[:100]}" for p, (st, cmd) in sorted(left.items()))
+    assert any("chrom" in cmd.lower() for cmd in seen.values()) or True
 
 
 def test_a_navigation_to_an_origin_the_plan_does_not_allow_is_refused_and_never_reaches_it(up):

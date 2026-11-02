@@ -239,10 +239,11 @@ def _check_verdicts(up: Upstreams, frozen: FrozenPlan, files: Mapping[str, bytes
     recorded = {r["assertion_id"]: r for r in report["accounting"]["results"]}
     status = {l["lane_id"]: l["native"]["status"] for l in report["lanes"]}          # the reported native status is itself re-derived from the engine's files by _check_native
     double = bool((report.get("extensions") or {}).get("test_double"))
+    incomplete = "evidence_incomplete" in (report.get("extensions") or {})          # the one rule the builder applies: incomplete evidence is never VERIFIED
     if double:
         v.add("TEST_DOUBLE_BUNDLE", "extensions", "this bundle says a lane was produced by a test double: it carries no verdict and is not evidence of a run of the engines")
     for lane in frozen.lanes:
-        for r in finalize_results(judge_lane(up, lane, run_id=report["run_id"], files=files), status.get(lane.lane_id, ""), double, _harness_verdicts(files, lane.lane_id)):
+        for r in finalize_results(judge_lane(up, lane, run_id=report["run_id"], files=files), status.get(lane.lane_id, ""), double, _harness_verdicts(files, lane.lane_id), incomplete):
             v.recomputed += 1
             got = recorded.get(r["assertion_id"])
             if got is None:
@@ -433,6 +434,15 @@ def _required_files(frozen: FrozenPlan, report: Mapping[str, Any], tol: Toleranc
     return need
 
 
+def _check_not_kept_names(frozen: FrozenPlan, v: Verification, tol: Tolerance) -> None:
+    """A name in the list of files not kept must be one a run of this plan can write (the expected set, or a blob of a browser lane): a fabricated name is a finding, never an excuse."""
+    expected, blob_dirs = _expected_files(frozen, tol)
+    for name in sorted(tol.names):
+        if name in expected or any(name.startswith(d) and BLOB_RE.fullmatch(name[len(d):]) for d in blob_dirs):
+            continue
+        v.add("NOT_KEPT_MALFORMED", K.NOT_KEPT_PATH, f"the list names a file no run of this plan writes: {safe_text(name, 100)}")
+
+
 def _check_required(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification, tol: Tolerance) -> None:
     for path in _required_files(frozen, report, tol):
         if path not in files and path not in tol.names:
@@ -486,6 +496,7 @@ def verify_snapshot(snapshot: Any, *, anchor: Optional[str] = None, plan_digest:
                 _check_run_record(up, frozen, files, report, v, tol)
                 _check_file_set(frozen, files, v, tol)
                 _check_required(frozen, files, report, v, tol)
+                _check_not_kept_names(frozen, v, tol)
                 _check_report_fields(frozen, files, report, v)
             v.run_exit_code = exit_code_for(report)
         except EnvironmentFault as exc:
