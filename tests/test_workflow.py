@@ -237,3 +237,15 @@ def test_the_runner_documentation_states_what_it_does_not_show():
     for needle in ("unkeyed", "does not say the application is correct", "Linux x86_64", "never installs", "source-available, not open source"):
         assert needle in text
     assert "open source" not in text.replace("not open source", "")
+
+
+def test_the_runner_robot_job_installs_robot_not_a_browser_runs_only_the_real_tests_and_fails_on_skips():
+    job = WF["jobs"]["runner-robot"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert '"robotframework==7.5"' in steps and "-m robot_real packages/qa-runner/tests/real" in steps and "env -i HOME=" in steps
+    assert "playwright" not in steps.lower() and "tools/check_junit.py" in steps and "--junitxml" in steps
+    assert "pins" in job["needs"] and "continue-on-error" not in job and "upload-artifact" not in str(job)
+    fetches = [s for s in job["steps"] if "repository" in s.get("with", {})]
+    assert len(fetches) == 2 and "--verify-trees --require-git" in steps and steps.count('test -z "$(git status --porcelain)"') == 2
+    offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["runner"]["steps"])
+    assert "robotframework" not in offline.lower()

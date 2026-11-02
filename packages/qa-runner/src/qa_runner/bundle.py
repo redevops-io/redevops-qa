@@ -63,8 +63,8 @@ class RunInputs:
 
 
 REDACTION = {"applied": False, "rules": [], "notes": [
-    "artifacts captured by the browser pass the harness pattern redactor before they are stored; the harness run record, the gateway log and the logs of this "
-    "bundle are not redacted: do not put a secret in a plan that is run for evidence"]}
+    "artifacts captured by a browser lane pass the harness pattern redactor before they are stored; the harness run record, a Robot output.xml, the gateway "
+    "log and the logs of this bundle are not redacted: do not put a secret in a plan that is run for evidence"]}
 
 
 def _lane_entry(run_id: str, lane: LaneOutcome) -> Dict[str, Any]:

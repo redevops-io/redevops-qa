@@ -31,6 +31,16 @@ Licence: the family licence of this repository (source-available; see `LICENSE.m
 This is a guard, not a sandbox. A static scan cannot see every way a Python-capable keyword could load code, and the suite is only bounded by the
 supervisor (deadline, output limit, environment, process group). A hostile suite is contained by the worker, not by the allowlist.
 
+## Observations (`qa-observe` tags)
+
+A suite can *record* what it saw, without judging it: `Set Tags    qa-observe:order_101_total_cents=${total}` at run time puts the tag in the test's `<tag>` list of
+`output.xml` (checked with Robot Framework 7.5). `parse_observations(output_xml_bytes)` reads those tags into a `RobotObservations` (sorted names, integer or string
+values, the digest of the raw report); `observation_document(...)` renders the record as a `qa-checks/reference-1` document of kind `RobotObservations`. It is strict:
+the hardening of `parse_output_xml` applies first; a tag that starts with `qa-observe:` but does not match `<name>=<value>` (name `[a-z][a-z0-9_]{0,63}`, value
+`[A-Za-z0-9._:/@+-]{1,128}`) is refused, never skipped; a name used twice is refused; a name that reads as a verdict or an expected value (`expected`, `verdict`,
+`passed`, `status` ...) is refused; at most 64 names. Nothing in the module knows an expected value or produces a verdict. The independent check that compares the
+record with a frozen value is `evidence.robot-observations` in `qa-checks`.
+
 ## Tests
 
 * **Offline (default).** `python -m pytest packages/qa-robot/tests`: the importer against `output.xml` files recorded from real Robot Framework 7.5 runs and

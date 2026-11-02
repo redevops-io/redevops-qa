@@ -27,6 +27,33 @@ def files_with(data, lane="browser"):
     return {observation_path(lane): data}
 
 
+GOOD_TOTALS = {"order_101_total_cents": 9450, "order_102_total_cents": 9999, "order_103_total_cents": 9000, "order_104_total_cents": 9005}
+DEFECT_TOTALS = {"order_101_total_cents": 10500, "order_102_total_cents": 9999, "order_103_total_cents": 10000, "order_104_total_cents": 10005}
+_HEAD = '<?xml version="1.0" encoding="UTF-8"?>\n<robot generator="Robot 7.5 (Python 3.12.16 on linux)" generated="2026-11-01T13:34:05.196569" rpa="false" schemaversion="5">\n'
+
+
+def robot_xml(values=None, status="PASS", extra_tags=()):
+    """A minimal valid Robot Framework 7.5 output.xml of the order-discount suite with the given recorded values (a test double of the engine's file; the real file is
+    produced by the real engine in the ``real`` tests)."""
+    values = GOOD_TOTALS if values is None else values
+    tags = "".join(f"<tag>qa-observe:{k}={v}</tag>" for k, v in values.items()) + "".join(f"<tag>{t}</tag>" for t in extra_tags)
+    passed, failed = (1, 0) if status == "PASS" else (0, 1)
+    return (_HEAD + '<suite id="s1" name="Order Discount" source="/x/order_discount.robot"><test id="s1-t1" name="Order Discount Rule" line="8">' + tags
+            + f'<status status="{status}" start="2026-11-01T13:34:05.2" elapsed="0.001"/></test><status status="{status}" start="2026-11-01T13:34:05.1" elapsed="0.01"/></suite>'
+            + f'<statistics><total><stat pass="{passed}" fail="{failed}" skip="0">All Tests</stat></total></statistics></robot>\n').encode()
+
+
+def robot_record(native=None, run=RUN, lane="robot"):
+    """The observation record the importer derives from ``native`` (default: a clean run), as bytes."""
+    from qa_runner.judge import derived_record
+    return dumps_canonical(derived_record(robot_xml() if native is None else native, lane, f"{run}.{lane}"))
+
+
+def robot_files(native=None, record=None, lane="robot"):
+    native = robot_xml() if native is None else native
+    return {f"lanes/{lane}/native/output.xml": native, f"lanes/{lane}/observations.json": robot_record(native, lane=lane) if record is None else record}
+
+
 # ---- real browser-lane files (from a real run; see golden/regen_browser.py) ------------------------------------------------------------------------------------------------
 from pathlib import Path as _Path
 
@@ -39,3 +66,11 @@ BROWSER_RUN = {"none": "r0-golden-browser-none", "settings": "r0-golden-browser-
 def browser_files(defect="none"):
     """The files the judge reads for the browser lane of a REAL run against the target with ``defect`` (bundle path -> bytes), and the run id they belong to."""
     return dict(_read_files(str(GOLDEN_DIR / f"browser-{defect}.tar")))
+
+
+ROBOT_RUN = {"none": "r0-golden-robot-none", "discount": "r0-golden-robot-discount"}
+
+
+def robot_golden(defect="none"):
+    """The files the judge reads for the Robot lane of a REAL run of the real engine against the target with ``defect`` (see golden/regen_robot.py)."""
+    return dict(_read_files(str(GOLDEN_DIR / f"robot-{defect}.tar")))

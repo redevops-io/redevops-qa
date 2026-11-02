@@ -76,6 +76,16 @@ def test_a_crash_of_the_runner_has_its_own_exit_status_and_leaks_nothing(monkeyp
     assert code == K.EXIT_INTERNAL == 6 and err == "internal error: RuntimeError\n" and out == ""
 
 
+def test_a_failed_import_names_the_module_and_nothing_else(monkeypatch):
+    import qa_runner.cli as cli_module
+
+    def boom(args, out, err):
+        raise ModuleNotFoundError("No module named 'qa_robot' at /secret/path", name="qa_robot")
+    monkeypatch.setattr(cli_module, "_doctor", boom)
+    code, out, err = cli("doctor")
+    assert code == K.EXIT_INTERNAL and err == "internal error: ModuleNotFoundError (module qa_robot)\n"
+
+
 def test_the_python_check_names_the_floor():
     assert doctor.check_python((3, 10)).status == "FAIL" and "3.11" in doctor.check_python((3, 10)).remedy
     assert doctor.check_python((3, 11)).status == "OK" and doctor.check_python((3, 13)).status == "OK"

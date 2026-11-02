@@ -39,6 +39,14 @@ def gateway_down(lane, input_path):
     return [sys.executable, GATEWAY_DOWN, input_path]
 
 
+FAKE_ROBOT = str(Path(__file__).resolve().parent / "fake_robot.py")
+
+
+def fake_robot(mode):
+    """A ``RunOptions.robot_launcher`` that runs the Robot test double in ``mode`` instead of ``-m robot``."""
+    return (FAKE_ROBOT, mode)
+
+
 def process_table():
     """``{pid: (ppid, pgid, command)}`` of every process, from ``ps`` (what a process check can see; nothing here kills anything). ``-ww``: without it a ``ps`` that writes to a pipe may cut
     the command at the terminal width, and a long interpreter path then hides the module name the checks look for (this is what made the first CI run of these tests fail)."""
@@ -66,6 +74,15 @@ def descendants(root: int, table=None):
 def group_members(pgids, table=None):
     table = table or process_table()
     return {pid for pid, (_, pgid, _) in table.items() if pgid in pgids}
+
+
+def wait_for(predicate, timeout=60.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if predicate():
+            return True
+        time.sleep(0.1)
+    return predicate()
 
 
 def run_limited(argv, *, timeout=30.0, mem_mb=1536, env=None, cwd=None):

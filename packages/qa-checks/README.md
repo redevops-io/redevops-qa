@@ -54,6 +54,14 @@ Reference documents (`apiVersion: qa-checks/reference-1`) carry declared context
 as an image map or a budget. A key that looks like an expected value or a verdict (`expected`, `predicate`, `verdict` ...) in
 a reference document is a load error.
 
+## Evidence programs (`evidence_registry`)
+
+`evidence.robot-observations@1.0.0` reads the observation record a Robot run produced (`qa-robot`'s `RobotObservations` reference document: `qa-observe` tags imported from
+`output.xml`) and returns `{documents, observations, input_errors}`: the number of records it was given (a record is exactly one), the name/value pairs (integers and
+strings only) and the load errors. It never receives an expected value (a record that carries an `expected`, `verdict` or `predicate` key is not loaded and is reported
+as a load error) and never returns a verdict; the harness verifier compares its output with the value frozen in the assertion. It lives in `evidence_registry()`, not in
+`builtin_registry()` (whose programs and hashes are unchanged).
+
 ## Image metadata
 
 `image_store.ImageStore` reads, inside the case root and never over a network: OCI image layout directories (manifest, index

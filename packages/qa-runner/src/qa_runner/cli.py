@@ -175,5 +175,7 @@ def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Op
         print("cancelled", file=err)
         return K.EXIT_ENVIRONMENT
     except Exception as exc:
-        print(f"internal error: {type(exc).__name__}", file=err)
+        # the class of the failure, and the module name when an import failed (ours, not content from a page or a bundle)
+        missing = f" (module {safe_text(exc.name, 80)})" if isinstance(exc, ImportError) and exc.name else ""
+        print(f"internal error: {type(exc).__name__}{missing}", file=err)
         return K.EXIT_INTERNAL

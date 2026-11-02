@@ -20,7 +20,7 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from qa_adapter_kit.status import ErrorCode
 from qa_adapter_kit.supervisor import CancelToken
@@ -74,6 +74,7 @@ class RunOptions:
     clock: Callable[[], str] = utc_now
     max_evidence_bytes: Optional[int] = None            # the total a run keeps of its lanes' output (default: REDEVOPS_QA_MAX_EVIDENCE_BYTES, else 128 MiB); over it, the rest is not kept and the run is incomplete
     lane_command: Optional[Callable[[FrozenLane, str], List[str]]] = None       # test seam: the argv of a lane child. A lane run this way is a TEST DOUBLE: it can never carry a verdict
+    robot_launcher: Optional[Sequence[str]] = None                              # test seam: replaces "-m robot" in the Robot adapter's command (offline tests); also a test double
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,7 @@ def _unavailable(fl: FrozenLane, engine_version: str, raw: str, status: str = "N
 
 def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdir: str, opts: RunOptions, log: List[str], budget: Optional[Budget] = None) -> LaneOutcome:
     budget = budget if budget is not None else Budget(_evidence_cap(opts), root=workdir)
+    dropped_before = len(budget.dropped)
     try:
         version = importlib.metadata.version("playwright")
     except importlib.metadata.PackageNotFoundError:
@@ -184,8 +186,9 @@ def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], work
         data = budget.read(out_dir / name, 16 * 1024 * 1024, name)
         if data is not None:
             files[f"lanes/{fl.lane_id}/{name}"] = (data, "log")
-    if budget.dropped:
-        log.append(f"lane {fl.lane_id}: the evidence budget of {budget.total} bytes is used up: not kept: {len(budget.dropped)} file(s) ({', '.join(sorted(budget.dropped)[:5])}...); what was kept is in the bundle")
+    over = len(budget.dropped) > dropped_before                  # this lane's own files, not an earlier lane's
+    if over:
+        log.append(f"lane {fl.lane_id}: the evidence budget of {budget.total} bytes is used up: not kept: {len(budget.dropped) - dropped_before} file(s) ({', '.join(sorted(budget.dropped)[:5])}...); what was kept is in the bundle")
     status, raw_status, exit_code, counts = "NATIVE_ERROR", "error", proc.exit_code, None
     harness_verdicts: Dict[str, str] = {}
     egress: Dict[str, int] = {}
@@ -198,7 +201,7 @@ def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], work
         status, raw_status = "NATIVE_ERROR", "output-limit"
     elif proc.error_code == ErrorCode.SPAWN_FAILED:
         status, raw_status = "NATIVE_UNAVAILABLE", "spawn-failed"
-    elif result is not None and result.get("status") == "COMPLETED" and proc.exit_code == 0 and not too_many and not budget.dropped:
+    elif result is not None and result.get("status") == "COMPLETED" and proc.exit_code == 0 and not too_many and not over:
         status, raw_status = _native_from_harness(str(result.get("outcome")), result.get("reason"))
         exit_code = result.get("exit_code") if isinstance(result.get("exit_code"), int) else None
         rows = result.get("observations") if isinstance(result.get("observations"), list) else []
@@ -218,7 +221,7 @@ def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], work
             exit_code = 1
         if status == "NATIVE_PASS":
             exit_code = 0
-    elif budget.dropped:
+    elif over:
         raw_status = "evidence-over-cap"
     elif too_many:
         raw_status = "too-many-artifacts"
@@ -293,10 +296,15 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         except EnvironmentFault as exc:
             log.append(f"target not started: {exc.code}")
         for fl in frozen.lanes:
-            if fl.engine != K.ENGINE_PLAYWRIGHT:
-                raise PlanError("UNSUPPORTED_ENGINE", f"no runner for engine {fl.engine!r}")
+            deadline = float(fl.deadline_s if opts.lane_deadline_s is None else min(opts.lane_deadline_s, fl.deadline_s))
             before = len(_log_lines(req_path, workdir))
-            out = run_browser_lane(fl, run_id=run_id, origin=origin, workdir=workdir, opts=opts, log=log, budget=budget)
+            if fl.engine == K.ENGINE_PLAYWRIGHT:
+                out = run_browser_lane(fl, run_id=run_id, origin=origin, workdir=workdir, opts=opts, log=log, budget=budget)
+            elif fl.engine == K.ENGINE_ROBOT:
+                from .lane_robot import run_robot_lane
+                out = run_robot_lane(fl, run_id=run_id, origin=origin, workdir=workdir, cancel=opts.cancel, deadline_s=deadline, log=log, launcher=opts.robot_launcher, budget=budget)
+            else:
+                raise PlanError("UNSUPPORTED_ENGINE", f"no runner for engine {fl.engine!r}")
             window = b"".join(l + b"\n" for l in _log_lines(req_path, workdir)[before:])       # what the target itself served while this lane ran
             kept = dict(out.files)
             if budget.keep(request_log_path(fl.lane_id), window):

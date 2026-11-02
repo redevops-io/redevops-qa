@@ -25,7 +25,7 @@ from qa_adapter_kit.supervisor import CancelToken, ProcessOutcome, run_supervise
 from .deps import child_environment_keys
 from .errors import EnvironmentFault
 
-CHILD_MODULES = ("qa_runner", "qa_evidence", "qa_playwright", "qa_egress", "qa_adapter_kit", "qa_fixture_app", "redevops_qa_bridge")
+CHILD_MODULES = ("qa_runner", "qa_evidence", "qa_playwright", "qa_egress", "qa_adapter_kit", "qa_fixture_app", "redevops_qa_bridge", "qa_robot", "redevops_qa_checks")
 
 
 def module_roots(modules: Sequence[str] = CHILD_MODULES) -> List[str]:

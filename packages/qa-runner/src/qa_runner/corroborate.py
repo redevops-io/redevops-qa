@@ -11,13 +11,17 @@ bundle, before it lets a verdict stand:
 * the **reference check** (``qa_fixture_app.reference_check``: its own restatement of the seed data and the rule, plain HTTP, no code of this repository's engines) does not contradict a
   verdict the plan ties to one of its facts.
 
+For a Robot lane the engine's own files are held against each other (the summary and the adapter result must name the very ``output.xml`` that is in the bundle and agree on every
+test's status), the reviewed suite files in the bundle must be the files the plan pins, and the target must have seen the requests a reviewed library has to make.
+
 A failure is a reason string; the caller turns it into unusable evidence for the whole lane (INCONCLUSIVE), never into a pass or a fail."""
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any, Dict, List, Mapping, Optional, Set
 
-from qa_evidence.canon import CanonError, loads_strict
+from qa_evidence.canon import CanonError, loads_strict, sha256_bytes
 
 from .deps import Upstreams
 from .plan import FrozenLane, materialise_spec
@@ -132,3 +136,52 @@ def probe_verdicts(lane: FrozenLane, files: Mapping[str, bytes]) -> Dict[str, st
         return {aid: "missing" for aid in facts}
     deviating = {d["check"] for d in doc["deviations"]}
     return {aid: "contradicted" for aid, fact in facts.items() if fact in deviating}
+
+
+
+def _plain_json(data: bytes) -> Any:
+    def refuse(_: str) -> Any:
+        raise ValueError("constant")
+
+    def pairs(items):
+        keys = [k for k, _ in items]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate key")
+        return dict(items)
+    return json.loads(data.decode("utf-8"), object_pairs_hook=pairs, parse_constant=refuse)
+
+
+def corroborate_robot(lane: FrozenLane, run_id: str, files: Mapping[str, bytes]) -> Optional[str]:
+    """The Robot lane's native files against each other and against the plan: ``robot-summary.json`` and ``adapter-result.json`` name the ``output.xml`` of the bundle (by hash) and
+    agree on every test's status; the suite files in the bundle are the pinned ones; the target saw the requests the plan requires."""
+    lid = lane.lane_id
+    base = f"lanes/{lid}/native/"
+    try:
+        xml, summary_raw = files[base + "output.xml"], files[base + "robot-summary.json"]
+        summary, result = _plain_json(summary_raw), _plain_json(files[base + "adapter-result.json"])
+    except (KeyError, ValueError, UnicodeDecodeError):
+        return "the engine's report, its summary or the adapter result is missing or unreadable"
+    if not isinstance(summary, dict) or not isinstance(result, dict):
+        return "the engine's summary or the adapter result is not an object"
+    xml_hex = sha256_bytes(xml).split(":", 1)[-1]
+    if str(summary.get("raw_output_sha256", "")).split(":", 1)[-1] != xml_hex:
+        return "the engine's summary names another output.xml than the one in the bundle"
+    if result.get("run_id") != f"{run_id}.{lid}" or result.get("adapter_id") != "robot-suite" or result.get("status") not in ("PASS", "FAIL"):
+        return "the adapter result belongs to another run or does not report a completed suite"
+    arts = {a.get("path"): str(a.get("sha256", "")).split(":", 1)[-1] for a in result.get("artifacts") or [] if isinstance(a, dict)}
+    if arts.get("output.xml") != xml_hex or arts.get("robot-summary.json") != sha256_bytes(summary_raw).split(":", 1)[-1]:
+        return "the adapter result names other native files than the ones in the bundle"
+    try:
+        said = {t["native_id"]: t["status"] for t in summary["tests"]}
+        ran = {t["native_id"]: t["status"] for t in result["native_assertions"]}
+    except (KeyError, TypeError):
+        return "the engine's summary or the adapter result lists no tests"
+    if not said or said != ran:
+        return "the engine's summary and the adapter result disagree on the tests and their statuses"
+    if (result["status"] == "PASS") != all(v == "PASS" for v in ran.values()):
+        return "the adapter result's status is not what its own tests add up to"
+    prefix = f"lanes/{lid}/suite/"
+    kept = {k[len(prefix):] for k in files if k.startswith(prefix)}
+    if kept != set(lane.suite_files) or any(sha256_bytes(files[prefix + rel]) != digest for rel, digest in lane.suite_files.items()):
+        return "the suite files in the bundle are not the files the plan pins"
+    return corroborate_requests(lane, files)
