@@ -30,7 +30,7 @@ pythonpath = [
 ]
 # The real-browser lane (tests/browser in the browser-backed packages) is never collected by the offline suite: it needs
 # Playwright and Chromium and runs only in its own CI job, which names those directories explicitly.
-norecursedirs = ["browser", "real", ".*", "build", "dist", "*.egg", "venv", "__pycache__"]
+norecursedirs = ["browser", "real", "e2e", ".*", "build", "dist", "*.egg", "venv", "__pycache__"]
 addopts = "-ra -p no:cacheprovider --strict-markers --strict-config"
 markers = [
     "check(id): conformance check (CHK1..CHK7, ADR A.2.5 item 4) a test belongs to",
@@ -39,5 +39,6 @@ markers = [
     "appium_android: needs the Appium server, the client and an attached Android emulator or device; collected only by the manual Android workflow, never by the offline suite",
     "robot_real: needs Robot Framework installed; collected only by the robot lane CI job, never by the offline suite",
     "browser: needs a real Chromium and the Playwright package; collected only by the browser CI job, never by the offline suite",
+    "e2e: needs the real Chromium, Playwright and Robot Framework together; collected only by the runner end-to-end CI job, never by the offline suite",
 ]
 filterwarnings = ["error"]

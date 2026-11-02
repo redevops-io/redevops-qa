@@ -75,12 +75,14 @@ def _lane_entry(run_id: str, lane: LaneOutcome) -> Dict[str, Any]:
     return {"lane_id": lane.lane_id, "run_id": f"{run_id}.{lane.lane_id}", "engine": {"name": lane.engine_name, "version": lane.engine_version}, "native": native}
 
 
-def finalize_results(judged: List[Dict[str, Any]], native_status: str, double: bool, harness_verdicts: Mapping[str, str]) -> List[Dict[str, Any]]:
+def finalize_results(judged: List[Dict[str, Any]], native_status: str, double: bool, harness_verdicts: Mapping[str, str], incomplete: bool = False) -> List[Dict[str, Any]]:
     """What the recomputed verdicts of a lane become once the lane's own status is taken into account. ``verify`` applies the same rules to the same inputs read back from a bundle.
 
     * a lane produced by a test double never carries a verdict: every assertion is INCONCLUSIVE with the reason TEST_DOUBLE;
     * an engine that did not run to completion (error, timeout, cancelled, unavailable, skipped) never carries a VERIFIED or FAILED assertion: INCONCLUSIVE at most;
-    * the in-run verifier's verdicts are a cross-check, never the source: where the recomputation says VERIFIED or FAILED and the in-run verdict differs, nothing is certified."""
+    * the in-run verifier's verdicts are a cross-check, never the source: where the recomputation says VERIFIED or FAILED and the in-run verdict differs, nothing is certified;
+    * a run whose evidence is incomplete (the evidence budget kept ANYTHING out, a run-level file included) is never VERIFIED: a VERIFIED assertion becomes INCONCLUSIVE with the reason
+      EVIDENCE_INCOMPLETE. The rule only lowers a verdict; a FAILED one, which rests on evidence that was kept, stays."""
     out = []
     for r in judged:
         if double:
@@ -91,6 +93,8 @@ def finalize_results(judged: List[Dict[str, Any]], native_status: str, double: b
                 r = {**r, "state": "INCONCLUSIVE", "reason_code": "VERIFIER_ERROR"}
             if native_status not in COMPLETING_STATUSES and r["state"] in ("VERIFIED", "FAILED"):
                 r = {**r, "state": "INCONCLUSIVE", "reason_code": "EVIDENCE_UNUSABLE"}
+            if incomplete and r["state"] == "VERIFIED":
+                r = {**r, "state": "INCONCLUSIVE", "reason_code": "EVIDENCE_INCOMPLETE"}
         out.append(r)
     return out
 
@@ -114,7 +118,7 @@ def build_run_bundle(up: Upstreams, inputs: RunInputs) -> BuiltBundle:
     for fl in frozen.lanes:                                    # plan order
         lane = by_lane[fl.lane_id]
         lanes_report.append(_lane_entry(inputs.run_id, lane))
-        for r in finalize_results(judge_lane(up, fl, run_id=inputs.run_id, files=plain), lane.native_status, lane.double, lane.harness_verdicts):
+        for r in finalize_results(judge_lane(up, fl, run_id=inputs.run_id, files=plain), lane.native_status, lane.double, lane.harness_verdicts, "evidence_incomplete" in (inputs.extensions or {})):
             results.append({"assertion_id": r["assertion_id"], "native_status": lane.native_status, "state": r["state"], "reason_code": r["reason_code"],
                             "evidence": r["evidence"]})
     report = assemble_report(run_id=inputs.run_id, started_at=inputs.started_at, finished_at=inputs.finished_at, plan_digest=frozen.plan_digest,

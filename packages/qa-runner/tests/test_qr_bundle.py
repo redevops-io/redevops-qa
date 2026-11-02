@@ -172,3 +172,23 @@ def test_the_run_id_must_leave_room_for_the_lane_id(up, golden_frozen):
     inputs = RunInputs(frozen=golden_frozen, run_id="r" * 60, started_at="2026-01-01T00:00:00Z", finished_at="2026-01-01T00:00:05Z", environment=ENV, lanes=(lane(),))
     with pytest.raises(BuildError):
         build_run_bundle(up, inputs)
+
+
+# ---- retest round 4, R4-1: ONE rule for incomplete evidence -------------------------------------------------------------------------------------
+def test_finalize_results_never_verifies_a_run_whose_evidence_is_incomplete_and_only_lowers():
+    judged = [{"assertion_id": "A", "state": "VERIFIED", "reason_code": "EQUALS_EXPECTED", "evidence": None}, {"assertion_id": "B", "state": "FAILED", "reason_code": "EXPECTED_VALUE_DIFFERS", "evidence": None},
+              {"assertion_id": "C", "state": "INCONCLUSIVE", "reason_code": "EVIDENCE_MISSING", "evidence": None}]
+    got = [(r["state"], r["reason_code"]) for r in finalize_results(judged, "NATIVE_PASS", False, {}, incomplete=True)]
+    assert got == [("INCONCLUSIVE", "EVIDENCE_INCOMPLETE"), ("FAILED", "EXPECTED_VALUE_DIFFERS"), ("INCONCLUSIVE", "EVIDENCE_MISSING")]
+    assert [r["state"] for r in finalize_results(judged, "NATIVE_PASS", False, {}, incomplete=False)] == ["VERIFIED", "FAILED", "INCONCLUSIVE"]
+
+
+def test_a_completed_lane_with_every_lane_file_kept_is_not_verified_when_only_a_run_level_file_was_dropped(up, golden_frozen):
+    """The boundary the retest found: at a cap that drops only `logs/target-requests.jsonl` no lane is an engine error, yet the report said evidence_incomplete and the run was VERIFIED (exit 0)."""
+    b = build(up, golden_frozen, lane(), extensions={"target_defect": "none", "evidence_incomplete": "1 file(s) not kept: the evidence budget of 205000 bytes was used up"})
+    r = report_of(b)
+    assert r["verdict"]["outcome"] == "INCONCLUSIVE" and r["lanes"][0]["native"]["status"] == "NATIVE_PASS"
+    assert {x["verdict"]["reason_code"] for x in r["accounting"]["results"]} == {"EVIDENCE_INCOMPLETE"} and r["accounting"]["verified"] == 0
+    from qa_runner.orchestrate import exit_code_for
+    assert exit_code_for(r) == 3 and verify_files(b.files, plan_digest=golden_frozen.plan_digest).ok
+    assert report_of(build(up, golden_frozen, lane()))["verdict"]["outcome"] == "VERIFIED"                 # without the declaration nothing changes

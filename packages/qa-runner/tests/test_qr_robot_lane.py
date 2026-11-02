@@ -180,7 +180,7 @@ def test_the_engine_is_started_under_the_guard_that_watches_the_parent(up, froze
 
     monkeypatch.setattr(lr, "RobotSuiteAdapter", adapter)
     with pytest.raises(Stop):
-        lr.run_robot_lane(frozen.lane("robot"), run_id="r0-x", origin="http://127.0.0.1:9", workdir=str(tmp_path), cancel=None, deadline_s=5, log=[])
+        lr._run_inner(frozen.lane("robot"), run_id="r0-x", origin="http://127.0.0.1:9", workdir=str(tmp_path), cancel=None, deadline_s=5, log=[])
     assert seen["launcher"] == (lr.GUARD,) and Path(lr.GUARD).name == "robot_guard.py" and Path(lr.GUARD).is_file()
 
 
@@ -190,15 +190,53 @@ def test_the_native_files_of_the_engine_are_read_through_the_bounded_read(up, fr
     import qa_runner.safe_read as sr
     seen = []
     real = sr.read_regular
-    monkeypatch.setattr(sr, "read_regular", lambda path, **kw: seen.append((os.path.basename(path), kw)) or real(path, **kw))
+    spy = lambda path, **kw: seen.append((os.path.basename(path), kw)) or real(path, **kw)      # noqa: E731
+    monkeypatch.setattr(sr, "read_regular", spy)
+    monkeypatch.setattr("qa_runner.lane_robot.read_regular", spy)                                  # the outcome file is read directly (not charged to the budget)
     s = run(up, frozen, "live")
-    assert {"output.xml", "robot-summary.json"} <= {n for n, _ in seen}
-    assert all(kw["follow_symlinks"] is False and kw["max_bytes"] <= 32 * 1024 * 1024 for _, kw in seen)
+    names = {n for n, _ in seen}
+    assert "outcome.json" in names and any(n.endswith(".bin") for n in names)                      # in the parent: the lane child's outcome and the numbered data files it names
+    assert all(kw["follow_symlinks"] is False and kw["max_bytes"] <= 64 * 1024 * 1024 for _, kw in seen)
 
 
 def test_a_robot_lane_over_the_evidence_budget_is_an_engine_error_that_keeps_what_fits(up, frozen):
-    """Retest N2 for the Robot lane: the engine's files do not fit a 300 byte budget, nothing is deleted, the lane says so and is never verified."""
-    s = run_plan(up, frozen, RunOptions(robot_launcher=fake_robot("live"), lane_deadline_s=60, run_id="r0-test", max_evidence_bytes=300))
+    """Retest N2 for the Robot lane: the engine's files do not all fit a 6000 byte budget, nothing is deleted, the lane says so and is never verified."""
+    s = run_plan(up, frozen, RunOptions(robot_launcher=fake_robot("live"), lane_deadline_s=60, run_id="r0-test", max_evidence_bytes=6000))
     r = rep(s)
     assert s.lanes == (("robot", "NATIVE_ERROR"),) and r["lanes"][0]["native"]["raw_status"] == "evidence-over-cap" and "evidence_incomplete" in r["extensions"]
     assert s.outcome == "INCONCLUSIVE" and s.exit_code == K.EXIT_ENVIRONMENT and verify_files(s.bundle.files).ok
+
+
+@pytest.mark.parametrize("cap", [1, 200, 600, 1_000, 1_500, 3_000, 5_000, 8_000, 12_000, 20_000, 40_000, 80_000, 160_000])
+def test_a_robot_lane_cut_at_any_cap_is_labelled_evidence_over_cap_never_a_child_exit(up, frozen, cap):
+    """Retest R2-6: the lane child was handed the whole remaining budget, so the parent had no room left for the child's own outcome file, lost the outcome and labelled the lane `child-exit-0`.
+    At every cap the lane is either complete (nothing dropped) or an engine error `evidence-over-cap` that says what was not kept, and the bundle is valid."""
+    s = run_plan(up, frozen, RunOptions(robot_launcher=fake_robot("live"), lane_deadline_s=60, run_id="r0-test", max_evidence_bytes=cap))
+    r = rep(s)
+    raw = r["lanes"][0]["native"]["raw_status"]
+    incomplete = "evidence_incomplete" in r["extensions"]
+    assert not raw.startswith("child-"), (cap, raw)
+    if raw == "evidence-over-cap":
+        assert r["lanes"][0]["native"]["status"] == "NATIVE_ERROR" and incomplete and s.exit_code == K.EXIT_ENVIRONMENT and s.outcome != "VERIFIED"
+    else:                                              # the lane's own files all fit; at most a log did not, and then the run still says so and is never verified
+        assert not incomplete or (s.outcome != "VERIFIED" and s.exit_code == K.EXIT_ENVIRONMENT)
+    assert verify_files(s.bundle.files).ok
+
+
+def test_an_outcome_file_with_a_field_of_the_wrong_kind_is_not_taken_in(tmp_path):
+    """Retest R2-6: fields of the lane child's outcome that nothing used were accepted whatever they held."""
+    from qa_runner import lane_robot
+    from qa_runner.safe_read import Budget
+    base = {"schema": K.LANE_RESULT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "status": "COMPLETED", "engine_version": "7.5", "native_status": "NATIVE_PASS", "raw_status": "PASS",
+            "exit_code": 0, "counts": {"passed": 1, "failed": 0, "errored": 0, "skipped": 0}, "log": [], "native": {}, "files": {}}
+    lane = type("L", (), {"lane_id": "robot", "engine": "robot"})()
+
+    def read(doc):
+        out = tmp_path / f"o{len(list(tmp_path.iterdir()))}"
+        out.mkdir()
+        (out / "outcome.json").write_text(json.dumps(doc))
+        return lane_robot._read_outcome(lane, out, Budget(10_000_000, root=str(tmp_path)))[0]
+    assert read(base) is not None
+    for edit in ({"counts": {"passed": "many"}}, {"counts": {"surprise": 1}}, {"counts": [1]}, {"exit_code": "0"}, {"exit_code": 100000}, {"native_status": "NATIVE_VERIFIED"}, {"engine_version": 7},
+                 {"log": {"a": 1}}, {"files": {"x": "data/1.bin"}}, {"files": {"x": {"data": "data/1.bin"}}}):
+        assert read({**base, **edit}) is None, edit

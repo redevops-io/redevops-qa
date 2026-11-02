@@ -50,8 +50,8 @@ def child_env(home: str, *, extra: Optional[Mapping[str, str]] = None, modules: 
 
 
 def run_child(argv: Sequence[str], *, cwd: str, env: Mapping[str, str], deadline_s: float, cancel: Optional[CancelToken] = None,
-              output_limit_bytes: int = 1_000_000) -> ProcessOutcome:
-    return run_supervised(list(argv), cwd=cwd, env=env, limits=Limits(deadline_s=deadline_s, output_limit_bytes=output_limit_bytes, kill_grace_s=2.0), cancel=cancel)
+              output_limit_bytes: int = 1_000_000, kill_grace_s: float = 2.0) -> ProcessOutcome:
+    return run_supervised(list(argv), cwd=cwd, env=env, limits=Limits(deadline_s=deadline_s, output_limit_bytes=output_limit_bytes, kill_grace_s=kill_grace_s), cancel=cancel)
 
 
 def _kill_group(pid: int, sig: int) -> None:

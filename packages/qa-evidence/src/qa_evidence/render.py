@@ -17,10 +17,16 @@ def _t(value: Any, limit: int = 300) -> str:
     return safe_text(value, limit)
 
 
-def render_text(ins: Inspection) -> str:
+#: What a caller that did NOT recompute the verdicts (``verdicts_recomputed=False``) shows instead of "Verification : OK" and the "independent verdict" wording: the files, digests and accounting
+#: were checked, and nothing says the verdicts are true.
+NOT_RECOMPUTED_OK = "files, digests and accounting are consistent; the verdicts were NOT recomputed by this command and are not independently verified"
+NOT_RECOMPUTED_CLOSING = "These verdicts are the runner's own, as recorded in the bundle; no command recomputed them here. It does not mean the application under test is correct."
+
+
+def render_text(ins: Inspection, *, verdicts_recomputed: bool = True) -> str:
     v = ins.verification
     lines: List[str] = ["QA EVIDENCE BUNDLE", _RULE]
-    lines.append("Verification : " + ("OK - internally consistent" if v.ok else f"FAILED - {len(v.findings)} finding(s)"))
+    lines.append("Verification : " + (("OK - internally consistent" if verdicts_recomputed else NOT_RECOMPUTED_OK) if v.ok else f"FAILED - {len(v.findings)} finding(s)"))
     lines.append("External anchor: " + v.anchor.notice)
     if v.plan is not None:
         lines.append("Frozen assertion set: " + v.plan.notice)
@@ -48,7 +54,8 @@ def render_text(ins: Inspection) -> str:
                 lines.append(f"      {_t(a['path'])}  {a['digest']}  {a['size']} bytes")
         iv = s["independent_verdict"]
         prov = iv["provenance"]
-        lines += [_RULE, "INDEPENDENT VERDICT (verifier over recorded observations and frozen assertions)",
+        lines += [_RULE, "INDEPENDENT VERDICT (verifier over recorded observations and frozen assertions)" if verdicts_recomputed
+                  else "VERDICT AS RECORDED (the runner's own; not recomputed by this command)",
                   f"  outcome      : {iv['outcome']} ({_t(iv['reason_code'])})",
                   f"  verifier     : {_t(prov['verifier']['id'])} {_t(prov['verifier']['version'])}",
                   f"  assertion set: {prov['assertion_set_digest']}", f"  evidence set : {prov['evidence_set_digest']}"]
@@ -84,7 +91,10 @@ def render_text(ins: Inspection) -> str:
             lines.append(f"  field {i['document']}{_t(i['pointer'])}")
         for n in v.notes:
             lines.append(f"  {n['code']} ({n['document']}): {_t(n['message'])}")
-    lines += [_RULE, "Verified means the assertions were evaluated by an independent verifier over recorded observations; it does not mean the", "application under test is correct.", ""]
+    if verdicts_recomputed:
+        lines += [_RULE, "Verified means the assertions were evaluated by an independent verifier over recorded observations; it does not mean the", "application under test is correct.", ""]
+    else:
+        lines += [_RULE, NOT_RECOMPUTED_CLOSING, ""]
     return "\n".join(lines)
 
 
@@ -99,7 +109,7 @@ th{background:#f0f0f0}code{font-family:ui-monospace,monospace;font-size:.9em}
 """
 
 
-def render_html(ins: Inspection) -> str:
+def render_html(ins: Inspection, *, verdicts_recomputed: bool = True) -> str:
     e = lambda value, limit=2000: html.escape(safe_text(value, limit), quote=True)      # noqa: E731
     v = ins.verification
     out: List[str] = ["<!DOCTYPE html>", '<html lang="en"><head><meta charset="utf-8">',
@@ -108,8 +118,8 @@ def render_html(ins: Inspection) -> str:
     s = ins.summary
     out.append("<title>QA evidence bundle%s</title><style>%s</style></head><body>" % (" - " + e(s["run_id"]) if s else "", _STYLE))
     out.append("<h1>QA evidence bundle</h1>")
-    vclass = "ok" if v.ok else "bad"
-    out.append('<div class="banner %s">Verification: %s</div>' % (vclass, "OK - internally consistent" if v.ok else "FAILED - %d finding(s)" % len(v.findings)))
+    vclass = ("ok" if verdicts_recomputed else "warn") if v.ok else "bad"
+    out.append('<div class="banner %s">Verification: %s</div>' % (vclass, ("OK - internally consistent" if verdicts_recomputed else e(NOT_RECOMPUTED_OK)) if v.ok else "FAILED - %d finding(s)" % len(v.findings)))
     aclass = "ok" if v.anchor.matches else ("bad" if v.anchor.state in ("mismatch", "invalid") else "warn")
     out.append('<div class="banner %s">External anchor: %s</div>' % (aclass, e(v.anchor.notice)))
     if v.plan is not None:
@@ -140,9 +150,12 @@ def render_html(ins: Inspection) -> str:
         out.append("</table>")
         iv = s["independent_verdict"]
         prov = iv["provenance"]
-        out.append('<h2>Independent verdict</h2><p class="small">Produced by a verifier over recorded observations and frozen assertions, with its provenance.</p>'
+        out.append('<h2>%s</h2><p class="small">%s</p>'
                    '<table class="verdict"><tr><th>Outcome</th><td><strong>%s</strong> (%s)</td></tr><tr><th>Verifier</th><td>%s %s</td></tr>'
                    '<tr><th>Assertion set digest</th><td><code>%s</code></td></tr><tr><th>Evidence set digest</th><td><code>%s</code></td></tr>' % (
+                       "Independent verdict" if verdicts_recomputed else "Verdict as recorded",
+                       "Produced by a verifier over recorded observations and frozen assertions, with its provenance." if verdicts_recomputed
+                       else "The runner's own verdict, as recorded in the bundle; no command recomputed it here.",
                        e(iv["outcome"]), e(iv["reason_code"]), e(prov["verifier"]["id"]), e(prov["verifier"]["version"]),
                        e(prov["assertion_set_digest"]), e(prov["evidence_set_digest"])))
         a = s["accounting"]
@@ -177,6 +190,7 @@ def render_html(ins: Inspection) -> str:
     if ins.files:
         out.append("<h2>Files</h2><table><tr><th>Path</th><th>Role</th><th>Size</th><th>sha256</th></tr>%s</table>" % "".join(
             "<tr><td>%s</td><td>%s</td><td>%d</td><td><code>%s</code></td></tr>" % (e(f["path"]), e(f["role"]), f["size"], e(f["digest"])) for f in ins.files))
-    out.append('<p class="small">Verified means the assertions were evaluated by an independent verifier over recorded observations; it does not mean the application under test is correct.</p>')
+    out.append('<p class="small">%s</p>' % ("Verified means the assertions were evaluated by an independent verifier over recorded observations; it does not mean the application under test is correct."
+                                          if verdicts_recomputed else e(NOT_RECOMPUTED_CLOSING)))
     out.append("</body></html>")
     return "\n".join(out) + "\n"

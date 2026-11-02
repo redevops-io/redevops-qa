@@ -317,6 +317,58 @@ jobs:
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
+  runner-e2e:
+    name: runner end to end (real Chromium and Robot Framework 7.5 in one run; Playwright and Robot pinned; the two-lane plan for each seeded defect, partial success, timeouts, cancellation and a killed parent with process checks; a missing dependency fails, never skips)
+    # The product's end-to-end path: one frozen plan, two real engines, serially, one run id, one evidence bundle, for the clean target and each seeded defect, run through the
+    # command line in a scrubbed environment too. Read-only, no secret; the browser is installed in its own prefetch step and nothing downloads at test time.
+    runs-on: ubuntu-24.04
+    needs: pins
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Read the pinned commits
+        id: pins
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
+      - name: Fetch runtime-contracts at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.contracts_repo }}
+          ref: ${{ steps.pins.outputs.contracts_commit }}
+          path: ${{ steps.pins.outputs.contracts_path }}
+          persist-credentials: false
+      - name: Fetch agent-harness at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.harness_qa_repo }}
+          ref: ${{ steps.pins.outputs.harness_qa_commit }}
+          path: ${{ steps.pins.outputs.harness_qa_path }}
+          persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --verify-trees --require-git
+      - name: Install the pinned test tools, Playwright and Robot Framework
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "playwright==1.64.1" "robotframework==7.5"
+      - name: Browser install (prefetch; no credentials; the tests never download anything)
+        run: |
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/pw-browsers" >> "$GITHUB_ENV"
+          PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers" python -m playwright install --with-deps chromium
+      - name: Fail unless the pinned Playwright and Robot Framework are importable
+        run: python -c "import importlib.metadata as m, playwright.sync_api, robot; assert m.version('playwright') == '1.64.1', m.version('playwright'); assert m.version('robotframework') == '7.5', m.version('robotframework')"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the runner end-to-end lane (scrubbed environment; only tests marked e2e)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" \
+            python -m pytest -q -m e2e packages/qa-runner/tests/e2e --junitxml="$RUNNER_TEMP/junit-runner-e2e.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner-e2e.xml"
+      - name: Fail if the tests left anything in the working tree
+        run: test -z "$(git status --porcelain)"
+
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
     runs-on: ubuntu-24.04

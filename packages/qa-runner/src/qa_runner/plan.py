@@ -275,6 +275,7 @@ def freeze_plan(up: Upstreams, plan_doc: Any) -> FrozenPlan:
                                 "every frozen assertion is accounted exactly once")
             seen_ids[key] = (a["assertion_id"], lid)
         suite_name, suite_hashes = _lane_engine_rules(lane, spec, assertions)
+        materialise_spec(lane["spec"], "http://127.0.0.1:1")                 # the rule for {origin} that the run applies: a plan the run would refuse is refused here, before anything starts
         ids = {a["assertion_id"] for a in assertions}
         unknown_probe = sorted(set(lane["probes"]) - ids)
         if unknown_probe:

@@ -213,3 +213,17 @@ def test_the_json_inspection_is_plain_json_without_floats(hostile_location):
         if isinstance(x, list):
             [no_float(v) for v in x]
     no_float(doc)
+
+
+def test_a_caller_that_did_not_recompute_the_verdicts_gets_a_report_that_does_not_say_verified_or_ok():
+    """A caller that only checked files, digests and accounting asks for ``verdicts_recomputed=False``: no `Verification : OK`, no green banner, no `INDEPENDENT VERDICT`, no `Verified means ...`.
+    The default is unchanged."""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as d:
+        build_base().write_archive(os.path.join(d, "b.tar"))
+        ins = inspect_bundle(os.path.join(d, "b.tar"))
+    text, page = render_text(ins, verdicts_recomputed=False), render_html(ins, verdicts_recomputed=False)
+    assert "Verification : OK" in render_text(ins) and 'banner ok">Verification: OK' in render_html(ins)
+    assert "Verification : OK" not in text and "NOT recomputed" in text and "INDEPENDENT VERDICT" not in text and "VERDICT AS RECORDED" in text and "Verified means" not in text
+    assert "Verification: OK" not in page and 'banner ok">Verification' not in page and "NOT recomputed" in page and "Independent verdict" not in page and "Verdict as recorded" in page
+    assert "Verified means" not in page
