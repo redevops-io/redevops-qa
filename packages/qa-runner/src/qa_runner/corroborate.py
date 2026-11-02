@@ -24,6 +24,8 @@ from typing import Any, Dict, List, Mapping, Optional, Set
 from qa_evidence.canon import CanonError, loads_strict, sha256_bytes
 
 from .deps import Upstreams
+from .egress import policy_config
+from .errors import PlanError
 from .plan import FrozenLane, materialise_spec
 
 BUILTIN_REQUESTS = frozenset({"GET /health", "GET /favicon.ico"})      # the runner's own health probe and the browser's icon request
@@ -34,12 +36,36 @@ def request_log_path(lane_id: str) -> str:
     return f"lanes/{lane_id}/target-requests.jsonl"
 
 
-def _origin(files: Mapping[str, bytes], lane_id: str) -> Optional[str]:
+def lane_origin(lane: FrozenLane, files: Mapping[str, bytes]) -> Optional[str]:
+    """The one origin the lane was allowed to reach, from the egress profile in the bundle, which must be EXACTLY what the plan's profile gives for that origin (no other label, network, scheme or port)."""
     try:
-        entry = loads_strict(files[f"lanes/{lane_id}/egress-profile.json"])["private"][0]
-        return f"http://{entry['host']}:{entry['ports'][0]}"
-    except (KeyError, IndexError, TypeError, CanonError):
+        doc = loads_strict(files[f"lanes/{lane.lane_id}/egress-profile.json"])
+        entry = doc["private"][0]
+        origin = f"http://{entry['host']}:{entry['ports'][0]}"
+        return origin if doc == policy_config(lane.egress, origin) else None
+    except (KeyError, IndexError, TypeError, CanonError, PlanError):
         return None
+
+
+class BundleBlobs:
+    """The blob store of a browser lane as the bundle carries it (``lanes/<lane>/native/blobs/<sha256 hex>``): what the harness integrity check reads to find a missing or altered blob."""
+
+    def __init__(self, h: Any, files: Mapping[str, bytes], lane_id: str):
+        self._h, self._files, self._prefix = h, files, f"lanes/{lane_id}/native/blobs/"
+
+    def _key(self, digest: str) -> str:
+        return self._prefix + str(digest).split(":", 1)[-1]
+
+    def exists(self, digest: str) -> bool:
+        return self._key(digest) in self._files
+
+    def get(self, digest: str) -> bytes:
+        data = self._files.get(self._key(digest))
+        if data is None:
+            raise self._h.blobs.BlobNotFound("no such blob")
+        if sha256_bytes(data).split(":", 1)[-1] != str(digest).split(":", 1)[-1]:
+            raise self._h.blobs.BlobCorrupt("the blob does not hash to its name")
+        return data
 
 
 def corroborate_browser(up: Upstreams, lane: FrozenLane, run_id: str, files: Mapping[str, bytes], rows: Mapping[str, Mapping[str, Any]]) -> Optional[str]:
@@ -60,7 +86,7 @@ def corroborate_browser(up: Upstreams, lane: FrozenLane, run_id: str, files: Map
         receipts = [h.records.ActionReceipt.from_json(copy.deepcopy(r)) for r in rec["receipts"]]
         links = [h.receipts.ChainLink(**l) for l in rec["receipt_links"]]
         manifest = h.records.RunManifest.from_json(copy.deepcopy(rec["manifest"]))
-        found = h.integrity.verify_run_evidence(events=rec["events"], receipts=receipts, links=links, manifest=manifest)
+        found = h.integrity.verify_run_evidence(events=rec["events"], receipts=receipts, links=links, manifest=manifest, blobs=BundleBlobs(h, files, lid))
     except Exception:
         return "the harness run record cannot be read as a harness record"
     if found.findings:
@@ -71,9 +97,12 @@ def corroborate_browser(up: Upstreams, lane: FrozenLane, run_id: str, files: Map
         return "the run record was verified against another assertion set than the frozen one"
     if rec.get("classification", {}).get("outcome") != result.get("outcome") or rec.get("exit_code") != result.get("exit_code"):
         return "the run record and the lane result name different outcomes"
-    origin = _origin(files, lid)
+    mismatch = record_contradicts_itself(rec, manifest)
+    if mismatch is not None:
+        return mismatch
+    origin = lane_origin(lane, files)
     if origin is None:
-        return "the egress profile that names the allowed origin is missing"
+        return "the egress profile that names the allowed origin is missing or is not the one the plan's profile gives"
     try:
         if manifest.spec_ref != h.records.TestSpec.from_json(materialise_spec(lane.spec_template, origin)).spec_ref():
             return "the spec the run executed is not the frozen template with the allowed origin"
@@ -84,6 +113,24 @@ def corroborate_browser(up: Upstreams, lane: FrozenLane, run_id: str, files: Map
         r = by_id.get(aid)
         if r is None or r.actual != row.get("value") or r.actual_digest != row.get("value_digest"):
             return "an observation is not what the harness run record says was read"
+    return None
+
+
+def record_contradicts_itself(rec: Mapping[str, Any], manifest: Any) -> Optional[str]:
+    """A harness run record whose parts disagree: the ``AssertionResult`` events must be exactly the results its manifest lists, the ``RunSealed`` event must carry the classification the record
+    states, and the manifest's outcome must be that classification's. (The integrity check ties the chain, the seal and the manifest hash together; it does not relate these to each other.)"""
+    events = rec.get("events") or []
+    raw = rec.get("manifest") or {}
+    event_payloads = [e["payload"] for e in events if isinstance(e, dict) and e.get("kind") == "AssertionResult" and isinstance(e.get("payload"), dict)]
+    listed = [r for r in raw.get("assertion_results") or [] if isinstance(r, dict)]
+    from_events, from_manifest = {p.get("assertion_id"): p for p in event_payloads}, {r.get("assertion_id"): r for r in listed}
+    if from_events != from_manifest or len(event_payloads) != len(listed) or len(from_manifest) != len(listed):
+        return "the AssertionResult events of the run record are not the results its manifest lists"
+    sealed = [e for e in events if isinstance(e, dict) and e.get("kind") == "RunSealed"]
+    if len(sealed) != 1 or sealed[0].get("payload", {}).get("classification") != rec.get("classification"):
+        return "the RunSealed event does not carry the classification the run record states"
+    if raw.get("outcome") != (rec.get("classification") or {}).get("outcome"):
+        return "the manifest's outcome is not the run record's classification"
     return None
 
 
@@ -139,7 +186,7 @@ def probe_verdicts(lane: FrozenLane, files: Mapping[str, bytes]) -> Dict[str, st
 
 
 
-def _plain_json(data: bytes) -> Any:
+def plain_json(data: bytes) -> Any:
     def refuse(_: str) -> Any:
         raise ValueError("constant")
 
@@ -158,7 +205,7 @@ def corroborate_robot(lane: FrozenLane, run_id: str, files: Mapping[str, bytes])
     base = f"lanes/{lid}/native/"
     try:
         xml, summary_raw = files[base + "output.xml"], files[base + "robot-summary.json"]
-        summary, result = _plain_json(summary_raw), _plain_json(files[base + "adapter-result.json"])
+        summary, result = plain_json(summary_raw), plain_json(files[base + "adapter-result.json"])
     except (KeyError, ValueError, UnicodeDecodeError):
         return "the engine's report, its summary or the adapter result is missing or unreadable"
     if not isinstance(summary, dict) or not isinstance(result, dict):

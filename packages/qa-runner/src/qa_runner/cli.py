@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
-"""``redevops-qa``: one command for the whole path: ``doctor``, ``freeze``, ``run``, ``report``, ``inspect`` and the one-shot ``demo`` (``verify`` follows).
+"""``redevops-qa``: one command for the whole path: ``doctor``, ``freeze``, ``run``, ``verify``, ``report``, ``inspect`` and the one-shot ``demo``.
 
 Exit status of ``run`` and ``demo``: 0 the run is VERIFIED; 1 an assertion FAILED; 2 the plan, the lock or an option was refused before anything ran; 3 a lane did not run
 to completion (error, timeout, cancelled, unavailable) or the environment could not provide what the run needs; 4 inconclusive (every lane completed but not every
 assertion is verified, or an engine and the verifier disagree); 6 an internal error of the runner. A crash is never reported as a product failure. ``freeze``: 0 or 2.
-``report`` and ``inspect``: 0 the bundle verified as internally consistent, 1 it did not, 2 it cannot be opened. They never recompute a verdict."""
+``report`` and ``inspect``: 0 the bundle verified as internally consistent, 1 it did not, 2 it cannot be opened. They never recompute a verdict.
+``verify``: the same table as ``run`` for an accepted bundle (0 VERIFIED, 1 FAILED, 3 a lane did not complete, 4 inconclusive), 5 when ANY finding rejects the evidence, 2 when the bundle
+cannot be opened. ``run`` and ``demo`` end by calling ``verify`` in a separate interpreter and exit 5 if it does not accept what the run just wrote."""
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import shutil
@@ -27,11 +30,9 @@ from qa_evidence.sources import SourceError
 from . import __version__
 from . import constants as K
 from .deps import verified_bootstrap
-from .doctor import render, run_doctor
 from .errors import EnvironmentFault, PlanError, RunnerError
 from .golden import demo_plan
 from .inspect_cmd import inspect_text
-from .orchestrate import RunOptions, RunSummary, new_run_id, run_plan
 from .plan import MAX_PLAN_BYTES, FrozenPlan, freeze_plan, load_plan_or_lock
 from . import isolated
 
@@ -73,6 +74,14 @@ def _parser() -> argparse.ArgumentParser:
     sp.add_argument("--out", default="qa-evidence", metavar="DIR", help="directory to create the bundle in: DIR/<run id> (default: ./qa-evidence)")
     run_options(sp)
 
+    sp = sub.add_parser("verify", help="re-verify a finished run from its bundle alone, offline: recompute every digest, the frozen assertions and every verdict; exit 5 on any finding")
+    sp.add_argument("bundle", help="a bundle directory or archive")
+    sp.add_argument("--anchor", metavar="sha256:HEX", help="external anchor value: the manifest digest published outside the bundle (print it with `run`, publish it where the producer cannot rewrite it)")
+    sp.add_argument("--plan-digest", metavar="sha256:HEX", help="the plan digest printed by `freeze`, obtained from outside the bundle")
+    sp.add_argument("--require-anchor", action="store_true", help="a finding unless --anchor matches the recomputed manifest digest (a match is not proof of integrity: nothing here authenticates where the supplied value came from)")
+    sp.add_argument("--require-plan-digest", action="store_true", help="a finding unless --plan-digest matches the plan digest of the bundle")
+    sp.add_argument("--json", action="store_true", help="print the result as JSON")
+
     for name, text in (("report", "print the report of a bundle for people (text, JSON or one HTML file); it verifies the bundle first and never recomputes a verdict"),
                        ("inspect", "list what is in a bundle: files, digests, tool versions, lanes and the heads of the chains inside it")):
         sp = sub.add_parser(name, help=text)
@@ -99,6 +108,7 @@ def _read_plan(path: str) -> bytes:
 
 
 def _doctor(args, out: TextIO, err: TextIO) -> int:
+    from .doctor import render, run_doctor
     engines = (K.ENGINE_PLAYWRIGHT, K.ENGINE_ROBOT)
     if args.plan:
         up = verified_bootstrap()
@@ -157,6 +167,7 @@ def _freeze(args, out: TextIO, err: TextIO) -> int:
 
 
 def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text: bool = False) -> int:
+    from .orchestrate import RunOptions, new_run_id, run_plan
     target = Path(args.out)
     run_id = new_run_id() if args.run_id is None else args.run_id
     if not K.RUN_ID_RE.fullmatch(run_id):
@@ -177,18 +188,58 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
     bundle_dir = reserved
-    _print_summary(summary, bundle_dir, out)
+    _print_summary(summary, bundle_dir, out, recomputed=True)          # the separate verification below recomputes the verdicts
+    from .exits import exit_code_for
+    # verify cannot know whether the run was cancelled (a SIGTERM after the last lane): it returns the status of the report alone, which is what it is compared with
+    code = _verify_in_a_new_process(bundle_dir, summary.plan_digest, exit_code_for(json.loads(summary.bundle.files["report.json"])), summary.exit_code, out)
     if report_text:
         print("", file=out)
-        out.write(render_text(inspect_source(_snapshot(str(bundle_dir))), verdicts_recomputed=False))          # no plan digest supplied: the one this process computed would only match itself
-    return summary.exit_code
+        if code == K.EXIT_REJECTED:
+            print("the report is not printed: the bundle was rejected by the separate verification above", file=out)
+        else:
+            out.write(render_text(inspect_source(_snapshot(str(bundle_dir)))))          # no plan digest supplied: the one this process computed would only match itself
+    return code
 
 
-def _print_summary(summary: RunSummary, bundle_dir: Path, out: TextIO) -> None:
+def _verify_in_a_new_process(bundle_dir: Path, plan_digest: str, expected_exit: int, run_exit: int, out: TextIO) -> int:
+    """The run's own re-verification: ``verify`` in a fresh interpreter with a fresh environment (no state shared with this process), given the bundle and the plan digest this process
+    froze. The plan digest comes from the same process that ran the plan, so it checks that the run wrote what it froze, not that the plan is the one somebody asked for."""
+    import subprocess
+    from .procs import child_env, make_workdir
+    import shutil
+    home = make_workdir("redevops-qa-verify-")
+    try:
+        done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "verify", str(bundle_dir.resolve()), "--plan-digest", plan_digest, "--json"], env=child_env(home), cwd=home,
+                              capture_output=True, text=True, timeout=300)
+        try:
+            doc = json.loads(done.stdout)
+        except ValueError:
+            doc = None
+    except (OSError, subprocess.SubprocessError):
+        done, doc = None, None
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+    if doc is None or done is None or done.returncode == K.EXIT_INTERNAL:
+        print("  re-verification in a fresh process (the same code as the run, not independent code): COULD NOT RUN; nothing is accepted", file=out)
+        return K.EXIT_REJECTED
+    if not doc["accepted"]:
+        codes = ", ".join(sorted({safe_text(f["code"], 60) for f in doc["findings"]}))
+        print(f"  re-verification in a fresh process (the same code as the run, not independent code): REJECTED ({codes})", file=out)
+        return K.EXIT_REJECTED
+    if doc["exit_code"] != expected_exit:
+        print(f"  re-verification in a fresh process (the same code as the run, not independent code): ACCEPTED, but its exit status ({doc['exit_code']}) is not the report's ({expected_exit}); nothing is accepted", file=out)
+        return K.EXIT_REJECTED
+    print(f"  re-verification in a fresh process (the same code as the run, not independent code): ACCEPTED as internally consistent; {doc['agreeing_assertions']} of {doc['recomputed_assertions']} verdict(s) recomputed from the bundle alone "
+          "agree with the report; no external anchor", file=out)
+    return run_exit
+
+
+def _print_summary(summary, bundle_dir: Path, out: TextIO, *, recomputed: bool = False) -> None:
     report = json.loads(summary.bundle.files["report.json"])
     print(f"run {summary.run_id}: {report['verdict']['outcome']} ({report['verdict']['reason_code']})" + ("  [cancelled]" if summary.cancelled else ""), file=out)
     print(f"  external anchor: {ANCHOR_ABSENT_NOTICE} (a manifest digest published where this machine cannot rewrite it is an anchor)", file=out)
-    print(f"  {RUNNER_ONLY}", file=out)
+    if not recomputed:
+        print(f"  {RUNNER_ONLY}", file=out)
     acc = report["accounting"]
     for lane in report["lanes"]:
         mine = [r for r in acc["results"] if r["lane_id"] == lane["lane_id"]]
@@ -229,36 +280,76 @@ def _demo(args, out: TextIO, err: TextIO) -> int:
     return _execute(freeze_plan(up, demo_plan()), args, out, err, report_text=True)
 
 
+def _verify(args, out: TextIO, err: TextIO) -> int:
+    from .verify import render_text as verify_text, verify_location
+    try:
+        v = verify_location(args.bundle, anchor=args.anchor, plan_digest=args.plan_digest, require_anchor=args.require_anchor, require_plan_digest=args.require_plan_digest)
+    except isolated.IsolatedReadError as exc:
+        raise _bundle_read_error(exc) from None
+    out.write(json.dumps(v.to_json(), sort_keys=True, indent=2) + "\n" if args.json else verify_text(args.bundle, v))
+    return v.exit_code
+
+
+def _bundle_read_error(exc: "isolated.IsolatedReadError") -> Exception:
+    if exc.code == "CANCELLED":
+        return EnvironmentFault("CANCELLED", "cancelled while reading the bundle")
+    return PlanError("BUNDLE_READ_TIMEOUT" if exc.code == "TIMEOUT" else "BUNDLE_UNREADABLE", safe_text(str(exc), 200))
+
 #: ``run`` and ``demo`` print this right under the outcome: the verdicts come from the runner that ran the plan, and no command in this release recomputes them (retest R2-3)
 RUNNER_ONLY = "verdicts are the runner's own and are not recomputed by any command here (`verify`, in the next part, recomputes them); this is not an independent verification"
 
-#: ``report`` and ``inspect`` check a bundle's own consistency (files, digests, accounting) and show what it says; they never recompute a verdict, so what they print is not a verification of the verdicts
-NOT_RECOMPUTED = "verdicts NOT recomputed by this command: only the bundle's files, digests and accounting were checked; what the bundle says is not shown to be true"
-
 
 def _snapshot(location: str):
-    """ONE immutable snapshot of a bundle, taken by a child that is killed at the deadline (``isolated``); everything ``report`` and ``inspect`` look at comes from it."""
+    """ONE immutable snapshot of a bundle, taken by a child that is killed at the deadline (``isolated``); everything ``report`` and ``inspect`` look at, and the recomputation, comes from it."""
     try:
         return isolated.snapshot_bundle(location)
     except isolated.IsolatedReadError as exc:
-        if exc.code == "CANCELLED":
-            raise EnvironmentFault("CANCELLED", "cancelled while reading the bundle") from None
-        raise PlanError("BUNDLE_READ_TIMEOUT" if exc.code == "TIMEOUT" else "BUNDLE_UNREADABLE", safe_text(str(exc), 200)) from None
+        raise _bundle_read_error(exc) from None
 
 
-def _inspection(args):
-    return inspect_source(_snapshot(args.bundle), anchor=args.anchor, plan_digest=args.plan_digest)
+def _recomputed(args, snapshot):
+    """The recomputation of the verdicts from the bundle alone (``verify``), over the snapshot ``report`` and ``inspect`` also show."""
+    from .verify import verify_snapshot
+    return verify_snapshot(snapshot, anchor=args.anchor, plan_digest=args.plan_digest)
+
+
+def _recomputed_line(v) -> str:
+    if v.accepted:
+        return f"verdicts recomputed from the bundle alone: {v.agreeing} of {v.recomputed} agree with the report (ACCEPTED as internally consistent)"
+    if v.unavailable:
+        return "NOT VERIFIED: the verifier cannot run here (nothing was verified, and nothing of the bundle is shown)"
+    codes = ", ".join(sorted({safe_text(f.code, 60) for f in v.findings})[:8])
+    return f"REJECTED: the bundle does not verify, {len(v.findings)} finding(s) ({codes}); nothing of what it says is shown"
+
+
+def _findings_lines(v, limit: int = 30) -> List[str]:
+    lines = [f"  {safe_text(f.code, 60)} {safe_text(f.where, 100)}: {safe_text(f.message, 200)}" for f in v.findings[:limit]]
+    if len(v.findings) > limit:
+        lines.append(f"  ... and {len(v.findings) - limit} more (run `redevops-qa verify` for all of them)")
+    return lines
 
 
 def _report(args, out: TextIO, err: TextIO) -> int:
-    ins = _inspection(args)
-    ok = ins.verification.ok
-    if args.format == "json":
-        text = json.dumps({**ins.to_json(), "content_trusted": False, "verdicts_recomputed": False, "notice": NOT_RECOMPUTED}, sort_keys=True, indent=2) + "\n"
-    elif args.format == "html":
-        text = render_html(ins, verdicts_recomputed=False).replace("<body>", '<body><div class="banner warn">' + NOT_RECOMPUTED + "</div>", 1)
+    snap = _snapshot(args.bundle)
+    ins = inspect_source(snap, anchor=args.anchor, plan_digest=args.plan_digest)
+    v = _recomputed(args, snap)
+    line = _recomputed_line(v)
+    if v.accepted:
+        if args.format == "json":
+            text = json.dumps({**ins.to_json(), "verdicts_recomputed": True, "recomputation": v.to_json()}, sort_keys=True, indent=2) + "\n"
+        elif args.format == "html":
+            text = render_html(ins).replace("<body>", '<body><div class="banner ok">%s</div>' % html.escape(line), 1)
+        else:
+            text = f"Recomputation : {line}\n" + render_text(ins)
     else:
-        text = f"Verdicts      : {NOT_RECOMPUTED}\n" + render_text(ins, verdicts_recomputed=False)
+        # A bundle that does not verify is not summarised: nothing the qa-evidence report would say ("Verification : OK", an outcome, ``content_trusted``) is printed next to a rejection.
+        if args.format == "json":
+            text = json.dumps({"verdicts_recomputed": not v.unavailable, "content_trusted": False, "verification": {"ok": False}, "recomputation": v.to_json()}, sort_keys=True, indent=2) + "\n"
+        elif args.format == "html":
+            text = ('<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'"><title>bundle rejected</title></head><body>'
+                    '<div class="banner bad">%s</div><ul>%s</ul></body></html>\n' % (html.escape(line), "".join("<li>%s</li>" % html.escape(l.strip()) for l in _findings_lines(v))))
+        else:
+            text = f"Recomputation : {line}\n" + "\n".join(_findings_lines(v)) + "\n"
     if args.output:
         try:
             with open(args.output, "x", encoding="utf-8", newline="\n") as fh:
@@ -267,15 +358,22 @@ def _report(args, out: TextIO, err: TextIO) -> int:
             raise PlanError("OUTPUT_UNWRITABLE", f"cannot write {safe_text(args.output)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
     else:
         out.write(text)
-    if not ok:
-        print(f"the bundle did not verify: {len(ins.verification.findings)} finding(s); what is shown must not be relied on", file=err)
-    return 0 if ok else 1
+    if not v.accepted:
+        print(f"the bundle did not verify: {len(v.findings)} finding(s) (run `redevops-qa verify` for the findings)", file=err)
+    return 0 if v.accepted else v.exit_code
 
 
 def _inspect(args, out: TextIO, err: TextIO) -> int:
-    text = inspect_text(_snapshot(args.bundle), args.bundle, anchor=args.anchor, plan_digest=args.plan_digest, verdicts_recomputed=False)
-    out.write(text)
-    return 0 if not text.splitlines()[1].startswith("verification: FAILED") else 1
+    snap = _snapshot(args.bundle)              # ONE snapshot: the listing and the recomputation below see the same bytes
+    v = _recomputed(args, snap)
+    if not v.accepted:
+        out.write(f"bundle {safe_text(args.bundle, 200)}: {snap.kind}, {len(snap.entries)} file(s)\nrecomputation: {_recomputed_line(v)}\n" + "\n".join(_findings_lines(v)) + "\n")
+        return v.exit_code
+    text = inspect_text(snap, args.bundle, anchor=args.anchor, plan_digest=args.plan_digest)
+    lines = text.splitlines()
+    lines.insert(2, "recomputation: " + _recomputed_line(v))
+    out.write("\n".join(lines) + "\n")
+    return 0
 
 
 def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Optional[TextIO] = None) -> int:
@@ -286,7 +384,7 @@ def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Op
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else K.EXIT_USAGE
     try:
-        return {"doctor": _doctor, "freeze": _freeze, "run": _run, "demo": _demo, "report": _report, "inspect": _inspect}[args.command](args, out, err)
+        return {"doctor": _doctor, "freeze": _freeze, "run": _run, "verify": _verify, "demo": _demo, "report": _report, "inspect": _inspect}[args.command](args, out, err)
     except PlanError as exc:
         print(f"error: {safe_text(str(exc))}", file=err)
         return K.EXIT_USAGE

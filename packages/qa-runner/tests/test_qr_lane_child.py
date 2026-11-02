@@ -125,3 +125,15 @@ def test_an_outcome_json_that_is_a_fifo_is_no_outcome_and_is_not_waited_for(tmp_
     os.mkfifo(tmp_path / "outcome.json")
     t0 = time.monotonic()
     assert _read_outcome(LANE, tmp_path) == (None, []) and time.monotonic() - t0 < 5
+
+
+def test_what_the_lane_child_could_not_keep_is_carried_to_the_run_so_that_the_report_names_it(tmp_path):
+    """Retest R2-1: the Robot child has its own budget; the names of what it dropped did not reach the parent, so the run could not say what was absent on purpose."""
+    _write_outcome(outcome(), [], tmp_path, not_kept=["output.xml", "native/robot-summary.json"])
+    budget = Budget(10_000_000)
+    back, _ = _read(LANE, tmp_path, budget)
+    assert back is not None and budget.dropped == ["output.xml", "native/robot-summary.json"]
+    doc = json.loads((tmp_path / "outcome.json").read_text())
+    doc["not_kept"] = ["x" * 400]
+    (tmp_path / "outcome.json").write_bytes(dumps_canonical(doc))
+    assert _read(LANE, tmp_path, Budget(10_000_000)) == (None, [])

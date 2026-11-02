@@ -359,6 +359,29 @@ def test_everything_that_defines_the_robot_run_is_in_the_plan_digest(up, name, e
     assert freeze_plan(up, plan).plan_digest != ROBOT_PLAN_DIGEST, name
 
 
+@pytest.mark.parametrize("name,edit", [
+    ("no pins", lambda l: l.update(suite_sha256={})),
+    ("an extra file", lambda l: l["suite_sha256"].update({"extra.py": "sha256:" + "0" * 64})),
+    ("a pin that is not a sha256", lambda l: l["suite_sha256"].update({"OrderApi.py": "x"})),
+    ("not a mapping", lambda l: l.update(suite_sha256="x")),
+])
+def test_for_verification_the_plan_must_pin_exactly_the_files_of_the_suite_the_code_knows(up, name, edit):
+    """Review finding H2: verification took the suite hashes from the lock itself, so a lock with none (or any) passed. They are the plan's now, and `{}` is not a pin."""
+    plan = robot_plan()
+    edit(plan["lanes"][0])
+    with pytest.raises(PlanError) as exc:
+        freeze_plan(up, plan, for_verification=True)
+    assert exc.value.code == "SUITE_PINS_MALFORMED", name
+
+
+def test_for_verification_the_pins_of_an_older_suite_are_accepted_when_the_plan_carries_them(up):
+    """An older run used older suite files: its plan pins them, and verification compares the bundle's copies with those pins, not with what this runner ships."""
+    plan = robot_plan()
+    plan["lanes"][0]["suite_sha256"]["OrderApi.py"] = "sha256:" + "1" * 64
+    refused(up, plan, "SUITE_MISMATCH")                                                    # freezing a plan to run: only the shipped files
+    assert freeze_plan(up, plan, for_verification=True).lane("robot").suite_files["OrderApi.py"] == "sha256:" + "1" * 64
+
+
 @pytest.mark.parametrize("name,edit,code", [
     ("no probes on a Robot lane", lambda l: l.pop("probes"), "MISSING_FIELD"),
     ("an empty set of probes on a Robot lane", lambda l: l.update(probes={}), "BAD_PROBES"),

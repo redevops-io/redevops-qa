@@ -198,9 +198,9 @@ def test_doctor_with_a_plan_checks_only_the_engines_the_plan_uses(tmp_path, monk
 
 # ---- the output location (review finding M4) and the options (M5) ---------------------------------------------------------------------------
 def test_an_unwritable_output_location_fails_before_anything_runs(tmp_path, monkeypatch):
-    import qa_runner.cli as cli_module
+    import qa_runner.orchestrate as orchestrate_module
     ran = []
-    monkeypatch.setattr(cli_module, "run_plan", lambda *a, **k: ran.append(1))
+    monkeypatch.setattr(orchestrate_module, "run_plan", lambda *a, **k: ran.append(1))
     (tmp_path / "ro").mkdir()
     (tmp_path / "ro").chmod(0o500)
     try:
@@ -211,20 +211,20 @@ def test_an_unwritable_output_location_fails_before_anything_runs(tmp_path, monk
 
 
 def test_a_second_run_with_the_same_id_fails_fast_before_it_executes(tmp_path, monkeypatch):
-    import qa_runner.cli as cli_module
+    import qa_runner.orchestrate as orchestrate_module
     ran = []
-    monkeypatch.setattr(cli_module, "run_plan", lambda *a, **k: ran.append(1))
+    monkeypatch.setattr(orchestrate_module, "run_plan", lambda *a, **k: ran.append(1))
     (tmp_path / "o" / "r0-same").mkdir(parents=True)            # what a concurrent run with this id holds while it is running
     code, out, err = cli("run", plan_file(tmp_path), "--out", str(tmp_path / "o"), "--run-id", "r0-same")
     assert code == K.EXIT_USAGE and "OUTPUT_EXISTS" in err and "another run may be using this run id" in err and ran == []
 
 
 def test_the_reservation_is_removed_when_the_run_does_not_produce_a_bundle(tmp_path, monkeypatch):
-    import qa_runner.cli as cli_module
+    import qa_runner.orchestrate as orchestrate_module
 
     def boom(*a, **k):
         raise RuntimeError("boom")
-    monkeypatch.setattr(cli_module, "run_plan", boom)
+    monkeypatch.setattr(orchestrate_module, "run_plan", boom)
     code, out, err = cli("run", plan_file(tmp_path), "--out", str(tmp_path / "o"), "--run-id", "r0-gone")
     assert code == K.EXIT_INTERNAL and not (tmp_path / "o" / "r0-gone").exists() and not list((tmp_path / "o").glob(".*"))
 

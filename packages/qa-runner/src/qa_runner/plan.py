@@ -32,6 +32,7 @@ PLAN_KEYS = {"schema", "schema_version", "plan_id", "target", "lanes"}
 COMMON_LANE_KEYS = {"lane_id", "engine", "spec", "egress", "deadline_s", "requests", "probes"}
 LANE_KEYS = {K.ENGINE_PLAYWRIGHT: set(COMMON_LANE_KEYS), K.ENGINE_ROBOT: COMMON_LANE_KEYS | {"suite", "suite_sha256"}}
 OPTIONAL_LANE_KEYS = {"deadline_s"}
+SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 REQUEST_RE = re.compile(r"^(GET|POST) (/[A-Za-z0-9._~/-]{0,100})$")
 #: what an assertion's verdict is checked against besides the engine's own record: a fact of the independent reference check of the target, or ``ui-only`` (the assertion is about what the browser shows;
 #: no server-side fact applies and nothing independent backs it). EVERY assertion of a lane names one: a lane cannot reach VERIFIED on a fixture-app assertion nobody said anything about.
@@ -211,7 +212,7 @@ def _contracts_spec(up: Upstreams, doc: Mapping[str, Any], lane_id: str):
                         f"{str(getattr(exc, 'detail', exc))[:300]}") from None
 
 
-def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict[str, Any]]) -> Tuple[str, Dict[str, str]]:
+def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict[str, Any]], for_verification: bool = False) -> Tuple[str, Dict[str, str]]:
     """What each kind of lane may contain. A browser lane holds PLAYWRIGHT assertions only. A Robot lane names a shipped suite, holds no steps, and its assertions are
     SCRIPT assertions that read exactly the lane's observation record with the registered, hash-pinned ``evidence.robot-observations`` program."""
     lid = lane["lane_id"]
@@ -219,15 +220,26 @@ def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict
         if any(a["executor"] != "PLAYWRIGHT" for a in assertions):
             raise PlanError("EXECUTOR_MISMATCH", f"lane {lid}: a browser lane holds PLAYWRIGHT assertions only")
         return "", {}
+    from . import suites
     from .suites import OBSERVATIONS_PATH_FORMAT, evidence_program_ref, suite_digests
     suite = lane["suite"]
     if not isinstance(suite, str):
         raise PlanError("UNKNOWN_SUITE", f"lane {lid}: suite must be the name of a shipped suite")
-    hashes = suite_digests(suite)                                   # refuses an unknown suite
     given_hashes = lane["suite_sha256"]
-    if not isinstance(given_hashes, dict) or given_hashes != hashes:
-        raise PlanError("SUITE_MISMATCH", f"lane {lid}: the plan pins the files of suite {suite!r} as {json.dumps(given_hashes, sort_keys=True)[:300]}, "
-                        f"the files this runner ships hash as {json.dumps(hashes, sort_keys=True)}: a suite or library that is not the reviewed one is refused before anything runs")
+    if for_verification:
+        # Verifying the lock of a finished run: the suite files are the ones THE PLAN pins (``suite_sha256``, part of the plan digest and bound into every assertion digest of the lane),
+        # never numbers the lock merely repeats, and never what this runner ships now (an older run used older files). Which files make a suite is the code's; their digests are the plan's.
+        names = set(suites.SUITES[suite]["files"]) if suite in suites.SUITES else None
+        if names is None:
+            raise PlanError("UNKNOWN_SUITE", f"lane {lid}: no suite named {str(suite)[:40]!r} is known to this runner")
+        if not isinstance(given_hashes, dict) or set(given_hashes) != names or not all(isinstance(v, str) and SHA256_RE.fullmatch(v) for v in given_hashes.values()):
+            raise PlanError("SUITE_PINS_MALFORMED", f"lane {lid}: the plan must pin exactly the files {sorted(names)} of suite {suite!r} by sha256")
+        hashes = dict(given_hashes)
+    else:
+        hashes = suite_digests(suite)                               # refuses an unknown suite
+        if not isinstance(given_hashes, dict) or given_hashes != hashes:
+            raise PlanError("SUITE_MISMATCH", f"lane {lid}: the plan pins the files of suite {suite!r} as {json.dumps(given_hashes, sort_keys=True)[:300]}, "
+                            f"the files this runner ships hash as {json.dumps(hashes, sort_keys=True)}: a suite or library that is not the reviewed one is refused before anything runs")
     if any(v == UI_ONLY for v in lane["probes"].values()):
         raise PlanError("BAD_PROBES", f"lane {lid}: a Robot lane's assertions are about what the target's API says: each needs a fact of the reference check, not {UI_ONLY!r}")
     if spec.steps:
@@ -248,7 +260,7 @@ def _lane_engine_rules(lane: Mapping[str, Any], spec: Any, assertions: List[Dict
     return suite, hashes
 
 
-def freeze_plan(up: Upstreams, plan_doc: Any) -> FrozenPlan:
+def freeze_plan(up: Upstreams, plan_doc: Any, *, for_verification: bool = False) -> FrozenPlan:
     lanes_in = _parse_structure(plan_doc)
     if len(json.dumps(plan_doc)) > MAX_PLAN_BYTES:
         raise PlanError("PLAN_TOO_LARGE", f"a plan is at most {MAX_PLAN_BYTES} bytes")
@@ -274,7 +286,7 @@ def freeze_plan(up: Upstreams, plan_doc: Any) -> FrozenPlan:
                 raise PlanError("DUPLICATE_ASSERTION", f"assertion id {a['assertion_id']!r} appears in lanes {seen_ids[key][1]!r} and {lid!r} (ids are compared without case): "
                                 "every frozen assertion is accounted exactly once")
             seen_ids[key] = (a["assertion_id"], lid)
-        suite_name, suite_hashes = _lane_engine_rules(lane, spec, assertions)
+        suite_name, suite_hashes = _lane_engine_rules(lane, spec, assertions, for_verification)
         materialise_spec(lane["spec"], "http://127.0.0.1:1")                 # the rule for {origin} that the run applies: a plan the run would refuse is refused here, before anything starts
         ids = {a["assertion_id"] for a in assertions}
         unknown_probe = sorted(set(lane["probes"]) - ids)
@@ -304,16 +316,25 @@ def freeze_plan(up: Upstreams, plan_doc: Any) -> FrozenPlan:
     return FrozenPlan(plan=copy.deepcopy(plan_doc), plan_id=plan_doc["plan_id"], lanes=tuple(frozen), pins=pin_summary(up), runner_version=K.RUNNER_VERSION)
 
 
-def thaw_lock(up: Upstreams, lock_doc: Any) -> FrozenPlan:
-    """Read a lock document: re-freeze the plan it carries and require every recorded digest and pin to be what that gives (no trust in the lock's own numbers)."""
+def thaw_lock(up: Upstreams, lock_doc: Any, *, for_verification: bool = False) -> FrozenPlan:
+    """Read a lock document: re-freeze the plan it carries and require every recorded digest and pin to be what that gives (no trust in the lock's own numbers).
+
+    ``for_verification`` is for reading the lock of a finished run on another machine or at another time: the suite file hashes are the ones the PLAN pins (``verify``
+    compares them with the copies in the bundle; they are part of the plan digest) and the tool versions the lock names are not required to be the ones loaded now (``verify`` reports a difference as a note);
+    every assertion, expected value, digest, pin and program hash is still recomputed and compared."""
     if not isinstance(lock_doc, dict) or lock_doc.get("schema") != K.LOCK_SCHEMA:
         raise PlanError("NOT_A_LOCK", f"this is not a {K.LOCK_SCHEMA} document")
     if lock_doc.get("schema_version") != K.PLAN_SCHEMA_VERSION:
         raise PlanError("UNSUPPORTED_LOCK_VERSION", f"unsupported schema_version {str(lock_doc.get('schema_version'))[:20]!r}: this runner reads {K.LOCK_SCHEMA} {K.PLAN_SCHEMA_VERSION} only"
                         + (" (a lock, or a bundle's plan lock, written by an older runner; run the plan again with this runner)" if lock_doc.get("schema_version") == "1.0" else ""))
-    again = freeze_plan(up, lock_doc.get("plan"))
-    if dumps_canonical(again.lock_document()) != dumps_canonical(lock_doc):
-        raise PlanError("LOCK_MISMATCH", "the lock does not equal the freeze of the plan it carries (an edited expected value, digest, pin or tool version)")
+    again = freeze_plan(up, lock_doc.get("plan"), for_verification=for_verification)
+    expected, got = again.lock_document(), dict(lock_doc)
+    if for_verification:
+        for tooling in ("pins", "runner_version"):
+            expected.pop(tooling, None)
+            got.pop(tooling, None)
+    if dumps_canonical(expected) != dumps_canonical(got):
+        raise PlanError("LOCK_MISMATCH", "the lock does not equal the freeze of the plan it carries (an edited expected value, digest, pin, tool version or suite hash)")
     return again
 
 

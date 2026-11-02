@@ -17,6 +17,8 @@ from qa_runner.procs import child_env
 from qr_support import fake, fake_robot, reap, run_limited
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
+COMMANDS = ["report", "inspect"] + (["verify"] if hasattr(K, "EXIT_REJECTED") else [])
+REJECTED = getattr(K, "EXIT_REJECTED", 1)         # 5 once `verify` exists (report and inspect exit with its status), 1 before
 
 
 def cli(tmp_path, *argv, timeout=60):
@@ -29,8 +31,14 @@ def bundle(up, tmp_path_factory):
     from qa_runner.golden import demo_plan
     from qa_runner.orchestrate import RunOptions, run_plan
     from qa_runner.plan import freeze_plan
-    s = run_plan(up, freeze_plan(up, demo_plan()), RunOptions(lane_command=fake("pass"), robot_launcher=fake_robot("live"), lane_deadline_s=60, run_id="r0-test"))
     target = tmp_path_factory.mktemp("rb") / "b"
+    try:
+        from qr_tamper import golden                       # from the part that has `verify`: the bundle of a real run
+        write_directory(golden("none"), str(target))
+        return target
+    except ImportError:
+        pass
+    s = run_plan(up, freeze_plan(up, demo_plan()), RunOptions(lane_command=fake("pass"), robot_launcher=fake_robot("live"), lane_deadline_s=60, run_id="r0-test"))
     write_directory(s.bundle.files, str(target))
     return target
 
@@ -57,9 +65,9 @@ def test_a_plan_that_is_not_a_small_regular_file_is_refused_by_every_command_tha
     assert time.monotonic() - t0 < 30 and not (tmp_path / "lock.json").exists() and not (tmp_path / "o").exists()
 
 
-@pytest.mark.parametrize("command", ["report", "inspect"])
+@pytest.mark.parametrize("command", COMMANDS)
 @pytest.mark.parametrize("kind", ["fifo", "devnull", "sparse-archive", "symlink", "missing"])
-def test_report_and_inspect_refuse_a_location_that_is_not_a_bundle_at_once(tmp_path, command, kind):
+def test_report_inspect_and_verify_refuse_a_location_that_is_not_a_bundle_at_once(tmp_path, command, kind):
     path = tmp_path / "loc"
     if kind == "fifo":
         os.mkfifo(path)
@@ -74,13 +82,13 @@ def test_report_and_inspect_refuse_a_location_that_is_not_a_bundle_at_once(tmp_p
     t0 = time.monotonic()
     code, out, err = cli(tmp_path, command, str(path))
     if kind == "sparse-archive":                              # a 3 GiB file is a location that opens: its size is a finding (ARCHIVE_TOO_LARGE), and none of it is read
-        assert code == 1 and "ARCHIVE_TOO_LARGE" in out, (code, out[:300])
+        assert code == REJECTED and "ARCHIVE_TOO_LARGE" in out, (code, out[:300])
     else:
         assert code == K.EXIT_USAGE and "BUNDLE_UNREADABLE" in err, (kind, code, err)
     assert time.monotonic() - t0 < 30
 
 
-@pytest.mark.parametrize("command", ["report", "inspect"])
+@pytest.mark.parametrize("command", COMMANDS)
 def test_a_special_or_huge_entry_inside_a_bundle_directory_is_a_finding_and_never_read(tmp_path, bundle, command):
     import shutil
     copy = tmp_path / "b"
@@ -90,8 +98,9 @@ def test_a_special_or_huge_entry_inside_a_bundle_directory_is_a_finding_and_neve
         fh.truncate(400 * 1024 * 1024)
     t0 = time.monotonic()
     code, out, err = cli(tmp_path, command, str(copy))
-    assert code == 1
-    assert ("SPECIAL_FILE" in out or "FAILED" in out) and time.monotonic() - t0 < 30
+    assert code == REJECTED
+    assert ("SPECIAL_FILE" in out or "FAILED" in out or "REJECTED" in out) and time.monotonic() - t0 < 30
+    assert "Verification : OK" not in out and "verification: OK" not in out
 
 
 def _script(tmp_path, command, seconds):
@@ -109,13 +118,13 @@ sys.exit(main([{command!r}, {str(bundle)!r}]))
     return script
 
 
-@pytest.mark.parametrize("command", ["report", "inspect"])
+@pytest.mark.parametrize("command", COMMANDS)
 def test_a_stalled_read_of_a_bundle_is_ended_at_the_deadline(tmp_path, command):
     code, out, err = run_limited([sys.executable, "-s", str(_script(tmp_path, command, 1.0))], timeout=40, env=child_env(str(tmp_path)))
     assert code == K.EXIT_USAGE and "BUNDLE_READ_TIMEOUT" in err
 
 
-@pytest.mark.parametrize("command", ["report", "inspect"])
+@pytest.mark.parametrize("command", COMMANDS)
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP])
 def test_a_cancel_while_a_bundle_is_read_ends_with_exit_3(tmp_path, command, sig):
     proc = subprocess.Popen([sys.executable, "-s", str(_script(tmp_path, command, 60.0))], env=child_env(str(tmp_path)), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
@@ -147,5 +156,5 @@ def test_report_and_inspect_read_the_bundle_once_into_a_snapshot_that_later_chan
     monkeypatch.setattr(isolated, "snapshot_bundle", snapshot_then_swap)
     out, err = io.StringIO(), io.StringIO()
     code = main(["inspect", str(copy)], out, err)
-    assert len(taken) == 1 and "verification: files, digests and accounting consistent" in out.getvalue()      # the snapshot verifies; the changed file on disk would not
-    assert "verdict: INCONCLUSIVE" in out.getvalue() and "lane browser:" in out.getvalue()      # the summary of the snapshot, not of the changed file
+    assert len(taken) == 1 and "verification: OK, internally consistent" in out.getvalue()      # the snapshot verifies; the changed file on disk would not
+    assert "verdict: " in out.getvalue() and "lane browser:" in out.getvalue()                  # the summary of the snapshot, not of the changed file

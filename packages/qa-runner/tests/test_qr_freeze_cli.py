@@ -186,22 +186,24 @@ def test_cancelling_during_the_first_lane_skips_the_second_and_still_accounts_fo
 
 # ---- report and inspect ------------------------------------------------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def bundle_dir(up, demo_frozen, tmp_path_factory):
-    s = two(up, demo_frozen, defect="discount")
+def bundle_dir(tmp_path_factory):
+    """The bundle `demo` wrote for the discount defect with the real engines (golden/regen_bundles.py): report and inspect are exercised over a real one."""
+    from qa_evidence.build import write_directory
+    from qr_tamper import golden
     target = tmp_path_factory.mktemp("bundle") / "b"
-    s.bundle.write_directory(str(target))
+    write_directory(golden("discount"), str(target))
     return target
 
 
 def test_report_text_is_the_evidence_report_and_exits_zero_for_a_bundle_that_verifies(bundle_dir):
     code, out, err = cli("report", str(bundle_dir))
-    assert code == 0 and "VERDICT AS RECORDED" in out and "INDEPENDENT VERDICT" not in out and "Verification : OK" not in out and "A-ORDER-RULE [robot] native=NATIVE_FAIL verdict=INCONCLUSIVE" in out and "does not mean the" in out and err == ""
+    assert code == 0 and "INDEPENDENT VERDICT" in out and "A-ORDER-RULE [robot] native=NATIVE_FAIL verdict=FAILED" in out and "does not mean the" in out and err == ""
 
 
 def test_report_json_carries_the_verification_and_the_summary(bundle_dir):
     code, out, err = cli("report", str(bundle_dir), "--format", "json")
     doc = json.loads(out)
-    assert code == 0 and doc["verification"]["ok"] is True and doc["summary"]["independent_verdict"]["outcome"] == "INCONCLUSIVE"
+    assert code == 0 and doc["verification"]["ok"] is True and doc["summary"]["independent_verdict"]["outcome"] == "FAILED"
 
 
 def test_report_html_is_one_file_with_no_script_and_a_content_security_policy(bundle_dir, tmp_path):
@@ -216,7 +218,7 @@ def test_report_with_a_plan_digest_says_whether_it_matches(bundle_dir):
     good = cli("report", str(bundle_dir), "--plan-digest", DEMO_PLAN_DIGEST)
     bad = cli("report", str(bundle_dir), "--plan-digest", "sha256:" + "0" * 64)
     assert good[0] == 0 and "matches the supplied value" in good[1]
-    assert bad[0] == 1 and "does NOT match" in bad[1] and "must not be relied on" in bad[2]
+    assert bad[0] == K.EXIT_REJECTED and "PLAN_DIGEST_MISMATCH" in bad[1] and "did not verify" in bad[2]
 
 
 def test_report_of_a_tampered_bundle_exits_one_and_warns(bundle_dir, tmp_path):
@@ -225,7 +227,7 @@ def test_report_of_a_tampered_bundle_exits_one_and_warns(bundle_dir, tmp_path):
     shutil.copytree(bundle_dir, copy)
     (copy / "lanes" / "robot" / "observations.json").write_bytes(b"{}\n")
     code, out, err = cli("report", str(copy))
-    assert code == 1 and "FAILED" in out and "WARNING: this bundle FAILED verification" in out and "must not be relied on" in err
+    assert code == K.EXIT_REJECTED and out.startswith("Recomputation : REJECTED") and "Verification : OK" not in out and "did not verify" in err
 
 
 def test_report_and_inspect_of_something_that_is_not_a_bundle_are_usage_errors(tmp_path):
@@ -234,8 +236,8 @@ def test_report_and_inspect_of_something_that_is_not_a_bundle_are_usage_errors(t
 
 def test_inspect_lists_the_files_the_tools_the_lanes_and_the_verdict_and_never_recomputes(bundle_dir):
     code, out, err = cli("inspect", str(bundle_dir))
-    assert code == 0 and "verification: files, digests and accounting consistent; NOT independently verified" in out and "verification: OK" not in out
-    assert "tools: " in out and "redevops-qa-verify" in out and "lane browser:" in out and "lane robot:" in out and "verdict: INCONCLUSIVE (" in out
+    assert code == 0 and "verification: OK, internally consistent" in out
+    assert "tools: " in out and "redevops-qa-verify" in out and "lane browser:" in out and "lane robot:" in out and "verdict: FAILED (ASSERTION_FAILED)" in out
     assert "native-artifact" in out and "lanes/robot/native/output.xml" in out and "plan.lock.json" in out and "files:" in out
 
 
@@ -245,7 +247,7 @@ def test_inspect_exits_one_for_a_bundle_that_does_not_verify(bundle_dir, tmp_pat
     shutil.copytree(bundle_dir, copy)
     (copy / "plan.lock.json").write_bytes(b"{}\n")
     code, out, err = cli("inspect", str(copy))
-    assert code == 1 and "verification: FAILED" in out
+    assert code == K.EXIT_REJECTED and "recomputation: REJECTED" in out and "verification: OK" not in out and "verdict:" not in out
 
 
 def test_chain_heads_are_read_from_the_run_record_as_stored():
@@ -268,17 +270,40 @@ def test_hostile_text_in_a_bundle_is_escaped_in_inspect(bundle_dir, tmp_path):
 
 
 # ---- review of #32: what report and inspect do not show, the run summary, the plan read, the origin rule --------------------------------------------
-def test_report_and_inspect_say_that_they_do_not_recompute_a_verdict(bundle_dir, tmp_path):
-    """Review finding H1: `report` printed 'Verification : OK ... VERIFIED' for a bundle whose verdicts nobody had recomputed."""
-    code, out, err = cli("report", str(bundle_dir))
-    assert code == 0 and out.splitlines()[0].startswith("Verdicts      : verdicts NOT recomputed by this command")
-    doc = json.loads(cli("report", str(bundle_dir), "--format", "json")[1])
-    assert doc["verdicts_recomputed"] is False and "NOT recomputed" in doc["notice"]
+def forged_bundle(up, tmp_path):
+    """The bundle of the discount run with the failing verdict reported as VERIFIED by this package's own report builder, so every digest, count and the manifest agree (a forgery that the
+    bundle's own checks cannot see)."""
+    from qa_evidence.build import write_directory
+    from qr_tamper import golden
+    from qr_tamper_cases import CASES
+    case = next(c for c in CASES if c.name.startswith("forged PASS: the report recomputed by the library"))
+    target = tmp_path / "forged"
+    write_directory(case.mutate(up, golden(case.base)), str(target))
+    return target
+
+
+def test_report_and_inspect_recompute_the_verdicts_and_do_not_print_ok_for_evidence_verify_rejects(up, bundle_dir, tmp_path):
+    """Review finding H1: for a forged bundle `verify` exited 5 while `report` printed 'Verification : OK - internally consistent ... VERIFIED' and exited 0."""
+    forged = forged_bundle(up, tmp_path)
+    code, out, err = cli("report", str(forged))
+    assert code == K.EXIT_REJECTED and "REJECTED: the bundle does not verify" in out.splitlines()[0] and "VERDICT_RECOMPUTE_MISMATCH" in out.splitlines()[0] and "did not verify" in err
+    assert "Verification : OK" not in out and "INDEPENDENT VERDICT" not in out and "ALL_ASSERTIONS" not in out          # retest N5: nothing of the forged body is shown next to the rejection
+    code, out, err = cli("inspect", str(forged))
+    assert code == K.EXIT_REJECTED and "recomputation: REJECTED" in out.splitlines()[1] and "verification: OK" not in out
+    doc = json.loads(cli("report", str(forged), "--format", "json")[1])
+    assert doc["recomputation"]["accepted"] is False and "VERDICT_RECOMPUTE_MISMATCH" in {f["code"] for f in doc["recomputation"]["findings"]}
+    assert doc["content_trusted"] is False and doc["verification"] == {"ok": False} and "summary" not in doc          # the old keys do not say OK next to a rejection
     html_file = tmp_path / "r.html"
-    assert cli("report", str(bundle_dir), "--format", "html", "-o", str(html_file))[0] == 0
-    assert 'banner warn">verdicts NOT recomputed' in html_file.read_text()
-    code, out, err = cli("inspect", str(bundle_dir))
-    assert out.splitlines()[2].startswith("verdicts: NOT recomputed by this command")
+    assert cli("report", str(forged), "--format", "html", "-o", str(html_file))[0] == K.EXIT_REJECTED
+    assert 'banner bad">REJECTED' in html_file.read_text()
+
+
+def test_report_and_inspect_say_what_was_recomputed_for_a_bundle_that_verifies(bundle_dir):
+    code, out, err = cli("report", str(bundle_dir))
+    assert code == 0 and out.splitlines()[0] == "Recomputation : verdicts recomputed from the bundle alone: 4 of 4 agree with the report (ACCEPTED as internally consistent)"
+    doc = json.loads(cli("report", str(bundle_dir), "--format", "json")[1])
+    assert doc["verdicts_recomputed"] is True and doc["recomputation"]["accepted"] is True and doc["recomputation"]["recomputed_assertions"] == 4
+    assert cli("inspect", str(bundle_dir))[1].splitlines()[2].startswith("recomputation: verdicts recomputed from the bundle alone: 4 of 4 agree")
 
 
 def test_the_run_summary_says_that_integrity_against_re_forging_is_not_established(up, demo_frozen):
@@ -324,30 +349,3 @@ def test_run_and_demo_say_right_under_the_outcome_that_no_command_recomputes_the
     _print_summary(two(up, demo_frozen), Path("/x"), buf)
     lines = buf.getvalue().splitlines()
     assert lines[0].startswith("run r0-test:") and RUNNER_ONLY in lines[2] and "not an independent verification" in RUNNER_ONLY
-
-
-def test_report_and_inspect_do_not_show_a_verification_ok_or_a_trusted_content_before_verify_exists(bundle_dir, tmp_path):
-    """Round 2 R2-3: below the first-line caveat the body still said `Verification : OK`, JSON `content_trusted: true`, and the HTML had a green `Verification: OK` banner."""
-    out = cli("report", str(bundle_dir))[1]
-    assert "Verification : OK" not in out and "Verification : files, digests and accounting are consistent; the verdicts were NOT recomputed" in out and "INDEPENDENT VERDICT" not in out
-    assert "Verified means the assertions were evaluated by an independent verifier" not in out
-    doc = json.loads(cli("report", str(bundle_dir), "--format", "json")[1])
-    assert doc["content_trusted"] is False and doc["verdicts_recomputed"] is False
-    html_file = tmp_path / "r.html"
-    assert cli("report", str(bundle_dir), "--format", "html", "-o", str(html_file))[0] == 0
-    page = html_file.read_text()
-    assert 'banner ok">Verification' not in page and "Verification: OK" not in page and "Independent verdict" not in page and "Verification: files, digests and accounting are consistent" in page
-    assert "OK" not in cli("inspect", str(bundle_dir))[1].splitlines()[1]
-
-
-def test_a_demo_report_is_not_labelled_independent_before_verify_exists(up, demo_frozen, tmp_path, monkeypatch):
-    """Round 2 R2-3: the report `demo` prints after the run said `INDEPENDENT VERDICT` and `Verified means ... an independent verifier`."""
-    import argparse
-    from qa_runner import cli as cli_module
-    s = two(up, demo_frozen)
-    monkeypatch.setattr(cli_module, "run_plan", lambda *a, **k: s)
-    out, err = io.StringIO(), io.StringIO()
-    args = argparse.Namespace(out=str(tmp_path / "o"), run_id="r0-test", defect="none", lane_deadline=None)
-    cli_module._execute(demo_frozen, args, out, err, report_text=True)
-    text = out.getvalue()
-    assert "VERDICT AS RECORDED" in text and "INDEPENDENT VERDICT" not in text and "Verified means" not in text and "Verification : OK" not in text and cli_module.RUNNER_ONLY in text

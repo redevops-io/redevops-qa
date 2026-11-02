@@ -192,7 +192,8 @@ def test_the_command_line_demo_end_to_end_in_a_scrubbed_environment(tmp_path):
         out = tmp_path / f"out-{defect}"
         done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "demo", "--out", str(out), "--defect", defect], env=env, cwd=str(tmp_path), capture_output=True, text=True, timeout=240)
         assert done.returncode == code and f": {outcome} (" in done.stdout, done.stdout + done.stderr
-        assert "VERDICT AS RECORDED" in done.stdout and "INDEPENDENT VERDICT" not in done.stdout and "not recomputed by any command" in done.stdout and "lane browser:" in done.stdout and "lane robot:" in done.stdout
+        assert "INDEPENDENT VERDICT" in done.stdout and "lane browser:" in done.stdout and "lane robot:" in done.stdout
+        assert "re-verification in a fresh process (the same code as the run, not independent code): ACCEPTED as internally consistent; 4 of 4 verdict(s) recomputed from the bundle alone agree with the report" in done.stdout
         (bundle,) = list(out.iterdir())
         assert subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle)], env=env, capture_output=True, timeout=60).returncode == 0
         report = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "report", str(bundle)], env=env, capture_output=True, text=True, timeout=60)
@@ -211,6 +212,35 @@ def test_freeze_then_run_the_lock_end_to_end(tmp_path):
     (bundle,) = list((tmp_path / "o").iterdir())
     verify = subprocess.run([sys.executable, "-s", "-m", "qa_evidence", "verify", str(bundle), "--plan-digest", digest], env=env, capture_output=True, text=True, timeout=60)
     assert verify.returncode == 0 and "matches the supplied value" in verify.stdout
+    manifest = [l for l in done.stdout.splitlines() if "manifest digest:" in l][0].split("manifest digest: ")[1].split()[0]
+    redevops = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "verify", str(bundle), "--anchor", manifest, "--plan-digest", digest, "--require-anchor", "--require-plan-digest"],
+                              env=env, capture_output=True, text=True, timeout=120)
+    assert redevops.returncode == 0 and "ACCEPTED" in redevops.stdout and "matches the supplied value" in redevops.stdout, redevops.stdout + redevops.stderr
+    wrong = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "verify", str(bundle), "--anchor", "sha256:" + "0" * 64], env=env, capture_output=True, text=True, timeout=120)
+    assert wrong.returncode == 5 and "REJECTED" in wrong.stdout and "ANCHOR_MISMATCH" in wrong.stdout
+
+
+@pytest.mark.parametrize("cap", [1_200, 5_000, 20_000, 60_000, 100_000, 150_000, 190_000])
+def test_a_run_over_the_evidence_cap_is_an_incomplete_result_with_exit_3_and_its_own_re_verification_accepts_it(tmp_path, cap):
+    """Retest R2-1: the run's own re-verification rejected an over-cap run (exit 5, NATIVE_STATUS_RELABELLED / RUN_RECORD_MISSING_BLOB). Both real engines, the cap cutting the browser lane, the Robot
+    lane or both; the result is the decided one: incomplete, never VERIFIED, exit 3, and `verify` over the written bundle gives the same."""
+    env = {**child_env(str(tmp_path)), "REDEVOPS_QA_MAX_EVIDENCE_BYTES": str(cap)}
+    out = tmp_path / "out"
+    done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "demo", "--out", str(out)], env=env, cwd=str(tmp_path), capture_output=True, text=True, timeout=240)
+    assert done.returncode == K.EXIT_ENVIRONMENT, done.stdout + done.stderr
+    assert "re-verification in a fresh process" in done.stdout and "ACCEPTED as internally consistent" in done.stdout and "REJECTED" not in done.stdout, done.stdout
+    assert "VERIFIED (ALL_ASSERTIONS_VERIFIED)" not in done.stdout
+    (bundle,) = list(out.iterdir())
+    again = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "verify", str(bundle), "--json"], env=env, capture_output=True, text=True, timeout=120)
+    doc = json.loads(again.stdout)
+    assert again.returncode == K.EXIT_ENVIRONMENT and doc["accepted"] is True and doc["exit_code"] == K.EXIT_ENVIRONMENT and doc["findings"] == [] and doc["run_outcome"]["outcome"] != "VERIFIED"
+    assert any("INCOMPLETE" in n for n in doc["notes"])
+
+
+def test_a_run_below_the_cap_is_unchanged_by_the_cap_setting(tmp_path):
+    env = {**child_env(str(tmp_path)), "REDEVOPS_QA_MAX_EVIDENCE_BYTES": str(100 * 1024 * 1024)}
+    done = subprocess.run([sys.executable, "-s", "-m", "qa_runner", "demo", "--out", str(tmp_path / "out")], env=env, cwd=str(tmp_path), capture_output=True, text=True, timeout=240)
+    assert done.returncode == 0 and "VERIFIED (ALL_ASSERTIONS_VERIFIED)" in done.stdout and "ACCEPTED as internally consistent" in done.stdout
 
 
 @pytest.mark.parametrize("cap", list(range(196_000, 210_001, 1_000)))

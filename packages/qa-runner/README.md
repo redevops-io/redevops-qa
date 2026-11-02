@@ -1,8 +1,8 @@
 # qa-runner
 
 The `redevops-qa` command: it checks a machine (`doctor`), freezes a test plan (`freeze`), runs a frozen plan against the fixture app and writes an evidence bundle (`run`),
-reports and inspects a bundle (`report`, `inspect`) and does all of that in one step for the built-in two-lane plan (`demo`). `verify`, the separate-process re-verification, follows in
-the next part of this work. A plan holds a Playwright Chromium lane (`examples/golden-plan.json`), a Robot Framework lane (`examples/robot-plan.json`) or both, run one after the other
+re-verifies a finished run from its bundle alone (`verify`), reports and inspects a bundle (`report`, `inspect`) and does all of that in one step for the built-in two-lane plan (`demo`).
+A plan holds a Playwright Chromium lane (`examples/golden-plan.json`), a Robot Framework lane (`examples/robot-plan.json`) or both, run one after the other
 (`examples/demo-plan.json`).
 
 Licence: the family licence of this repository (source-available, not open source; see `LICENSE.md`). Standard library and the repository's own packages
@@ -18,6 +18,7 @@ Appium are not part of this workflow. Nothing here has been run on any other pla
 redevops-qa doctor [--plan PLAN] [--json]
 redevops-qa freeze PLAN --out LOCK
 redevops-qa run PLAN_OR_LOCK --out DIR [--defect none|discount|settings] [--run-id ID] [--lane-deadline SECONDS]
+redevops-qa verify BUNDLE [--anchor sha256:HEX] [--plan-digest sha256:HEX] [--require-anchor] [--require-plan-digest] [--json]
 redevops-qa demo [--out DIR] [--defect none|discount|settings] [--run-id ID] [--lane-deadline SECONDS]
 redevops-qa report BUNDLE [--format text|json|html] [-o FILE] [--anchor sha256:HEX] [--plan-digest sha256:HEX]
 redevops-qa inspect BUNDLE [--anchor sha256:HEX] [--plan-digest sha256:HEX]
@@ -41,9 +42,16 @@ The summary `run` prints says in its second line that integrity against delibera
 **`demo`** is `freeze` and `run` on the built-in plan (browser lane, then Robot lane, one target, one run id) followed by the full report. It prints no plan digest comparison: a digest
 computed by the process that ran the plan would only match itself.
 
-**`report`** and **`inspect`** read a bundle (directory or archive) through ONE snapshot taken by a killable child process (`isolated.snapshot_bundle`; REDEVOPS_QA_BUNDLE_READ_TIMEOUT, default 120 s; a cancel ends with exit 3), so the verification, the summary and the chain heads see the same bytes whatever happens to the files afterwards, and through `qa-evidence`: they check the bundle's own consistency (files, digests, accounting), never recompute a verdict and SAY SO at the top of what they print (text, the `verdicts_recomputed: false` field of the JSON, an HTML banner; `verify`, the next part, recomputes them), escape every string that came from the
-bundle, and exit 0 only if the bundle verified as internally consistent (1 if not, 2 if it cannot be opened). `report` renders text, JSON or one HTML file with no script and a
-content-security policy; `inspect` lists the files with roles and digests, the tool versions, the lanes and the heads of the chains inside each harness run record.
+**`report`** and **`inspect`** read a bundle (directory or archive) through ONE snapshot taken by a killable child process (`isolated.snapshot_bundle`; `REDEVOPS_QA_BUNDLE_READ_TIMEOUT`, default 120 s; a
+cancel ends with exit 3) and run `verify` over that same snapshot. For a bundle that `verify` accepts, what they print starts with the result of the recomputation (the first line of `report`, the second
+of `inspect`, a banner of the HTML, `recomputation` and `verdicts_recomputed` in the JSON). For a bundle that `verify` rejects they exit 5 and show NOTHING of what the bundle says: no "Verification: OK", no
+outcome, no summary; the JSON carries `content_trusted: false`, `verification: {ok: false}` and the findings. 2 if the location cannot be opened. Every string that came from the bundle is escaped. `report`
+renders text, JSON or one HTML file with no script and a content-security policy; `inspect` lists the files with roles and digests, the tool versions, the lanes and the heads of the chains inside each
+harness run record.
+
+**`verify`** re-verifies a finished run from its bundle alone, offline, in a process of its own (see "What verification does and does not prove" below). Exit status: for an accepted bundle
+the same table as `run` (0 VERIFIED, 1 FAILED, 3 a lane did not complete, 4 inconclusive); **5 when any finding rejects the evidence**; 2 when the bundle cannot be opened; 7 when the verifier itself cannot run here. `run` and
+`demo` end by calling `verify` in a separate interpreter (fresh environment, no state shared) and exit 5 if it does not accept what they just wrote. That second pass is a RE-verification in a fresh process by the SAME code the run uses (`judge_lane`, `finalize_results`, the `native_from_*` functions are shared): it catches what was written wrongly or changed on the way to disk, it is not an independent implementation of the verdicts. The word "independent" in this package means independent of the ENGINE's own status and, for the probes, of the engines' code (the reference check), nothing more.
 
 **`run`** freezes the plan (or reads a lock), starts the fixture app on loopback with the defect you name, runs each lane as a supervised child process, stops
 the app, and writes the bundle to `DIR/<run id>` (a directory that must not exist; it is reserved before anything runs and the bundle is renamed into place, so a reader sees no bundle or a whole one). It prints the outcome, what each engine reported, what the independent
@@ -56,7 +64,9 @@ verdicts are, the plan digest (the value to give `verify --plan-digest`) and the
 | 2 | the plan, the lock or an option was refused before anything ran |
 | 3 | a lane did not run to completion (error, timeout, cancelled, unavailable), or the environment cannot provide what the run needs |
 | 4 | inconclusive: every lane completed but not every assertion is verified, or an engine and the verifier disagree (`NATIVE_FAIL_VERIFIED_ASSERTIONS`) |
+| 5 | `verify` rejected the evidence (any finding), including the verification a run does of its own bundle |
 | 6 | an internal error of the runner (a crash is never reported as a product failure) |
+| 7 | `verify` only: the verifier itself cannot run here (a pinned dependency or git is missing); nothing was verified, which says nothing about the bundle (the JSON is still printed, with `assurance: not-verified`) |
 
 ## The plan
 
@@ -146,7 +156,7 @@ native status that says so; its assertions are `INCONCLUSIVE`; the run is never 
 
 Two mechanisms, for two kinds of files.
 
-* **Paths a user supplies** (a plan or lock, a bundle to report or inspect, and from the next part a bundle to verify) are read by a child process (`isolated.py`, `read_worker.py`): the parent holds nothing but what
+* **Paths a user supplies** (a plan or lock, and a bundle to `verify`, `report` or `inspect`) are read by a child process (`isolated.py`, `read_worker.py`): the parent holds nothing but what
   came through a pipe, stops taking bytes at the cap (and kills the child), stops waiting at a wall-clock deadline (`REDEVOPS_QA_READ_TIMEOUT`, default 30 s; bundles `REDEVOPS_QA_BUNDLE_READ_TIMEOUT`, default
   120 s) and kills the child, and on SIGINT, SIGTERM or SIGHUP kills the child and ends with exit 3. The child opens the path without blocking (`O_NONBLOCK`), `fstat`s the same descriptor and refuses anything
   that is not a regular file (a FIFO, a device, a directory: never read, `/dev/zero` included), refuses a file above the cap before reading, and reads with a running total (a growing file stops at the cap).
@@ -169,7 +179,7 @@ Two mechanisms, for two kinds of files.
 
 **Tested** (each in a child with a hard timeout and, where the platform enforces one, an address-space cap; none opens an unbounded source): a reading child that never answers is killed at the deadline and is
 gone; a child that writes without end is stopped at the byte cap; SIGINT, SIGTERM, SIGHUP end the wait and the child; refusals of a FIFO with no writer, a FIFO with a capped writer (nothing is consumed), a
-character device, a symlink, a sparse file of 300 MiB, a size that lies at the open and a growing file; the same for `run` and `doctor --plan`; the evidence budget and its fallback; the reference check against a
+character device, a symlink, a sparse plan or lock of 300 MiB, a sparse bundle archive of 3 GiB and a sparse bundle member of 400 MiB (a finding, never read), a size that lies at the open and a growing file; the same for `run`, `doctor --plan`, `verify`, `report` and `inspect` (a stalled bundle read ends at the deadline, a cancel during it ends with exit 3); the evidence budget and its fallback (a run over the cap is an incomplete result, exit 3, that its own re-verification and `verify` accept as such: both real engines at seven caps, the Robot lane cut at the lowest ones); the reference check against a
 capped 64 MiB answer, a one-byte-at-a-time body, dripped headers and a cancel during a stall.
 **Not tested, only inferred:** a child blocked in UNINTERRUPTIBLE kernel I/O on a hard-hung network or FUSE mount. SIGKILL is sent and the parent does not wait for the child past a short grace, but the
 process itself may stay until the kernel returns the I/O (a subprocess timeout does not guarantee that every blocked kernel operation ends). No test has a stalled mount; the "never answers" child is a stand-in.
@@ -195,6 +205,92 @@ logs/                                  orchestration log, tails of the lane outp
 ```
 
 Plus the files `qa-evidence` writes: `report.json`, `bundle-manifest.json`, `assertion-lock.json`, `BUNDLE-FORMAT.txt`.
+
+## What verification does and does not prove
+
+`redevops-qa verify BUNDLE` (a directory or the canonical archive) takes nothing from the run: it reads the bundle ONCE into a snapshot (a child process, killed at the deadline) and computes everything from that snapshot, so a writer that changes the files while it runs cannot make two checks see two bundles; it opens no socket and imports no browser or Robot Framework package. It is not
+dependency-free: it needs the pinned runtime-contracts and agent-harness trees (checked with `git`, so `git` and clean checkouts of the pins), PyYAML (the check-program registry imports it), and its
+output depends on `PATH` and the `REDEVOPS_QA_*` / `QA_PIN_*` variables that name the pins; the pinned harness imports the standard library's HTTP client modules when it is imported (a test shows
+that nothing connects). It re-computes, and reports a finding for any difference:
+
+1. every file digest and size, the manifest and the report schema, the accounting (every frozen assertion exactly once), the lane ids and run ids, and the external anchor and plan digest if you
+   supply them (`qa-evidence`);
+2. the frozen plan: `plan.lock.json` is re-frozen with the pinned runtime-contracts and harness parsers (unknown fields refused) and must equal itself, the report's frozen set and the
+   assertion lock, with every expected value, digest, assertion-set pin and check-program hash recomputed; the suite files in the bundle must be the ones THE PLAN pins (`suite_sha256`, part of the
+   plan digest) and the pins must name exactly the files of the suite (a lock with no pins, or other pins, is `LOCK_REJECTED`); a version of the runner that ships other suite files than the plan
+   pins is a note, not a finding (an older run used older files);
+3. **every verdict**, from the files in the bundle: the recorded browser observations against the frozen assertions, and for the Robot lane the hash-pinned check program over a record that
+   must be exactly what the importer derives from the engine's own `output.xml` in the bundle. A report that says something else is `VERDICT_RECOMPUTE_MISMATCH`;
+4. each lane's **native status**, re-derived from the engine's own files (the harness outcome and exit code, the Robot adapter result and the test statuses of `output.xml`); a native FAIL
+   written as a PASS is `NATIVE_STATUS_RELABELLED`; an engine status this verifier does not map is never read as a pass;
+5. each browser lane's **harness run record**: the event and receipt chains, the manifest, the blobs it refers to (a missing or altered blob is `RUN_RECORD_MISSING_BLOB` / `RUN_RECORD_BLOB_CONTENT`),
+   the run id, the frozen assertion pin, the executed spec (rebuilt from the frozen template and the allowed origin), that the `AssertionResult` events are the results its manifest lists and
+   that the seal and the manifest carry the classification the record states (`RUN_RECORD_CONTRADICTS_ITSELF`), and that every observation equals what the record says was read;
+6. the **egress profile** of a browser lane is exactly the one the plan's profile gives for the origin it names, the lock's tool versions and runner version are well-formed, and the bundle holds no
+   file that no run of its plan writes (`UNEXPECTED_FILE`: a lane directory that is not in the plan, a hidden log).
+
+A bundle whose report says a test double produced a lane is rejected (`TEST_DOUBLE_BUNDLE`): a double carries no verdict. Whatever else goes wrong inside the verification, on a bundle built to cause it,
+is `VERIFY_INCOMPLETE` and exit 5, never an internal error.
+
+An observation row or record that carries a field an adapter has no business writing (a verdict, a `verified` claim, an expected value) is unusable evidence: the assertion is `INCONCLUSIVE`.
+
+What an accepted bundle means, and what it does not:
+
+* **Without `--anchor`, accepted means INTERNALLY CONSISTENT, nothing more.** The hashes and the manifest are unkeyed. They detect accidental changes and partial edits. They do not detect a bundle
+  that was rewritten consistently from start to finish by someone who can rewrite all of it: the product's own builder would produce the same bytes from forged inputs, and the tamper suite shows
+  it (`tests/test_qr_tamper_suite.py`): the failing lane dropped, an assertion weakened, or the engine's own report rewritten to say the rule held, with every digest recomputed, is accepted as
+  internally consistent and says so (the engine's report now has to be rewritten together with the engine's summary, the adapter result that names both by hash, the observation record and the
+  target's reference check: more work than before, not a different class of forgery). Only a manifest digest obtained from a place the forger cannot write (`--anchor`; the CI artifact attestation planned for the release job publishes it) rejects
+  those. `verify` never calls a match with a value you supplied proof that the value is trustworthy.
+* **`--plan-digest` closes the gaps in the PLAN and no other.** The plan digest printed by `freeze` (record it outside the bundle) covers every assertion, its expected value and, bound into each
+  assertion's digest, the whole definition of its lane: the spec with its steps, the egress profile, the deadline, the request expectations and probes, the reviewed Robot suite and the sha256 of its
+  files, and the plan id and target. A bundle whose plan was changed in any of those fails with it. It cannot reject a forgery that left the plan alone.
+* **Two partial backstops that need no anchor:** an engine that said FAIL while every assertion verifies makes the run `INCONCLUSIVE` (`NATIVE_FAIL_VERIFIED_ASSERTIONS`), so weakening an assertion
+  without also rewriting the engine's files does not give a VERIFIED run; and the harness run record is checked against itself (chains, seal, manifest, blobs, and the events against the manifest), so
+  a forger must rewrite the manifest, the seal and every event that contradicts them, not only recompute the chain.
+* **It does not establish that the application is correct.** It shows that the frozen assertions hold (or fail) over the recorded observations, and that the bundle is what it says. It does not re-drive the
+  browser or the application and it does not show that a suite recorded what it observed (the target's request log and the frozen suite hashes are the only evidence of that).
+* **Not covered:** verification with other pinned versions of runtime-contracts or agent-harness than the ones that wrote the bundle is reported as a note (every digest is re-derived with the tools loaded
+  here, and they must agree); a check program changed since the run makes older bundles fail to verify (`PROGRAM_HASH_MISMATCH`), by design; a reviewed suite changed since the run does not (the plan carries its own pins), and `verify` says so
+  in a note.
+* **The offline mutation suite cannot reach the end-to-end tests** (`-m e2e` is an unknown marker under its strict configuration), so no mutant covers process cleanup end to end; the end-to-end job
+  runs those tests unmutated.
+
+### A run that hit the evidence cap
+
+A run whose lanes' files did not fit `REDEVOPS_QA_MAX_EVIDENCE_BYTES` is an explicit INCOMPLETE result: the lane that lost files is an engine error `evidence-over-cap`, the report says `extensions.evidence_incomplete`,
+the bundle lists what it did not keep (`logs/evidence-not-kept.json`), the run is never VERIFIED and its exit status is 3. `verify` (and the run's own re-verification) accepts exactly that, with a note, and the
+same exit status 3. What it tolerates, and nothing else: a lane the report itself declares `evidence-over-cap` (and only when `evidence_incomplete` is there too) may differ from what its files say, because it can
+only LOWER the result; a file the list names may be absent (a reviewed suite file, a blob the run record points at: matched by name, one finding per blob); a blob that is missing and not listed, a lane reported as
+completed that its files contradict, a VERIFIED run that says its evidence is incomplete, a changed file that was kept, a list that is not of the shape the runner writes, or a list in a bundle that does not say
+it is incomplete are findings. Round 3 tightened the tolerance: a lane declared `evidence-over-cap` must really have lost something (a file of that lane is listed and absent, or the lane's own result file is missing), the count in
+`extensions.evidence_incomplete` must equal the length of the list (`EVIDENCE_OVER_CAP_NOT_SUPPORTED` otherwise), the list must be in the sorted, unique form the runner writes, and every file a run of the
+plan always writes must be in the bundle or listed (`EXPECTED_FILE_MISSING`): the orchestrator's log and the target's request log; for a lane that completed or is over the cap, its egress profile, its
+request-log window, the browser lane's gateway and guard logs, the Robot lane's suite copies (and, for a completed lane, the engine's own files). A lane that did not complete for another reason (a
+timeout, a cancel, a target that never started) wrote whatever it got to: nothing is required of it.
+Round 4: ONE rule covers every way the budget can keep something out. `bundle.finalize_results` (the builder and `verify` call the same function) turns every VERIFIED assertion into `INCONCLUSIVE`
+with the reason `EVIDENCE_INCOMPLETE` whenever the report says `evidence_incomplete`, so a cap that drops only a run-level file (the target's own request log belongs to no lane) gives an INCONCLUSIVE run with
+exit 3, never VERIFIED; `verify` recomputes the same downgrade and accepts it. A name in the list must be a file a run of the plan can write (the expected set, or a blob of a browser lane); a fabricated
+name is `NOT_KEPT_MALFORMED`; a listed blob must also be one the lane's kept run record refers to (its digest appears in the record), so a made-up hex name does not count as something the lane lost.
+
+Limits of this tolerance, stated plainly (each needs a rewrite of the whole bundle; only `--anchor`, a manifest digest supplied from outside, rejects all of them; `--plan-digest` does NOT, because these forgeries leave the plan untouched and its digest matches):
+* A bundle that is rebuilt consistently by the product's own builder can declare a lane `evidence-over-cap` (or any non-complete status) with a matching list and thereby lower a FAILED or VERIFIED run to
+  INCONCLUSIVE, exit 3, without an anchor. The result can only be lower; the orchestrator's log is not used to corroborate it (the Robot lane's over-cap label can come from the parent's budget, which the
+  child's log lines do not carry), so it is documented rather than checked.
+* Files an over-cap lane's own run wrote and that are not in the required set can be deleted without being listed: the browser lane's `lane-result.json` and `run-record.json`, the stdout and stderr tails
+  (`logs/<lane>.stdout.txt`, `.stderr.txt`) and `observations.json`. A missing `lane-result.json` or `run-record.json` makes the lane's assertions inconclusive anyway; the tails and the observations
+  are not read by a verdict of an incomplete lane.
+* A run-level declaration (`evidence_incomplete` with a legal name that is in fact present) is not checked against an absence: only a lane declared over the cap must have lost something. It can only lower
+  a VERIFIED run to INCONCLUSIVE/3; a FAILED run stays FAILED.
+* `EVIDENCE_INCOMPLETE` was added to qa-evidence's closed list of INCONCLUSIVE reasons without a format version (as `TEST_DOUBLE` and `NATIVE_FAIL_VERIFIED_ASSERTIONS` were before): an older qa-evidence
+  refuses a bundle that uses it. Note it when the format is frozen.
+The list is written by the same run as everything else: without an anchor it shows nothing a forger could not also write, but with it a forger gains no higher status.
+
+## Reading limits: tested and inferred (summary)
+
+Tested: the byte cap, the deadline, the refusals and the cancel paths of every read of a user-supplied path (`freeze`, `run`, `doctor --plan`, `report`, `inspect`, `verify`), the kill of a reading child that
+never answers, the evidence budget, the single snapshot (a writer that swaps the files after it was taken changes nothing). Inferred, not tested: a child stuck in uninterruptible kernel I/O on a hard-hung mount
+may outlive its SIGKILL (the parent does not wait for it past a short grace); a subprocess timeout does not guarantee that every blocked kernel operation ends. See "Bounded reads".
 
 ## What this does not show
 

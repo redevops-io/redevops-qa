@@ -73,8 +73,8 @@ def test_rows_that_are_not_rows_are_not_recorded_and_leave_everything_inconclusi
 @pytest.mark.parametrize("outcome,reason,status", [("PASS", None, "NATIVE_PASS"), ("PRODUCT_FAIL", None, "NATIVE_FAIL"), ("ENVIRONMENT_FAIL", "LANE_DEADLINE", "NATIVE_TIMEOUT"),
                                                   ("ENVIRONMENT_FAIL", None, "NATIVE_ERROR"), ("WHATEVER", None, "NATIVE_ERROR")])
 def test_the_engine_status_comes_from_the_executors_own_outcome(outcome, reason, status):
-    from qa_runner.orchestrate import _native_from_harness
-    assert _native_from_harness(outcome, reason)[0] == status
+    from qa_runner.natives import native_from_harness
+    assert native_from_harness(outcome, reason)[0] == status
 
 
 def test_a_gateway_that_cannot_start_fails_the_lane_closed_and_no_browser_is_started(up, golden_frozen):
@@ -306,6 +306,8 @@ def test_a_run_over_its_evidence_budget_keeps_what_fits_says_so_and_is_never_a_c
     kept = [p for p in s.bundle.files if "/blobs/" in p]
     assert 0 < len(kept) < 20 and sum(len(s.bundle.files[p]) for p in kept) <= 450_000          # the evidence that fits is in the bundle
     assert verify_files(s.bundle.files).ok and "evidence budget of 450000 bytes is used up" in s.bundle.files["logs/orchestrator.log"].decode()
+    listed = json.loads(s.bundle.files[K.NOT_KEPT_PATH])["names"]                  # retest R2-1: the bundle names what it did not keep (verify tolerates exactly these, in the lane that hit the cap)
+    assert listed and all(n.startswith("lanes/browser/native/") or n.startswith("logs/") for n in listed) and not any(n in s.bundle.files and s.bundle.files[n] for n in listed)
 
 
 def test_the_evidence_budget_is_configurable_and_the_default_is_conservative(up, golden_frozen, monkeypatch):

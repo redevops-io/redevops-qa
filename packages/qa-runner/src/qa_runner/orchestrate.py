@@ -35,6 +35,8 @@ from .egress import policy_config
 from .errors import EnvironmentFault, PlanError
 from .corroborate import REFERENCE_CHECK_PATH, request_log_path
 from .judge import observation_document, observation_path
+from .exits import exit_code_for  # noqa: F401  (kept importable from here)
+from .natives import native_from_harness
 from .safe_read import Budget, UnsafeRead, read_regular
 from .plan import FrozenLane, FrozenPlan, materialise_spec
 from . import limits
@@ -90,34 +92,12 @@ class RunSummary:
     cancelled: bool
 
 
-def exit_code_for(report: Mapping[str, Any], cancelled: bool = False) -> int:
-    outcome = report["verdict"]["outcome"]
-    if outcome == "VERIFIED":
-        return K.EXIT_VERIFIED
-    if outcome == "FAILED":
-        return K.EXIT_FAILED
-    if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]) or "evidence_incomplete" in (report.get("extensions") or {}):
-        return K.EXIT_ENVIRONMENT                  # incomplete evidence (the evidence cap) is a limit of the run, not a lane that completed with an unproven assertion
-    return K.EXIT_INCONCLUSIVE
-
-
 def _read_bounded(path: Path, limit: int, root: Optional[str] = None) -> Optional[bytes]:
     """A file a lane or the target wrote: read through ``safe_read`` (one descriptor, regular files only, no symlink, byte and time caps), or ``None``."""
     try:
         return read_regular(str(path), max_bytes=limit, deadline_s=10.0, follow_symlinks=False, root=root)
     except UnsafeRead:
         return None
-
-
-def _native_from_harness(outcome: str, reason: Optional[str]) -> Tuple[str, str]:
-    """The engine-side status of a browser lane from the harness executor's own outcome. PASS maps to NATIVE_PASS only: it is never a verdict."""
-    if outcome == "PASS":
-        return "NATIVE_PASS", "PASS"
-    if outcome == "PRODUCT_FAIL":
-        return "NATIVE_FAIL", "PRODUCT_FAIL"
-    if reason and "DEADLINE" in reason.upper():
-        return "NATIVE_TIMEOUT", outcome
-    return "NATIVE_ERROR", outcome
 
 
 def lane_input(fl: FrozenLane, *, run_id: str, origin: str, out_dir: str) -> Dict[str, Any]:
@@ -202,7 +182,7 @@ def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], work
     elif proc.error_code == ErrorCode.SPAWN_FAILED:
         status, raw_status = "NATIVE_UNAVAILABLE", "spawn-failed"
     elif result is not None and result.get("status") == "COMPLETED" and proc.exit_code == 0 and not too_many and not over:
-        status, raw_status = _native_from_harness(str(result.get("outcome")), result.get("reason"))
+        status, raw_status = native_from_harness(str(result.get("outcome")), result.get("reason"))
         exit_code = result.get("exit_code") if isinstance(result.get("exit_code"), int) else None
         rows = result.get("observations") if isinstance(result.get("observations"), list) else []
         if rows and all(isinstance(r, dict) and isinstance(r.get("assertion_id"), str) for r in rows):
@@ -236,6 +216,29 @@ def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], work
     log.append(f"lane {fl.lane_id}: native {status} ({_SAFE.sub('_', raw_status)[:40]}), exit {exit_code}")
     return LaneOutcome(lane_id=fl.lane_id, engine_name=fl.engine, engine_version=version, native_status=status, raw_status=raw_status, exit_code=exit_code,
                        native_files=native, files=files, counts=counts, harness_verdicts=harness_verdicts, double=opts.lane_command is not None, egress=egress, chromium=chromium)
+
+
+MAX_NOT_KEPT_LISTED = 2000
+
+
+def _bundle_name(lane_id: Optional[str], name: str) -> str:
+    """The bundle path of a file the evidence budget did not let in. A lane reads its files by their name in its output directory (``lane-result.json``, ``blobs/<hex>``) or by ``native/<name>``; the
+    ones it builds itself already carry their bundle path (``lanes/...``, ``logs/...``)."""
+    name = name[:160]
+    if name.startswith(("lanes/", "logs/")) or lane_id is None:
+        return name
+    if name in ("gateway-log.jsonl", "browser-guard-log.jsonl"):                  # the browser lane's logs are lane files, not native ones
+        return f"lanes/{lane_id}/{name}"
+    return f"lanes/{lane_id}/{name}" if name.startswith("native/") else f"lanes/{lane_id}/native/{name}"
+
+
+def _not_kept_names(names: List[str]) -> List[str]:
+    """The canonical form of the list: sorted, unique, at most MAX_NOT_KEPT_LISTED."""
+    return sorted(set(names))[:MAX_NOT_KEPT_LISTED]
+
+
+def _not_kept_document(names: List[str]) -> bytes:
+    return dumps_canonical({"schema": K.NOT_KEPT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "names": _not_kept_names(names)})
 
 
 def _evidence_cap(opts: RunOptions) -> int:
@@ -288,6 +291,8 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
     origin: Optional[str] = None
     outcomes: List[LaneOutcome] = []
     reference: Optional[Dict[str, Any]] = None
+    after_lanes = 0
+    not_kept: List[str] = []                                   # bundle paths of what the evidence budget did not let in (verify tolerates exactly these as absent, and only in a lane declared over the cap)
     budget = Budget(_evidence_cap(opts), root=workdir)         # one budget for everything the run keeps of its lanes: over it, the rest is not kept, the run says so, nothing is deleted
     try:
         try:
@@ -298,6 +303,7 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         for fl in frozen.lanes:
             deadline = float(fl.deadline_s if opts.lane_deadline_s is None else min(opts.lane_deadline_s, fl.deadline_s))
             before = len(_log_lines(req_path, workdir))
+            mark = len(budget.dropped)
             if fl.engine == K.ENGINE_PLAYWRIGHT:
                 out = run_browser_lane(fl, run_id=run_id, origin=origin, workdir=workdir, opts=opts, log=log, budget=budget)
             elif fl.engine == K.ENGINE_ROBOT:
@@ -310,11 +316,14 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
             if budget.keep(request_log_path(fl.lane_id), window):
                 kept[request_log_path(fl.lane_id)] = (window, "log")
             outcomes.append(dataclasses.replace(out, files=kept))
+            not_kept.extend(_bundle_name(fl.lane_id, n) for n in budget.dropped[mark:])
+            after_lanes = len(budget.dropped)
         if origin is not None and not (opts.cancel is not None and opts.cancel.cancelled) and any(f != "ui-only" for l in frozen.lanes for f in l.probes.values()):
             reference = _reference_check(origin, log, opts.cancel)          # after every lane: the check saves one setting in the (throwaway) target
     finally:
         app.stop()
     request_log = budget.read(req_path, 16 * 1024 * 1024, "logs/target-requests.jsonl") or b""
+    not_kept.extend(_bundle_name(None, n) for n in budget.dropped[after_lanes:])          # what was dropped outside a lane (the target's own log)
     cancelled = bool(opts.cancel is not None and opts.cancel.cancelled)
     if cancelled:
         log.append("the run was cancelled")
@@ -334,7 +343,9 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         if any(key in o.egress for o in outcomes):
             extensions["egress_" + key] = sum(o.egress.get(key, 0) for o in outcomes)
     if budget.dropped:
-        extensions["evidence_incomplete"] = f"{len(budget.dropped)} file(s) not kept: the evidence budget of {budget.total} bytes was used up"
+        listed = _not_kept_names(not_kept)
+        extensions["evidence_incomplete"] = f"{len(listed)} file(s) not kept: the evidence budget of {budget.total} bytes was used up"          # the count is the length of the list (verify checks it)
+        logs[K.NOT_KEPT_PATH] = _not_kept_document(listed)
     inputs = RunInputs(frozen=frozen, run_id=run_id, started_at=started, finished_at=finished, environment=env, lanes=tuple(outcomes), logs=logs, extensions=extensions)
     try:
         built = build_run_bundle(up, inputs)
@@ -342,9 +353,13 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         # The bundle format refused what was collected (a cap of its own: file count or total size). The evidence is not thrown away and the run does not end as a crash: every lane's bulk (blobs) is left out,
         # the lane is an engine error with the reason, and the bundle that is built says so.
         log.append("the bundle format refused the evidence as collected (" + ", ".join(sorted({c for c, _, _ in exc.problems})[:3]) + "): the blobs of every lane were left out")
-        slim = tuple(dataclasses.replace(o, native_files={k: v for k, v in o.native_files.items() if not k.startswith("blobs/")}, native_status="NATIVE_ERROR", raw_status="evidence-over-cap") for o in outcomes)
+        # only a lane that actually lost blobs becomes an engine error: a lane with nothing left out is not declared incomplete (verify requires that what a lane is declared to have lost is absent)
+        slim = tuple(dataclasses.replace(o, native_files={k: v for k, v in o.native_files.items() if not k.startswith("blobs/")}, native_status="NATIVE_ERROR", raw_status="evidence-over-cap")
+                     if any(k.startswith("blobs/") for k in o.native_files) else o for o in outcomes)
         logs["logs/orchestrator.log"] = ("\n".join(log) + "\n").encode("utf-8")
-        extensions["evidence_incomplete"] = "the bundle format refused the evidence as collected; the blobs were left out"
+        listed = _not_kept_names(list(not_kept) + [f"lanes/{o.lane_id}/native/{k}" for o in outcomes for k in o.native_files if k.startswith("blobs/")])
+        extensions["evidence_incomplete"] = f"{len(listed)} file(s) not kept: the bundle format refused the evidence as collected; the blobs were left out"
+        logs[K.NOT_KEPT_PATH] = _not_kept_document(listed)
         built = build_run_bundle(up, dataclasses.replace(inputs, lanes=slim, logs=logs, extensions=extensions))
     report = json.loads(built.files["report.json"])
     code = exit_code_for(report, cancelled)
