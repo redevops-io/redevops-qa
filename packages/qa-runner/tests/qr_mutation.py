@@ -24,7 +24,48 @@ def _run(work: Path, tests: Sequence[str]) -> subprocess.CompletedProcess:
     env = {k: os.environ[k] for k in KEEP_ENV if k in os.environ}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     cmd = [sys.executable, "-m", "pytest", "-c", str(ini), "--rootdir", str(work), *[str(PKG / "tests" / t) for t in tests]]
-    return subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=600)
+    return _run_tree(cmd, work, env, timeout=600)
+
+
+def descendants(pid: int) -> list:
+    """Every process below ``pid`` by parent links, children that started their own session included (a process group would miss those)."""
+    try:
+        table = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    children: dict = {}
+    for line in table.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            children.setdefault(int(parts[1]), []).append(int(parts[0]))
+    found, todo = [], [pid]
+    while todo:
+        for child in children.get(todo.pop(), []):
+            found.append(child)
+            todo.append(child)
+    return found
+
+
+def _run_tree(cmd, cwd, env, *, timeout) -> subprocess.CompletedProcess:
+    """Like ``subprocess.run(capture_output=True, timeout=...)``, but when the run times out the whole tree is killed (retest R2-8: a mutant that blocks a worker left it behind, in its own session)."""
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_tree(proc.pid)
+        proc.communicate()
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
+def kill_tree(pid: int) -> None:
+    import signal
+    victims = descendants(pid)
+    for victim in [pid] + victims:
+        try:
+            os.kill(victim, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 def _copy(tmp: Path) -> Path:

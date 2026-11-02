@@ -211,6 +211,10 @@ jobs:
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
             python -m pytest -q packages/qa-runner/tests --junitxml="$RUNNER_TEMP/junit-runner.xml"
+      - name: Fail if the suite left a reading child behind (the mutation suite blocks workers on purpose)
+        run: |
+          sleep 3
+          if pgrep -fa 'qa_runner[.]read_worker'; then echo "a read worker outlived the suite"; exit 1; fi
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner.xml"
 
