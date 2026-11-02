@@ -113,7 +113,7 @@ try:
 except UnsafeRead as exc:
     print(exc.code)
 stop.set(); t.join()
-"""], timeout=30)
+"""], timeout=30, env=child_env(str(tmp_path)))                  # the module roots come from the product's own list: the read now lives in the adapter kit
     assert out.strip() in ("TOO_LARGE", "NO ERROR"), (out, err)
     # whichever way the race went the read ended; a second, deterministic form of the same rule:
     path = tmp_path / "big.bin"
