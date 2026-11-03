@@ -964,7 +964,7 @@
       ],
       "limitations": [
         "It is a re-verification by the same code the run used, in a separate process; it is not an independent implementation of the verdicts. `independent` here means independent of the engine's own status.",
-        "The hash chain inside a bundle is unkeyed: someone who can rewrite a whole bundle can rewrite its digests too. Only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite, passed with `--anchor`, shows that a bundle is the one the value was taken from; nothing in the tool authenticates where the value came from.",
+        "The hash chain inside a bundle is unkeyed: someone who can rewrite a whole bundle can rewrite its digests too. Only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite, passed with `--anchor`, shows that a bundle is the one the value was taken from, and a valid signature of that digest by a key the producer does not hold (the optional signed anchor, below) shows the same for that key; nothing in the tool authenticates where the value or the public key came from.",
         "The optional signed anchor (`--anchor-sig` with `--anchor-pub`) needs the OpenSSH client `ssh-keygen` (without it `verify` exits 7, never accepts). A valid signature shows that the manifest digest was signed by the supplied Ed25519 key; it does not show who holds that key, that the key was not exposed, when the signature was made, or that the run was executed on an uncompromised host, and it carries no revocation or key rotation. The public CI demo is not signed.",
         "A verified run does not show that the application under test is correct."
       ]

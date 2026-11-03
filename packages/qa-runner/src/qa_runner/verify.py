@@ -568,7 +568,8 @@ def _check_signed_anchor(snapshot: Any, qe: Any, v: Verification, sig_path: Opti
             if v.signature.state == asig.VERIFIED:
                 v.signature_statement = fields
     if v.signature.state == asig.UNAVAILABLE:
-        v.unavailable = True
+        if not v.findings:
+            v.unavailable = True          # nothing else is wrong with the bundle: the verifier could not answer, exit 7. A bundle that is already rejected for another finding stays REJECTED (exit 5, the stronger statement)
         v.add("ANCHOR_SIGNATURE_UNAVAILABLE", "anchor_signature", safe_text(v.signature.message, 300))
     elif v.signature.state != asig.VERIFIED:
         v.add("ANCHOR_SIGNATURE_INVALID", "anchor_signature", safe_text(v.signature.message, 300))
@@ -576,13 +577,20 @@ def _check_signed_anchor(snapshot: Any, qe: Any, v: Verification, sig_path: Opti
 
 def render_text(location: str, v: Verification) -> str:
     t = lambda x, n=300: safe_text(x, n)         # noqa: E731
-    head = "ACCEPTED (internally consistent)" if v.accepted else ("NOT VERIFIED: the verifier cannot run here" if v.unavailable else f"REJECTED, {len(v.findings)} finding(s)")
+    signed = v.accepted and v.signature.state == asig.VERIFIED
+    head = ("ACCEPTED (internally consistent; the manifest digest carries a valid signature, see the signed anchor line)" if signed else "ACCEPTED (internally consistent)") if v.accepted else ("NOT VERIFIED: the verifier cannot run here" if v.unavailable else f"REJECTED, {len(v.findings)} finding(s)")
     lines = [f"verify {t(location)}: " + head]
     if v.qe is not None:
         lines.append(f"  recomputation: {v.recomputed} assertion(s) recomputed from the bundle alone, {v.agreeing} agree with the report")
-        lines.append(f"  external anchor: {v.qe.anchor.notice}")
+        if signed and v.qe.anchor.state == "absent":
+            lines.append("  external anchor: no digest was supplied with --anchor; the signed anchor line below is the only thing here that covers the manifest digest")
+        else:
+            lines.append(f"  external anchor: {v.qe.anchor.notice}")
         if v.qe.plan is not None:
-            lines.append(f"  frozen assertion set: {v.qe.plan.notice}")
+            if signed and v.qe.plan.state == "absent":
+                lines.append("  frozen assertion set: no plan digest was supplied with --plan-digest; the plan digest of this bundle's report is part of the signed statement (the signed anchor line below)")
+            else:
+                lines.append(f"  frozen assertion set: {v.qe.plan.notice}")
     if v.accepted and v.outcome is not None:
         lines.append(f"  recorded run outcome: {t(v.outcome['outcome'])} ({t(v.outcome['reason_code'])})")
     for d in (v.disagreements if v.accepted else []):

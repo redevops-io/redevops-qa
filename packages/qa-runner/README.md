@@ -80,7 +80,9 @@ unsigned bundle is unchanged; the JSON gains one key, `anchor_signature`, with s
   `redevops-qa/anchor-statement` 1.0. It refuses (exit 5) a bundle that does not verify. The statement can be taken to another machine: `ssh-keygen -Y sign -n redevops-qa-anchor@v1 -f <private key> FILE`
   writes `FILE.sig` (an OpenSSH SSHSIG signature in the namespace `redevops-qa-anchor@v1`).
 * `anchor sign BUNDLE --key PATH [--agent] [--out FILE]` does the same in one step by calling `ssh-keygen -Y sign` (with `--agent`, `--key` names the PUBLIC key file and the ssh-agent named by `SSH_AUTH_SOCK`
-  signs). The signature is written outside the bundle (default `<bundle path>.anchor.sig`, never overwritten) and printed. A signature by any key type but `ssh-ed25519` is refused and nothing is written.
+  signs, and only the key named by `--key` signs). Without `--agent` no ssh-agent is used: `SSH_AUTH_SOCK` and `SSH_AGENT_PID` are removed from the environment of `ssh-keygen`. The signature is written outside the bundle
+  (default `<bundle path>.anchor.sig`, never overwritten, created before `ssh-keygen` is started so that an unusable location fails before a passphrase or a touch is asked for, and removed again if signing fails) and printed. For a
+  bundle `DIR/r0-<id>` the default signature is a sibling `DIR/r0-<id>.anchor.sig` inside the evidence directory: a script that globs `DIR/r0-*` after signing would match it too (give `--out` to put it elsewhere). A signature by any key type but `ssh-ed25519` is refused and nothing is written.
   **Keys are the operator's: this package never generates, stores or reads a private key.** The path is handed to `ssh-keygen` as an argument and nothing else (a test watches every `open` of the process and
   signs with a key file that nothing but the agent can read). `run` and `demo` do not sign and take no key option; a host that runs lanes should not hold the signing key.
 * `verify BUNDLE --anchor-sig FILE --anchor-pub FILE [--require-signed-anchor]` rebuilds the statement from the bundle it has just read (the manifest digest it recomputed, the run id and the plan digest of its
@@ -90,7 +92,8 @@ unsigned bundle is unchanged; the JSON gains one key, `anchor_signature`, with s
   another key, or over another statement: finding `ANCHOR_SIGNATURE_INVALID`, exit 5, with or without `--require-signed-anchor`), `unavailable` (`ssh-keygen` is missing, older than OpenSSH 8.0 (no `-Y`), does
   not answer within 20 seconds or does not answer as a verifier: finding `ANCHOR_SIGNATURE_UNAVAILABLE`, exit 7, never accepted) or `absent` (nothing was supplied; with `--require-signed-anchor` it is the finding
   `ANCHOR_SIGNATURE_REQUIRED`, exit 5, so an unsigned or stripped run cannot be accepted where a signature is demanded). `--anchor` alone never gives `signed-anchor-verified`.
-  `ssh-keygen` runs with a fixed `PATH`, a temporary `HOME` and no ssh-agent; only its exit status and one expected line of its output count.
+  `ssh-keygen` runs with a fixed `PATH` (`/usr/bin:/bin`: a host that has it elsewhere gets exit 7), a temporary `HOME` and no ssh-agent; only its exit status and one expected line of its output count. The check trusts the OpenSSH client of the
+  host it runs on: a host whose `ssh-keygen` has been replaced can make it say anything, which is not detectable here. Needs OpenSSH 8.0 or later.
 
 When the state is `verified` the text says: "The manifest digest of this evidence bundle (run `<run id>`, plan digest `<plan digest>`) carries a valid OpenSSH Ed25519 signature made with the private key belonging
 to the public key with fingerprint `<fingerprint>`, which was supplied to this verification. A bundle rewritten after signing would not verify. This does not show who holds that key, that the key was not exposed, when
@@ -315,10 +318,11 @@ What an accepted bundle means, and what it does not:
   that was rewritten consistently from start to finish by someone who can rewrite all of it: the product's own builder would produce the same bytes from forged inputs, and the tamper suite shows
   it (`tests/test_qr_tamper_suite.py`): the failing lane dropped, an assertion weakened, or the engine's own report rewritten to say the rule held, with every digest recomputed, is accepted as
   internally consistent and says so (the engine's report now has to be rewritten together with the engine's summary, the adapter result that names both by hash, the observation record and the
-  target's reference check: more work than before, not a different class of forgery). Only a manifest digest obtained from a place the forger cannot write (`--anchor`; the CI artifact attestation planned for the release job publishes it) rejects
-  those. `verify` never calls a match with a value you supplied proof that the value is trustworthy.
-* **A signed anchor (optional) closes the rewrite after signing, for the key you supplied.** `--anchor-sig` with `--anchor-pub` shows that the manifest digest of the bundle carries a valid signature by the supplied
-  Ed25519 key (see `anchor` above for the exact claim and what it does not show); without it, or without `--anchor`, the paragraph above applies unchanged.
+  target's reference check: more work than before, not a different class of forgery). Only a manifest digest obtained from a place the forger cannot write (`--anchor`; the CI artifact attestation planned for the release job publishes it), or a valid signature of the manifest digest by a key the forger does not hold
+  (`--anchor-sig` with `--anchor-pub`, optional, see `anchor` above), rejects those. `verify` never calls a match with a value you supplied proof that the value is trustworthy.
+* **A signed anchor (optional) detects a rewrite made after signing, for the key you supplied.** `--anchor-sig` with `--anchor-pub` shows that the manifest digest of the bundle carries a valid signature by the supplied
+  Ed25519 key (see `anchor` above for the exact claim and what it does not show). Measured: three bundles rewritten and re-chained after signing are accepted by plain `verify` and refused by the signature check. Without a signature, or
+  without `--anchor`, the paragraph above applies unchanged.
 * **`--plan-digest` closes the gaps in the PLAN and no other.** The plan digest printed by `freeze` (record it outside the bundle) covers every assertion, its expected value and, bound into each
   assertion's digest, the whole definition of its lane: the spec with its steps, the egress profile, the deadline, the request expectations and probes, the reviewed Robot suite and the sha256 of its
   files, and the plan id and target. A bundle whose plan was changed in any of those fails with it. It cannot reject a forgery that left the plan alone.
@@ -372,7 +376,7 @@ may outlive its SIGKILL (the parent does not wait for it past a short grace); a 
 ## What this does not show
 
 * The hash chain and the bundle manifest are unkeyed. They detect accidental changes and partial edits, not deliberate re-forging by anyone who can rewrite the
-  whole bundle; only a manifest digest published somewhere that party cannot write (an external anchor) changes that. This part prints the digests; it
+  whole bundle; only a manifest digest published somewhere that party cannot write (an external anchor), or a signature of that digest by a key that party does not hold (the optional signed anchor), changes that. This part prints the digests; it
   does not publish or attest them.
 * A verified verdict says the frozen assertions hold over the recorded observations. It does not say the application is correct.
 * The harness run record, the gateway log and the logs are not passed through the redactor (only browser artifacts are). Do not put a secret in a plan that

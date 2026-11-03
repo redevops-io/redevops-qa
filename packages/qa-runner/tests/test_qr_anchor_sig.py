@@ -30,6 +30,23 @@ from qa_runner.cli import main
 from qr_tamper import golden, load, manifest_digest, rechain
 from qr_tamper_cases import _drop_robot_lane, _robot_reports_a_clean_run, _weaken_the_assertion
 
+AGENT_ENV = ("SSH_AUTH_SOCK", "SSH_AGENT_PID", "SSH_ASKPASS")
+
+
+def clean_env(**extra):
+    """The environment every helper subprocess gets: this process's, without any ssh-agent (a developer's or a CI runner's agent must never be reachable from these tests)."""
+    env = {k: v for k, v in os.environ.items() if k not in AGENT_ENV}
+    env.update(extra)
+    return env
+
+
+@pytest.fixture(autouse=True)
+def _no_ssh_agent_anywhere(monkeypatch):
+    """No test of this file can reach an ssh-agent unless it starts its own throwaway one on its own socket (``LoggingAgent``) and says so."""
+    for name in AGENT_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
 FORBIDDEN_WORDS = ("authenticated anchor", "tamper-proof", "tamper proof", "secure", "verified identity")
 OTHER_NS = "some-other-use@v1"
 
@@ -42,7 +59,7 @@ def cli(*argv):
 
 # ---- real OpenSSH tools, real throwaway keys ----------------------------------------------------------------------------------------------------------
 def ssh(*argv, data=None, check=True, cwd=None, env=None):
-    done = subprocess.run(list(argv), input=data, capture_output=True, cwd=cwd, env=env, timeout=60)
+    done = subprocess.run(list(argv), input=data, capture_output=True, cwd=cwd, env=clean_env() if env is None else env, timeout=60)
     if check and done.returncode != 0:
         raise AssertionError(f"{argv[0]} {argv[1:3]} failed with {done.returncode}: {done.stderr.decode(errors='replace')[-200:]}")
     return done
@@ -176,14 +193,14 @@ def test_the_one_step_command_can_sign_through_an_ssh_agent(tmp_path, none_files
     priv, pub = keygen(tmp_path, "agentkey")
     sockdir = Path(tempfile.mkdtemp(prefix="qa-agent-", dir="/tmp"))
     sock = sockdir / "a.sock"
-    agent = subprocess.Popen(["ssh-agent", "-D", "-a", str(sock)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    agent = subprocess.Popen(["ssh-agent", "-D", "-a", str(sock)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_env())
     try:
         for _ in range(100):
             if sock.exists():
                 break
             time.sleep(0.05)
         assert sock.exists()
-        env = {**os.environ, "SSH_AUTH_SOCK": str(sock)}
+        env = clean_env(SSH_AUTH_SOCK=str(sock))
         ssh("ssh-add", str(priv), env=env)
         os.chmod(priv, 0o000)                    # the private key cannot be read by anything but the agent now: signing must still work, which shows the tool is not reading it
         monkeypatch.setenv("SSH_AUTH_SOCK", str(sock))
@@ -522,7 +539,17 @@ def test_the_verified_text_carries_the_limits_and_none_of_the_words_the_project_
     everything = out.lower() + cli("report", path, "--anchor-sig", sig, "--anchor-pub", pub)[1].lower() + cli("inspect", path, "--anchor-sig", sig, "--anchor-pub", pub)[1].lower()
     for word in FORBIDDEN_WORDS:
         assert word not in everything, word
-    assert "no external anchor: integrity against deliberate re-forging not established" in out.lower()        # the digest-comparison anchor line stays, as it was
+    assert "external anchor: no digest was supplied with --anchor; the signed anchor line below is the only thing here that covers the manifest digest" in out
+    assert "frozen assertion set: no plan digest was supplied with --plan-digest; the plan digest of this bundle's report is part of the signed statement" in out
+    assert out.splitlines()[0].endswith("ACCEPTED (internally consistent; the manifest digest carries a valid signature, see the signed anchor line)")
+    assert "NOT established" not in out and "would not be noticed" not in out                    # the unsigned sentences do not contradict the signed line in a signed result ...
+    assert "ACCEPTED (internally consistent)\n" not in out                                      # ... and the first line is not the unsigned one
+    unsigned = cli("verify", path)[1]
+    assert "NOT established" in unsigned and "would not be noticed" in unsigned                  # an unsigned result keeps them (pinned byte for byte by another test)
+    anchor_only = cli("verify", path, "--anchor-sig", sig, "--anchor-pub", pub, "--anchor", manifest_digest(none_files))[1]
+    assert "external anchor:" in anchor_only and "no digest was supplied with --anchor" not in anchor_only      # an --anchor value that was supplied is still described by qa-evidence's own line
+    rep = cli("report", path, "--anchor-sig", sig, "--anchor-pub", pub)[1]
+    assert "The external anchor and frozen assertion set lines below describe values supplied with --anchor and --plan-digest, not this signature" in rep
     assert "this does not show that the application under test is correct" in out.lower()
     assert "assurance: signed anchor verified against the supplied public key. Without a signature or a manifest digest published elsewhere (--anchor)" in out
 
@@ -648,3 +675,170 @@ def test_a_signed_result_and_an_unsigned_or_anchor_only_result_cannot_be_mistake
             assert unsigned_out[form] != signed_out[form], (label, form)
         assert '"state": "absent"' in unsigned_out["verify-json"] and '"assurance": "signed-anchor-verified"' not in unsigned_out["report-json"]
         assert '"key_fingerprint": null' in unsigned_out["verify-json"] and '"key_fingerprint": "SHA256' not in unsigned_out["report-json"]
+
+
+# ---- F1: no ssh-agent is used unless --agent is given, and then only for the named key ----------------------------------------------------------------
+AGENT_REQUEST = re.compile(r"process_[a-z_0-9]+: entering")
+
+
+class LoggingAgent:
+    """A throwaway ssh-agent on its own socket that logs every request it gets (``ssh-agent -d``); the tests use it to see whether anything asked an agent at all."""
+
+    def __init__(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="qa-agent-", dir="/tmp"))
+        self.sock = self.dir / "a.sock"
+        self.log_path = self.dir / "agent.log"
+        self.log = open(self.log_path, "wb")
+        self.proc = subprocess.Popen(["ssh-agent", "-d", "-a", str(self.sock)], stdout=subprocess.DEVNULL, stderr=self.log, env=clean_env())
+        for _ in range(100):
+            if self.sock.exists():
+                break
+            time.sleep(0.05)
+        assert self.sock.exists()
+        self.mark_at = 0
+
+    def env(self):
+        return clean_env(SSH_AUTH_SOCK=str(self.sock))
+
+    def add(self, key):
+        ssh("ssh-add", str(key), env=self.env())
+
+    def mark(self):
+        time.sleep(0.2)
+        self.mark_at = self.log_path.stat().st_size
+
+    def requests_since_mark(self):
+        time.sleep(0.3)
+        text = self.log_path.read_bytes()[self.mark_at:].decode(errors="replace")
+        return [m.group(0) for m in AGENT_REQUEST.finditer(text)]
+
+    def close(self):
+        self.proc.terminate()
+        self.proc.wait(timeout=10)
+        self.log.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+@pytest.fixture()
+def agent():
+    a = LoggingAgent()
+    try:
+        yield a
+    finally:
+        a.close()
+
+
+def test_the_autouse_fixture_keeps_every_agent_variable_out_of_this_process_and_out_of_the_helpers(tmp_path, monkeypatch, agent):
+    assert not any(name in os.environ for name in AGENT_ENV)
+    monkeypatch.setenv("SSH_AUTH_SOCK", str(agent.sock))              # even if one is set, the helpers do not pass it on
+    priv, pub = keygen(tmp_path, "helper")
+    sign_like_an_operator(priv, b"x", tmp_path)
+    ssh("ssh-keygen", "-l", "-f", str(pub))
+    assert "SSH_AUTH_SOCK" not in clean_env() and "SSH_AGENT_PID" not in clean_env()
+    agent.mark_at = 0
+    assert agent.requests_since_mark() == [], "a helper of the tests reached an ssh-agent"
+
+
+def test_anchor_sign_without_agent_never_asks_an_inherited_agent_even_when_it_holds_the_key(tmp_path, none_files, monkeypatch, agent):
+    path = archive(tmp_path, none_files)
+    priv, pub = keygen(tmp_path, "held")
+    agent.add(priv)
+    agent.mark()
+    monkeypatch.setenv("SSH_AUTH_SOCK", str(agent.sock))              # an agent that holds the named key is in the environment of the caller
+    # a copy of the PUBLIC key file named without --agent, with no private key beside it: only an agent could sign with it, whoever runs the test (a file mode would not stop root)
+    lonely = tmp_path / "lonely.pub"
+    shutil.copy(pub, lonely)
+    code, out, err = cli("anchor", "sign", path, "--key", lonely)
+    assert code == K.EXIT_USAGE and out == "" and not Path(str(path) + ".anchor.sig").exists(), (code, out, err)
+    assert agent.requests_since_mark() == [], "ssh-keygen was allowed to reach the agent without --agent"
+    # and with a readable key file the agent is still not asked
+    assert cli("anchor", "sign", path, "--key", priv, "--out", tmp_path / "file-key.sig")[0] == 0
+    assert agent.requests_since_mark() == []
+
+
+def test_anchor_sign_with_agent_asks_the_agent_and_only_the_named_key_signs(tmp_path, none_files, monkeypatch, agent):
+    path = archive(tmp_path, none_files)
+    priv_a, pub_a = keygen(tmp_path, "a")
+    priv_b, pub_b = keygen(tmp_path, "b")
+    agent.add(priv_a)
+    agent.add(priv_b)
+    monkeypatch.setenv("SSH_AUTH_SOCK", str(agent.sock))
+    agent.mark()
+    code, out, err = cli("anchor", "sign", path, "--key", pub_b, "--agent", "--out", tmp_path / "b.sig")
+    assert code == 0, err
+    asked = agent.requests_since_mark()
+    assert any("sign" in r for r in asked), asked
+    assert cli("verify", path, "--anchor-sig", tmp_path / "b.sig", "--anchor-pub", pub_b, "--require-signed-anchor")[0] == 0
+    assert cli("verify", path, "--anchor-sig", tmp_path / "b.sig", "--anchor-pub", pub_a)[0] == K.EXIT_REJECTED              # signed by B, not by A (which the agent also holds)
+    priv_c, pub_c = keygen(tmp_path, "c")                                                                                    # a key the agent does not hold: nothing is signed by "whatever the agent offers"
+    code, out, err = cli("anchor", "sign", path, "--key", pub_c, "--agent", "--out", tmp_path / "c.sig")
+    assert code == K.EXIT_USAGE and not (tmp_path / "c.sig").exists()
+
+
+def test_the_environment_of_ssh_keygen_for_signing_has_no_agent_unless_asked(tmp_path, monkeypatch):
+    """What ``sign_statement`` starts ``ssh-keygen`` with, seen through a stand-in for it."""
+    record = tmp_path / "env.txt"
+    monkeypatch.setattr(A, "TOOL_SEARCH_PATH", fake_tool(tmp_path, f"/usr/bin/env > {record}; echo \"args: $*\" >> {record}; exit 1"))
+    monkeypatch.setenv("SSH_AUTH_SOCK", "/nonexistent/agent.sock")
+    monkeypatch.setenv("SSH_AGENT_PID", "12345")
+    monkeypatch.setenv("SSH_ASKPASS", "/nonexistent/askpass")
+    for agent_flag in (False, True):
+        with pytest.raises(A.AnchorSigError):
+            A.sign_statement(b"x", str(tmp_path / "k"), agent=agent_flag)
+        seen = record.read_text()
+        assert ("SSH_AUTH_SOCK=/nonexistent/agent.sock" in seen) == agent_flag and ("SSH_AGENT_PID=12345" in seen) == agent_flag, agent_flag
+        assert "SSH_ASKPASS=/nonexistent/askpass" in seen                                  # a passphrase prompt program of the operator is kept
+        assert ("args: -Y sign -n redevops-qa-anchor@v1 -f " in seen) and (" -U" in seen.splitlines()[-1]) == agent_flag
+
+
+# ---- F4: a rejected bundle is never described as signed, even when its signature is valid -------------------------------------------------------------
+@pytest.fixture()
+def rejected_but_signed(tmp_path, none_files, signed):
+    """The same manifest (so the same statement and a signature that is valid) plus a file the runner refuses (``anchor.json``: UNEXPECTED_FILE): the bundle is rejected."""
+    from qa_evidence.build import anchor_document
+    from qa_evidence.canon import dumps_canonical
+    path, priv, pub, sig = signed
+    files = dict(none_files)
+    files["anchor.json"] = dumps_canonical(anchor_document("ci-artifact-attestation", "somewhere", manifest_digest(none_files)))
+    return archive(tmp_path, files, "rejected.tar"), pub, sig
+
+
+def test_a_rejected_bundle_with_a_valid_signature_is_not_described_as_signed_in_any_form(rejected_but_signed):
+    path, pub, sig = rejected_but_signed
+    from qa_runner.verify import verify_location
+    v = verify_location(str(path), anchor_sig=str(sig), anchor_pub=str(pub))
+    assert v.signature.state == "verified" and not v.accepted and "UNEXPECTED_FILE" in {f.code for f in v.findings}      # the signature itself checks out
+    code, doc, _ = verify_json(path, "--anchor-sig", sig, "--anchor-pub", pub)
+    assert code == K.EXIT_REJECTED and doc["accepted"] is False and doc["assurance"] == "rejected"
+    assert doc["anchor_signature"]["state"] == "invalid" and doc["anchor_signature"]["key_fingerprint"] is None and doc["anchor_signature"]["statement"] is None          # X17
+    for form, text in every_form(path, "--anchor-sig", sig, "--anchor-pub", pub).items():
+        assert "signed anchor: VERIFIED" not in text and "signed anchor VERIFIED" not in text and "signed-anchor-verified" not in text and '"key_fingerprint": "SHA256' not in text, form       # X18
+    assert "signed anchor: NOT verified (the bundle is rejected)" in cli("verify", path, "--anchor-sig", sig, "--anchor-pub", pub)[1]
+
+
+# ---- F5: a bundle that is already rejected stays REJECTED (5) when the OpenSSH client is also missing -------------------------------------------------
+def test_a_rejected_bundle_is_exit_5_not_7_when_ssh_keygen_is_missing_and_a_clean_one_is_7(tmp_path, monkeypatch, rejected_but_signed, signed):
+    path, pub, sig = rejected_but_signed
+    monkeypatch.setattr(A, "TOOL_SEARCH_PATH", str(tmp_path / "empty"))
+    code, doc, _ = verify_json(path, "--anchor-sig", sig, "--anchor-pub", pub)
+    assert code == K.EXIT_REJECTED and doc["assurance"] == "rejected" and {"UNEXPECTED_FILE", "ANCHOR_SIGNATURE_UNAVAILABLE"} <= set(codes_of(doc))
+    assert doc["anchor_signature"]["state"] == "unavailable"
+    text = cli("verify", path, "--anchor-sig", sig, "--anchor-pub", pub)[1]
+    assert "REJECTED" in text and "NOT VERIFIED: the verifier cannot run here" not in text
+    clean_path, _, clean_pub, clean_sig = signed
+    assert verify_json(clean_path, "--anchor-sig", clean_sig, "--anchor-pub", clean_pub)[0] == K.EXIT_VERIFIER_UNAVAILABLE         # nothing else wrong: the verifier could not answer
+
+
+# ---- F6: the output file is created before signing and removed when signing fails ----------------------------------------------------------------------
+def test_the_signature_file_is_created_before_ssh_keygen_is_started_and_removed_if_signing_fails(tmp_path, none_files, monkeypatch):
+    path = archive(tmp_path, none_files)
+    priv, pub = keygen(tmp_path, "op")
+    marker = tmp_path / "tool-was-run"
+    monkeypatch.setattr(A, "TOOL_SEARCH_PATH", fake_tool(tmp_path, f"touch {marker}; echo 'no key' >&2; exit 1"))
+    code, out, err = cli("anchor", "sign", path, "--key", priv, "--out", tmp_path / "no-such-directory" / "x.sig")
+    assert code == K.EXIT_USAGE and "cannot write" in err and not marker.exists(), "an unusable output location was found only after ssh-keygen ran"
+    target = tmp_path / "failed.sig"
+    code, out, err = cli("anchor", "sign", path, "--key", priv, "--out", target)
+    assert marker.exists() and code == K.EXIT_USAGE and not target.exists(), "a failed signing left a file behind"
+    monkeypatch.setattr(A, "TOOL_SEARCH_PATH", A.TOOL_SEARCH_PATH.__class__("/usr/bin:/bin"))
+    assert cli("anchor", "sign", path, "--key", priv, "--out", target)[0] == 0 and target.stat().st_size > 0              # the same path is usable afterwards

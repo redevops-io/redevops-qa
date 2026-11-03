@@ -41,6 +41,7 @@ MAX_PUBLIC_KEY_BYTES = 2048
 TOOL_NAME = "ssh-keygen"
 TOOL_SEARCH_PATH = "/usr/bin:/bin"           # the same fixed PATH every child of this package gets (procs.child_env)
 VERIFY_SECONDS = 20.0
+AGENT_VARIABLES = ("SSH_AUTH_SOCK", "SSH_AGENT_PID")
 SIGN_SECONDS = 300.0                         # a passphrase or a touch may be asked for
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -112,8 +113,6 @@ def parse_public_key(data: bytes) -> PublicKey:
         text = text[:-2]
     elif text.endswith("\n"):
         text = text[:-1]
-    if "\n" in text or "\r" in text or "\x00" in text:
-        raise AnchorSigError(INVALID, "the public key file is not exactly one line")
     match = PUBLIC_KEY_LINE_RE.fullmatch(text)
     if match is None:
         raise AnchorSigError(INVALID, f"the public key file is not one 'ssh-ed25519 <key>' line (only that key type is accepted; no options, no certificates): {safe_text(text.split(' ')[0], 40)!r}")
@@ -160,7 +159,7 @@ def verify_signature(statement: bytes, signature_path: str, public_key_path: str
     (before 8.0) prints its usage and exits 1, which is ``unavailable`` here, like every other exit status."""
     try:
         sig = read_small(signature_path, MAX_SIGNATURE_BYTES, "signature file")
-        _expect_key_and_namespace(sig)
+        _expect_key(sig)
         key = parse_public_key(read_small(public_key_path, MAX_PUBLIC_KEY_BYTES, "public key file"))
         tool = _require_tool()
         work = tempfile.mkdtemp(prefix="redevops-qa-anchor-")
@@ -229,12 +228,12 @@ def parse_signature(armored: bytes):
         raise AnchorSigError(INVALID, "the signature file is not one armored OpenSSH signature (BEGIN line, base64, END line, nothing else)") from None
 
 
-def _expect_key_and_namespace(armored: bytes) -> bytes:
-    key_type, blob, namespace = parse_signature(armored)
+def _expect_key(armored: bytes) -> bytes:
+    """The public key blob of a signature of the accepted key type, or a refusal by name. (The namespace is not compared here: ``ssh-keygen -Y sign`` is given ``-n`` and ``-Y verify`` is given ``-n`` and an
+    ``allowed_signers`` line that carries ``namespaces=``, and a signature in another namespace is refused by it, which a test shows with the real tool.)"""
+    key_type, blob, _namespace = parse_signature(armored)
     if key_type != KEY_TYPE:
         raise AnchorSigError(INVALID, f"the signature was made by a key of type {safe_text(key_type, 40)!r}: only {KEY_TYPE} is accepted")
-    if namespace != NAMESPACE:
-        raise AnchorSigError(INVALID, "the signature is not in the namespace " + NAMESPACE)
     return blob
 
 
@@ -243,11 +242,15 @@ def sign_statement(statement: bytes, key_path: str, *, agent: bool = False) -> "
     environment signs). Returns the armored signature and the fingerprint of the key that made it. A signature by any other key type, or in another namespace, is refused."""
     tool = _require_tool()
     argv = [tool, "-Y", "sign", "-n", NAMESPACE, "-f", key_path] + (["-U"] if agent else [])
-    done = _run_tool(argv, statement, cwd=None, env=dict(os.environ), timeout=SIGN_SECONDS, own_session=False)       # the operator's own environment: an agent socket, a terminal
+    env = dict(os.environ)                      # the operator's own environment (a terminal, an askpass program) ...
+    if not agent:
+        for name in AGENT_VARIABLES:           # ... but an ssh-agent only when the operator asked for one: ssh-keygen would otherwise offer the named key to an inherited agent
+            env.pop(name, None)
+    done = _run_tool(argv, statement, cwd=None, env=env, timeout=SIGN_SECONDS, own_session=False)
     if done.returncode != 0:
         raise AnchorSigError(INVALID, f"'{TOOL_NAME} -Y sign' failed with status {done.returncode}: " + safe_text(done.stderr.decode("utf-8", "replace").strip().splitlines()[-1] if done.stderr.strip() else "no message", 160))
     try:
-        blob = _expect_key_and_namespace(done.stdout)
+        blob = _expect_key(done.stdout)
     except AnchorSigError as exc:
         raise AnchorSigError(INVALID, exc.message + "; nothing was written") from None
     return done.stdout, fingerprint_of(blob)

@@ -101,8 +101,8 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("bundle", help="a bundle directory or archive")
     ap = asub.add_parser("sign", help="verify a bundle and sign its statement with `ssh-keygen -Y sign`; the key is the operator's and is only passed to ssh-keygen, never read or kept here")
     ap.add_argument("bundle", help="a bundle directory or archive")
-    ap.add_argument("--key", required=True, metavar="PATH", help="the Ed25519 key file ssh-keygen signs with (with --agent: the PUBLIC key file; the ssh-agent named by SSH_AUTH_SOCK signs)")
-    ap.add_argument("--agent", action="store_true", help="sign with the ssh-agent (ssh-keygen -U); --key names the public key file")
+    ap.add_argument("--key", required=True, metavar="PATH", help="the Ed25519 key file ssh-keygen signs with (with --agent: the PUBLIC key file of the key the ssh-agent named by SSH_AUTH_SOCK must sign with). Without --agent no ssh-agent is used: SSH_AUTH_SOCK and SSH_AGENT_PID are removed from the environment of ssh-keygen")
+    ap.add_argument("--agent", action="store_true", help="sign with the ssh-agent named by SSH_AUTH_SOCK (ssh-keygen -U); --key names the public key file, and only that key signs")
     ap.add_argument("--out", metavar="FILE", help="where to write the signature (never overwritten); default: <bundle path>.anchor.sig, next to the bundle and outside it")
     return p
 
@@ -355,18 +355,25 @@ def _anchor(args, out: TextIO, err: TextIO) -> int:
         print(f"sign exactly these bytes (save them as FILE): ssh-keygen -Y sign -n {anchor_sig.NAMESPACE} -f <your private key> FILE   (writes FILE.sig); give the signature and the public key to `redevops-qa verify --anchor-sig ... --anchor-pub ...`", file=err)
         return 0
     out_path = args.out or (os.path.abspath(args.bundle).rstrip("/") + ".anchor.sig")
-    if os.path.lexists(out_path):
-        raise PlanError("OUTPUT_EXISTS", f"{safe_text(out_path)} already exists: a signature is never overwritten")
+    # the output file is created exclusively BEFORE ssh-keygen is started: an existing file (or a link, even a dangling one) or an unwritable location fails here, not after the operator has typed a passphrase or touched a key
     try:
-        signature, fingerprint = anchor_sig.sign_statement(statement, args.key, agent=args.agent)
-    except anchor_sig.AnchorSigError as exc:
-        print(f"error: {safe_text(exc.message, 300)}", file=err)
-        return K.EXIT_VERIFIER_UNAVAILABLE if exc.state == anchor_sig.UNAVAILABLE else K.EXIT_USAGE
-    try:
-        with open(out_path, "xb") as fh:
-            fh.write(signature)
+        fh = open(out_path, "xb")
     except FileExistsError:
         raise PlanError("OUTPUT_EXISTS", f"{safe_text(out_path)} already exists: a signature is never overwritten") from None
+    except OSError as exc:
+        raise PlanError("OUTPUT_UNWRITABLE", f"cannot write {safe_text(out_path)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+    try:
+        with fh:
+            try:
+                signature, fingerprint = anchor_sig.sign_statement(statement, args.key, agent=args.agent)
+                fh.write(signature)
+            except anchor_sig.AnchorSigError as exc:
+                os.unlink(out_path)              # nothing was signed: no empty file is left behind
+                print(f"error: {safe_text(exc.message, 300)}", file=err)
+                return K.EXIT_VERIFIER_UNAVAILABLE if exc.state == anchor_sig.UNAVAILABLE else K.EXIT_USAGE
+            except BaseException:
+                os.unlink(out_path)
+                raise
     except OSError as exc:
         raise PlanError("OUTPUT_UNWRITABLE", f"cannot write {safe_text(out_path)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
     out.write(signature.decode("ascii"))
@@ -401,7 +408,8 @@ def _recomputed(args, snapshot):
 def _recomputed_line(v) -> str:
     if v.accepted and v.signature.state == anchor_sig.VERIFIED:
         return (f"verdicts recomputed from the bundle alone: {v.agreeing} of {v.recomputed} agree with the report (ACCEPTED as internally consistent); signed anchor VERIFIED, key {safe_text(v.signature.fingerprint or '', 60)} "
-                "(supplied to this verification; it does not show who holds that key or when the signature was made)")
+                "(supplied to this verification; it does not show who holds that key or when the signature was made). The external anchor and frozen assertion set lines below describe values supplied with --anchor and --plan-digest, "
+                "not this signature")
     if v.accepted:
         return f"verdicts recomputed from the bundle alone: {v.agreeing} of {v.recomputed} agree with the report (ACCEPTED as internally consistent)"
     if v.unavailable:
