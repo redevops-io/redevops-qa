@@ -1,8 +1,8 @@
 # ReDevOps QA: a real run of the demo
 
-The output below is copied from a CI run, not written by hand: the `demo` jobs of [run 41566638020](https://github.com/redevops-io/redevops-qa/actions/runs/41566638020) of `tests.yml`, head commit
-`a93dfc3`, on a GitHub-hosted `ubuntu-24.04` runner (Linux x86_64, CPython 3.12.15, Playwright 1.64.1 with Chromium, Robot Framework 7.5). That run is on a branch of the stack that added the
-jobs; the same jobs run on every push, and a run on `main` replaces it once the stack is merged. Digests and run ids differ from run to run; the shape of the output does not.
+The output below is copied from a CI run on the main branch, not written by hand: the `demo` and `demo-verify` jobs of [run 41591460007](https://github.com/redevops-io/redevops-qa/actions/runs/41591460007) of `tests.yml`,
+head commit `d856bab` of `main`, on a GitHub-hosted `ubuntu-24.04` runner (Linux x86_64, CPython 3.12.15, Playwright 1.64.1 with Chromium, Robot Framework 7.5). The same jobs run on every push; run ids,
+timestamps and anchors differ from run to run, the plan digest, the outcomes, the counts and the exit statuses do not.
 
 ## What was run
 
@@ -15,10 +15,10 @@ redevops-qa demo --defect none --out evidence
 The demo starts a small fixture web app on loopback, runs a Playwright Chromium lane (sign in, open Settings, tick "Email notifications", save) and a Robot Framework lane (an order total with a 10 percent
 discount) one after the other under one run id, writes one evidence bundle, and re-verifies it in a fresh process. `--defect discount` and `--defect settings` start the same app with a seeded defect.
 
-## The output for the correct app ([job 125690107693](https://github.com/redevops-io/redevops-qa/actions/runs/41566638020/job/125690107693))
+## The output for the correct app ([job 125769400806](https://github.com/redevops-io/redevops-qa/actions/runs/41591460007/job/125769400806))
 
 ```text
-run r0-20261103T023340Z-nksqwwbjy43om: VERIFIED (ALL_ASSERTIONS_VERIFIED)
+run r0-20261103T064317Z-az64eenm2ehm4: VERIFIED (ALL_ASSERTIONS_VERIFIED)
   external anchor: no external anchor: integrity against deliberate re-forging NOT established (a manifest digest published where this machine cannot rewrite it is an anchor)
   lane browser: engine reported NATIVE_PASS (PASS); independent verdicts: 3 verified, 0 failed, 0 inconclusive, 0 unaccounted
   lane robot: engine reported NATIVE_PASS (PASS); independent verdicts: 1 verified, 0 failed, 0 inconclusive, 0 unaccounted
@@ -26,7 +26,7 @@ run r0-20261103T023340Z-nksqwwbjy43om: VERIFIED (ALL_ASSERTIONS_VERIFIED)
   no independent probe (declared ui-only in the plan; the verdict rests on the engine's record and the target's request log): browser:A-SAVED,browser:A-URL
   assertions: frozen 4 = verified 4 + failed 0 + inconclusive 0 + unaccounted 0
   plan digest: sha256:3e53d5b170e6541bd7fb37188a17c99c766af1d161d5aed452af68a56e68b943   (the value to give `verify --plan-digest`)
-  manifest digest: sha256:eaae79ceae18586cc7296e8f7b3dd7671e96fbd1d62472072f5024614cf2b5ff   (an anchor only if published where this machine cannot rewrite it)
+  manifest digest: sha256:023ccf463df60bfae8b4f188abfd548262a3eea7be6dd44aaba91ba7ba780c27   (an anchor only if published where this machine cannot rewrite it)
   re-verification in a fresh process (the same code as the run, not independent code): ACCEPTED as internally consistent; 4 of 4 verdict(s) recomputed from the bundle alone agree with the report; no external anchor
 ```
 
@@ -43,15 +43,22 @@ The report that follows it lists each frozen assertion with the engine's native 
 
 | `--defect` | Exit status | Outcome | Lane that failed | Anchor (sha256 of `bundle-manifest.json`) | Demo job | Verified again in a second job |
 |---|---|---|---|---|---|---|
-| `none` | 0 | `VERIFIED` | none: 3 browser and 1 Robot assertions verified | `sha256:eaae79ceae18586cc7296e8f7b3dd7671e96fbd1d62472072f5024614cf2b5ff` | [125690107693](https://github.com/redevops-io/redevops-qa/actions/runs/41566638020/job/125690107693) | [125690569279](https://github.com/redevops-io/redevops-qa/actions/runs/41566638020/job/125690569279): accepted, exit 0 |
-| `discount` | 1 | `FAILED` (`ASSERTION_FAILED`) | Robot Framework: engine `NATIVE_FAIL`, 0 of 1 verified; the browser lane verified 3 of 3 | `sha256:4808b6fe5c054ad38dde23b497e8125722179c70138ce217b5e4516937c7d492` | [125690107613](https://github.com/redevops-io/redevops-qa/actions/runs/41566638020/job/125690107613) | [125690569107](https://github.com/redevops-io/redevops-qa/actions/runs/41566638020/job/125690569107): accepted, exit 1 |
-| `settings` | 1 | `FAILED` (`ASSERTION_FAILED`) | Playwright Chromium: engine `NATIVE_FAIL (PRODUCT_FAIL)`, 2 of 3 verified; the Robot lane verified 1 of 1 | `sha256:8bc2df88bb696e8e791d12f1a764b247916bf3d15d71cfdd53853ab02b290130` | [125690107691](https://github.com/redevops-io/redevops-qa/actions/runs/41566638020/job/125690107691) | [125690569197](https://github.com/redevops-io/redevops-qa/actions/runs/41566638020/job/125690569197): accepted, exit 1 |
+| `none` | 0 | `VERIFIED` | none: 3 browser and 1 Robot assertions verified | `sha256:023ccf463df60bfae8b4f188abfd548262a3eea7be6dd44aaba91ba7ba780c27` | [125769400806](https://github.com/redevops-io/redevops-qa/actions/runs/41591460007/job/125769400806) | [125769764235](https://github.com/redevops-io/redevops-qa/actions/runs/41591460007/job/125769764235): accepted, exit 0 |
+| `discount` | 1 | `FAILED` (`ASSERTION_FAILED`) | Robot Framework: engine `NATIVE_FAIL`, 0 of 1 verified; the browser lane verified 3 of 3 | `sha256:f5d6a17a05c0b26b3980f9f3d8e5887702e3adfd5deddb3180d6408ce648f145` | [125769400825](https://github.com/redevops-io/redevops-qa/actions/runs/41591460007/job/125769400825) | [125769764661](https://github.com/redevops-io/redevops-qa/actions/runs/41591460007/job/125769764661): accepted, exit 1 |
+| `settings` | 1 | `FAILED` (`ASSERTION_FAILED`) | Playwright Chromium: engine `NATIVE_FAIL (PRODUCT_FAIL)`, 2 of 3 verified; the Robot lane verified 1 of 1 | `sha256:ec0af491eb0138a56fe774970be460508441200c42996ff3e4fed8b184599c9e` | [125769400895](https://github.com/redevops-io/redevops-qa/actions/runs/41591460007/job/125769400895) | [125769764369](https://github.com/redevops-io/redevops-qa/actions/runs/41591460007/job/125769764369): accepted, exit 1 |
 
 All three runs froze the same plan: plan digest `sha256:3e53d5b170e6541bd7fb37188a17c99c766af1d161d5aed452af68a56e68b943`. A seeded defect fails exactly its own lane, and the other lane's result is still recorded.
 
 The second job starts from nothing but the artifacts the demo job kept: it installs the bundle into a new directory, downloads the evidence bundle and the anchor, and runs
 `redevops-qa verify --anchor <the anchor above> --plan-digest <the plan digest above> --require-anchor --require-plan-digest`. For all three bundles the result was accepted, with the exit status the run had.
 The same command on a copy with one byte added to `report.json`, and with a wrong anchor, exited 5 (the evidence is not accepted) in all three jobs.
+
+## Running it as root
+
+Run as root with the default `HOME=/root`, the demo of an installation under `/root` ends `INCONCLUSIVE`, not `VERIFIED`: the Robot lane is refused with `PROHIBITED_PATH`, because the command line of that lane names the
+interpreter of the installation (`/root/redevops-qa/venv/bin/python`) and the adapter path policy refuses every path under `/root` (and under `/etc`, `/proc`, `/sys`, `/dev`, `/run`, `/var/run`, `/boot`, and any path with a
+component such as `.config`). The browser lane is not affected. `install.sh` now refuses such a prefix (exit status 2, the rule named; the list is read from the adapter kit inside the bundle), `doctor` has a check that names the
+interpreter, the guard script or a `TMPDIR` under a refused path before `demo` runs, and the bundle's CI job runs this case as root. As root use a prefix such as `/opt/redevops-qa`; the evidence directory may stay under `/root`.
 
 ## What this does not show
 

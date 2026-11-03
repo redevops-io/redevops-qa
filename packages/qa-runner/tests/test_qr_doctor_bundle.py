@@ -112,3 +112,58 @@ def test_an_unreadable_manifest_fails(tmp_path):
     prefix = make_prefix(tmp_path)
     (prefix / "share" / "redevops-qa" / "pinned-files.json").write_text("{")
     assert doctor.check_pinned_files(str(prefix)).status == "FAIL"
+
+
+# ------------------------------------------------------------------------------------------------------------------------ the adapter path policy (F1)
+def test_an_interpreter_under_root_fails_before_demo_and_names_the_cause():
+    c = doctor.check_path_policy([("the interpreter", "/root/redevops-qa/venv/bin/python"), ("the temporary directory", "/tmp")])
+    assert c.status == "FAIL" and "the interpreter is /root/redevops-qa/venv/bin/python" in c.detail and "PROHIBITED_PATH" in c.detail and "INCONCLUSIVE" in c.detail
+    assert "/opt/redevops-qa" in c.remedy and "TMPDIR" in c.remedy
+
+
+@pytest.mark.parametrize("path", ["/root/tmp", "/etc/x", "/run/x", "/var/run/x", "/proc/x", "/sys/x", "/dev/x", "/boot/x", "/home/u/.config/x", "/home/u/.ssh/x"])
+def test_every_path_the_kit_refuses_fails_for_the_interpreter_the_guard_script_and_the_temporary_directory(path):
+    for what in ("the interpreter", "the Robot guard script", "the temporary directory"):
+        c = doctor.check_path_policy([(what, path)])
+        assert c.status == "FAIL" and f"{what} is {path}" in c.detail, (what, path)
+
+
+def test_ordinary_paths_pass_and_the_remedy_lists_the_kits_own_prefixes():
+    assert doctor.check_path_policy([("the interpreter", "/opt/redevops-qa/venv/bin/python"), ("the temporary directory", "/tmp"), ("the Robot guard script", "/home/runner/x/robot_guard.py")]).status == "OK"
+    from qa_adapter_kit.paths import DENIED_PREFIXES
+    remedy = doctor.check_path_policy([("the interpreter", "/root/x")]).remedy
+    assert all(prefix in remedy for prefix in DENIED_PREFIXES)                  # read from the kit, not copied by hand
+
+
+def test_the_check_uses_the_kits_rule_not_a_copy_of_it():
+    seen = []
+    doctor.check_path_policy([("the interpreter", "/anything")], is_denied=lambda p: seen.append(p) or False)
+    assert seen == ["/anything", "/anything"]                                    # asked about the path as given and about its real path
+    assert doctor.check_path_policy([("the interpreter", "/anything")], is_denied=lambda p: True).status == "FAIL"
+    import inspect
+    assert "from qa_adapter_kit.paths import is_denied as kit_is_denied" in inspect.getsource(doctor.check_path_policy)
+
+
+def test_a_symbolic_link_into_a_refused_directory_is_found_by_its_real_path(tmp_path):
+    hidden = tmp_path / ".config"
+    hidden.mkdir()
+    link = tmp_path / "bin"
+    link.symlink_to(hidden)
+    c = doctor.check_path_policy([("the interpreter", str(link / "python"))])
+    assert c.status == "FAIL"
+
+
+def test_the_default_check_looks_at_this_interpreter_the_guard_script_and_the_temporary_directory(monkeypatch, tmp_path):
+    import tempfile
+    assert doctor.check_path_policy().status == "OK" or doctor.check_path_policy().status == "FAIL"           # whichever this machine gives, it ran the three
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: "/root/tmp")
+    c = doctor.check_path_policy()
+    assert c.status == "FAIL" and "the temporary directory is /root/tmp" in c.detail
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(doctor.sys, "executable", "/root/venv/bin/python")
+    assert "the interpreter is /root/venv/bin/python" in doctor.check_path_policy().detail
+
+
+def test_doctor_runs_the_path_policy_check_among_its_defaults():
+    import inspect
+    assert "check_path_policy" in inspect.getsource(doctor.run_doctor)

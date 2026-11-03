@@ -82,6 +82,24 @@ def _share(prefix: Optional[str]) -> Path:
     return Path(prefix or sys.prefix) / "share" / "redevops-qa"
 
 
+def check_path_policy(paths: Optional[Sequence[Tuple[str, str]]] = None, is_denied: Optional[Callable[[str], bool]] = None) -> Check:
+    """The Robot lane's command line names the interpreter, the guard script and a temporary directory; the adapter kit refuses a command whose arguments name a prohibited path
+    (``/root``, ``/etc``, a ``.config`` component, ...). A run whose interpreter or temporary directory lies under such a path ends INCONCLUSIVE (``PROHIBITED_PATH``) when the Robot lane
+    starts: this names the cause before ``demo`` runs. The rule is the adapter kit's own (``qa_adapter_kit.paths.is_denied``), not a copy."""
+    from qa_adapter_kit.paths import DENIED_COMPONENTS as kit_components, DENIED_PREFIXES as kit_prefixes
+    if is_denied is None:
+        from qa_adapter_kit.paths import is_denied as kit_is_denied
+        is_denied = kit_is_denied
+    if paths is None:
+        paths = [("the interpreter", sys.executable), ("the Robot guard script", str(Path(__file__).with_name("robot_guard.py"))), ("the temporary directory", tempfile.gettempdir())]
+    bad = [(what, os.path.normpath(p)) for what, p in paths if is_denied(os.path.normpath(p)) or is_denied(os.path.realpath(p))]
+    if bad:
+        return Check("adapter path policy", "FAIL", "; ".join(f"{what} is {p}" for what, p in bad) + ": the adapter path policy refuses these paths, so the Robot lane of a run would end INCONCLUSIVE (PROHIBITED_PATH)",
+                     "install into a directory the policy accepts (as root, not under /root: for example /opt/redevops-qa) and set TMPDIR to such a directory; the refused places are "
+                     + ", ".join(kit_prefixes) + " and any path with a component such as " + ", ".join(sorted(kit_components)[:4]) + " (the list of qa_adapter_kit.paths)")
+    return Check("adapter path policy", "OK", "the interpreter, the Robot guard script and the temporary directory are paths the adapter path policy accepts")
+
+
 def check_first_party_modules(prefix: Optional[str] = None, locate: Callable = importlib.util.find_spec) -> Check:
     """In a bundle install every first-party package must be imported from the installation itself. A stale checkout on PYTHONPATH (or anything else that comes first on the
     import path) that shadows an installed package is a failure here, not a silent replacement. Outside a bundle install (a checkout, a development environment) there is
@@ -226,7 +244,7 @@ def check_workdir() -> Check:
 
 
 def run_doctor(engines: Sequence[str] = (K.ENGINE_PLAYWRIGHT,), *, include: Optional[Sequence[Callable[[], Check]]] = None) -> List[Check]:
-    checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, check_first_party_modules, check_pins, check_pinned_files]
+    checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, check_path_policy, check_first_party_modules, check_pins, check_pinned_files]
     if K.ENGINE_PLAYWRIGHT in engines:
         checks.append(check_playwright)
     if K.ENGINE_ROBOT in engines:

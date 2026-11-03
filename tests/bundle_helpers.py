@@ -53,12 +53,31 @@ def make_wheel(directory: Path, version: str, *, name: str = "redevops_qa_testpk
     return out
 
 
-def make_mini_bundle(out_dir: Path, version: str = "1.0", *, target: Dict[str, str] | None = None, label: str = "", name: str = "redevops-qa-bundle-test") -> Path:
+def make_kit_wheel(directory: Path, paths_text: str | None = None, version: str = "1.0") -> Path:
+    """A wheel named like the adapter kit's, holding qa_adapter_kit/paths.py: the real file by default (the installer reads the path policy from it), or the text given."""
+    name = "redevops_qa_adapter_kit"
+    text = paths_text if paths_text is not None else (ROOT / "packages" / "qa-adapter-kit" / "src" / "qa_adapter_kit" / "paths.py").read_text(encoding="utf-8")
+    dist = f"{name}-{version}"
+    files = {"qa_adapter_kit/__init__.py": b"", "qa_adapter_kit/paths.py": text.encode(),
+             f"{dist}.dist-info/METADATA": f"Metadata-Version: 2.1\nName: {name.replace('_', '-')}\nVersion: {version}\n".encode(),
+             f"{dist}.dist-info/WHEEL": b"Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n"}
+    for lic in ("LICENSE.md", "LICENSE", "LICENSE-COMMONS-CLAUSE"):
+        files[f"{dist}.dist-info/licenses/{lic}"] = f"licence text {lic}\n".encode()
+    files[f"{dist}.dist-info/RECORD"] = ("\n".join(bb.record_line(n, d) for n, d in sorted(files.items())) + f"\n{dist}.dist-info/RECORD,,\n").encode()
+    out = directory / f"{dist}-py3-none-any.whl"
+    bb.write_wheel(out, files, 1_700_000_000)
+    return out
+
+
+def make_mini_bundle(out_dir: Path, version: str = "1.0", *, target: Dict[str, str] | None = None, label: str = "", name: str = "redevops-qa-bundle-test",
+                     kit_paths_text: str | None = None, with_kit: bool = False) -> Path:
     """A bundle of one synthetic wheel, built by ``assemble``. Its target is this host unless given."""
     wheels = out_dir / f"wheels-{version}"
     wheels.mkdir(parents=True)
-    entry = bb.WheelEntry(make_wheel(wheels, version), "first-party", "test")
-    return bb.assemble(out_dir, name=name, entries=[entry], target=target or host_target(), epoch=1_700_000_000, label=label, version=version, commit="0" * 40, pins_info=None,
+    entries = [bb.WheelEntry(make_wheel(wheels, version), "first-party", "test")]
+    if with_kit or kit_paths_text is not None:
+        entries.append(bb.WheelEntry(make_kit_wheel(wheels, kit_paths_text), "first-party", "test"))
+    return bb.assemble(out_dir, name=name, entries=entries, target=target or host_target(), epoch=1_700_000_000, label=label, version=version, commit="0" * 40, pins_info=None,
                        licences_from={}, build_tools={}, readme_template=(ROOT / "bundle" / "README.md").read_text(encoding="utf-8"))
 
 

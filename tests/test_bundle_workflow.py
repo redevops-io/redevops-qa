@@ -200,3 +200,23 @@ def test_no_step_of_the_demo_jobs_pipes_a_command_whose_exit_status_matters_thro
         for line in str(step.get("run", "")).splitlines():
             code = line.split("#")[0]
             assert not re.search(r"\)\s*\|\s*tee\b|[^|]\|\s*tee\b", code) or "pipefail" in str(step.get("run", "")) or step.get("shell"), line
+
+
+def test_the_bundle_install_job_also_runs_the_root_check_after_the_acceptance_script():
+    steps = MAIN["jobs"]["bundle-install"]["steps"]
+    runs = [str(x.get("run", "")) for x in steps]
+    acceptance = next(i for i, r in enumerate(runs) if "tools/bundle_acceptance.sh" in r)
+    root = next(i for i, r in enumerate(runs) if "tools/bundle_root_check.sh" in r)
+    assert acceptance < root
+    assert runs[root].startswith('sudo env HOME=/root PATH="$PATH" bash tools/bundle_root_check.sh --current "$RUNNER_TEMP/current"') and '--python "$(command -v python3.12)"' in runs[root]
+
+
+def test_the_root_check_script_covers_the_refusal_the_working_prefix_the_evidence_under_root_and_the_tmpdir_case():
+    text = (ROOT / "tools" / "bundle_root_check.sh").read_text(encoding="utf-8")
+    for fragment in ('./install.sh --prefix /root/redevops-qa', "[ $st -eq 2 ]", "the directory /root", "PROHIBITED_PATH", "/opt/redevops-qa-root-check", "--out \"$evidence\"", "evidence=/root/qa-root-check-evidence",
+                     'TMPDIR="$tmpd" "$prefix/bin/redevops-qa" doctor', "[ $st -eq 3 ]", "adapter path policy: the temporary directory is /root/qa-root-check-tmp", "ROOT CHECK OK", '[ "$(id -u)" -eq 0 ]'):
+        assert fragment in text, fragment
+    assert "curl" not in text and "wget" not in text
+    for line in text.splitlines():
+        if re.search(r"\brm -rf\b", line) and not line.lstrip().startswith("#"):
+            assert '"$work"' in line and '"$evidence"' in line and '"$tmpd"' in line, line               # it removes only what it made

@@ -11,7 +11,7 @@
 # --python  the interpreter to build the virtual environment with (default: python3.12, then python3). It must be the Python minor and the platform
 #           named in BUNDLE.json; anything else is refused before anything is created.
 #
-# Exit status: 0 installed; 2 usage; 3 the bundle is not for this Python or platform; 4 the bundle is damaged or does not match its checksums;
+# Exit status: 0 installed; 2 usage, or a prefix under a path the adapter path policy refuses (for example /root); 3 the bundle is not for this Python or platform; 4 the bundle is damaged or does not match its checksums;
 # 5 the prefix is not usable; 6 the environment or the install failed (and was removed).
 set -eu
 set -o pipefail
@@ -58,7 +58,7 @@ fi
 
 # Before anything is created: the interpreter and the platform are the ones the bundle was built for, and every file of the bundle is the one SHA256SUMS lists.
 status=0
-"$python_bin" -I - "$here" <<'PY' || status=$?
+"$python_bin" -I - "$here" "$prefix" <<'PY' || status=$?
 import hashlib, json, os, platform, sys
 here = sys.argv[1]
 manifest = json.load(open(os.path.join(here, "BUNDLE.json"), encoding="utf-8"))
@@ -94,6 +94,47 @@ for rel in sorted(present & set(listed)):
 if problems:
     print("install.sh: the bundle does not match its SHA256SUMS; nothing was installed:\n  " + "\n  ".join(problems[:20]), file=sys.stderr)
     sys.exit(4)
+
+# The prefix must be somewhere the adapter path policy of this bundle accepts. The rule is read from the bundle itself (the constants of qa_adapter_kit/paths.py in the adapter kit wheel,
+# parsed with ast, nothing executed) so that it cannot drift from what the runner enforces: a Robot lane whose command line names the installation (the interpreter and the guard script)
+# under a refused path ends INCONCLUSIVE (PROHIBITED_PATH). The commonest case: an install under /root, as root.
+import ast, glob, zipfile
+kits = sorted(glob.glob(os.path.join(here, "wheelhouse", "redevops_qa_adapter_kit-*.whl")))
+if kits:
+    with zipfile.ZipFile(kits[0]) as zf:
+        tree = ast.parse(zf.read("qa_adapter_kit/paths.py").decode("utf-8"))
+    consts = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in ("DENIED_PREFIXES", "DENIED_COMPONENTS", "DENIED_NAMES"):
+            value = node.value.args[0] if isinstance(node.value, ast.Call) else node.value
+            consts[node.targets[0].id] = tuple(ast.literal_eval(value))
+    if set(consts) != {"DENIED_PREFIXES", "DENIED_COMPONENTS", "DENIED_NAMES"}:
+        print("install.sh: the adapter kit of this bundle does not define the path policy this installer reads; nothing was installed", file=sys.stderr)
+        sys.exit(4)
+
+    def refused(path):
+        norm = os.path.normpath(path)
+        for prefix in consts["DENIED_PREFIXES"]:
+            if norm == prefix or norm.startswith(prefix + "/"):
+                return "the directory " + prefix
+        parts = [x for x in norm.split("/") if x]
+        for part in parts:
+            if part in consts["DENIED_COMPONENTS"]:
+                return "a path component named " + part
+        last = parts[-1] if parts else ""
+        for name in consts["DENIED_NAMES"]:
+            if last == name or last.startswith(name + "."):
+                return "a file named " + name
+        return ""
+    given = os.path.normpath(sys.argv[2])
+    for label, base in (("as given", given), ("with symbolic links resolved", os.path.realpath(given))):
+        for path in (base, base + "/venv/bin/python", base + "/venv/lib/python%d.%d/site-packages/qa_runner/robot_guard.py" % sys.version_info[:2]):
+            why = refused(path)
+            if why:
+                print("install.sh: the prefix (%s) puts the installation under %s, which the adapter path policy of this bundle refuses; the Robot lane would end INCONCLUSIVE "
+                      "(PROHIBITED_PATH: its command line names the interpreter and the guard script of the installation). As root use a prefix outside /root, for example /opt/redevops-qa. "
+                      "Nothing was changed." % (label, why), file=sys.stderr)
+                sys.exit(2)
 PY
 [ "$status" -eq 0 ] || exit "$status"
 

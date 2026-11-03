@@ -407,3 +407,96 @@ def test_sha256sums_with_a_duplicate_empty_or_malformed_line_is_refused_before_a
     (bundle / "SHA256SUMS").write_text("\n".join(edit(lines)) + "\n")
     done = run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home")
     assert done.returncode == 4 and "does not accept" in done.stderr and not (box / "qa").exists(), (label, done.stderr)
+
+
+# ------------------------------------------------------------------------------------------------ the prefix must be somewhere the adapter path policy accepts (F1: root, HOME=/root)
+import os  # noqa: E402
+
+from bundle_helpers import ROOT  # noqa: E402
+
+
+def kit_is_denied():
+    import qa_adapter_kit.paths as kit            # the source of truth the installer reads from the bundle's own copy of it
+    return kit
+
+
+@pytest.fixture(scope="module")
+def policy_bundle(tmp_path_factory):
+    return make_mini_bundle(tmp_path_factory.mktemp("policy"), with_kit=True)
+
+
+@pytest.fixture()
+def failing_venv_python(box):
+    """The real interpreter, except that `-m venv` fails at once: an install the path policy accepted then ends with exit 6 instead of taking seconds to finish."""
+    wrapper = box / "fastfail"
+    wrapper.write_text(f"#!/bin/sh\nif [ \"$1\" = \"-m\" ] && [ \"$2\" = \"venv\" ]; then exit 1; fi\nexec '{sys.executable}' \"$@\"\n")
+    wrapper.chmod(0o755)
+    return str(wrapper)
+
+
+@pytest.mark.parametrize("prefix,rule", [("/root/redevops-qa", "the directory /root"), ("/root", "the directory /root"), ("/etc/redevops-qa", "the directory /etc"), ("/proc/x", "the directory /proc"),
+                                         ("/sys/x", "the directory /sys"), ("/dev/x", "the directory /dev"), ("/run/x", "the directory /run"), ("/var/run/x", "the directory /var/run"),
+                                         ("/boot/x", "the directory /boot"), ("/home/u/.config/qa", "a path component named .config"), ("/home/u/.ssh/qa", "a path component named .ssh"),
+                                         ("/opt/credentials", "a file named credentials"), ("/root/redevops-qa/", "the directory /root"), ("/root/./x/..", "the directory /root")])
+def test_a_prefix_the_adapter_path_policy_refuses_is_refused_with_exit_2_naming_the_rule_and_nothing_is_created(policy_bundle, box, prefix, rule):
+    done = run_script(policy_bundle, "install.sh", ["--prefix", prefix], box / "home")
+    assert done.returncode == 2, done.stderr
+    assert rule in done.stderr and "adapter path policy" in done.stderr and "PROHIBITED_PATH" in done.stderr and "/opt/redevops-qa" in done.stderr and "Nothing was changed" in done.stderr
+    assert tree_listing(box / "home") == []
+
+
+def test_a_prefix_through_a_symbolic_link_into_a_refused_directory_is_refused_by_its_resolved_path(policy_bundle, box):
+    target = box / ".config"
+    target.mkdir()
+    link = box / "viaparent"
+    link.symlink_to(target)
+    done = run_script(policy_bundle, "install.sh", ["--prefix", str(link / "qa")], box / "home")
+    assert done.returncode == 2 and "with symbolic links resolved" in done.stderr and ".config" in done.stderr and not (target / "qa").exists()
+
+
+def test_the_installer_applies_exactly_the_rule_of_the_adapter_kit_for_a_battery_of_prefixes(policy_bundle, box, failing_venv_python):
+    kit = kit_is_denied()
+    version = "%d.%d" % sys.version_info[:2]
+    # prefixes the rule refuses, and prefixes that only look like them; an accepted prefix goes on to make its directory (exit 5 where / is not writable, 6 where the fake interpreter then fails),
+    # so near misses under system directories are only run by a user who cannot create them
+    refused_battery = ["/root/x", "/etc", "/run/user/1000/x", "/var/run/x", "/home/u/.config/q", "/home/u/.aws/q", "/srv/credentials", "/srv/credentials.json", "/dev/shm/x", "/boot", "/tmp/a/docker.sock",
+                       "/tmp/id_rsa.pub", "/proc/1/x", "/sys/x"]
+    accepted_battery = [str(box / "qa"), str(box / "config" / "q"), str(box / "credentialsx")]
+    if os.geteuid() != 0:
+        accepted_battery += ["/rootless/x", "/etc2/x", "/runner/x", "/var/runner/x", "/devx/y", "/bootx", "/opt/redevops-qa"]
+    mismatches = []
+    for prefix in refused_battery + accepted_battery:
+        expected_refused = any(kit.is_denied(p) for p in (prefix, prefix + "/venv/bin/python", f"{prefix}/venv/lib/python{version}/site-packages/qa_runner/robot_guard.py"))
+        done = run_script(policy_bundle, "install.sh", ["--prefix", prefix], box / "home", python=failing_venv_python)
+        refused = done.returncode == 2
+        if refused != expected_refused or (not refused and done.returncode not in (5, 6)):
+            mismatches.append((prefix, expected_refused, done.returncode, done.stderr[-120:]))
+    assert mismatches == []
+    assert [p for p in refused_battery if not any(kit.is_denied(x) for x in (p, p + "/venv/bin/python"))] == []          # every entry of the first list really is refused by the kit
+
+
+def test_the_installer_reads_the_rule_from_the_kit_of_the_bundle_so_it_cannot_drift_from_the_runner(tmp_path_factory, box, failing_venv_python):
+    text = (ROOT / "packages" / "qa-adapter-kit" / "src" / "qa_adapter_kit" / "paths.py").read_text(encoding="utf-8")
+    assert '"/boot", "/private/etc"' in text
+    changed = make_mini_bundle(tmp_path_factory.mktemp("kit2"), kit_paths_text=text.replace('"/boot", "/private/etc"', '"/boot", "/srv", "/private/etc"'))
+    done = run_script(changed, "install.sh", ["--prefix", "/srv/qa"], box / "home", python=failing_venv_python)
+    assert done.returncode == 2 and "the directory /srv" in done.stderr
+    same = make_mini_bundle(tmp_path_factory.mktemp("kit3"), with_kit=True)
+    assert run_script(same, "install.sh", ["--prefix", str(box / "srv" / "qa")], box / "home", python=failing_venv_python).returncode == 6        # the unchanged kit accepts what it did not list
+
+
+def test_a_kit_whose_policy_constants_cannot_be_read_stops_the_install_before_anything_is_created(tmp_path_factory, box):
+    broken = make_mini_bundle(tmp_path_factory.mktemp("kit4"), kit_paths_text="DENIED_PREFIXES = ('/etc',)\n")
+    done = run_script(broken, "install.sh", ["--prefix", str(box / "qa")], box / "home")
+    assert done.returncode == 4 and "does not define the path policy" in done.stderr and not (box / "qa").exists()
+
+
+def test_an_ordinary_prefix_still_installs_with_the_kit_present(policy_bundle, box):
+    prefix = box / "qa"
+    assert run_script(policy_bundle, "install.sh", ["--prefix", str(prefix)], box / "home").returncode == 0
+    assert run_script(policy_bundle, "uninstall.sh", ["--prefix", str(prefix)], box / "home").returncode == 0
+
+
+def test_the_installer_documents_the_new_exit_status():
+    text = (ROOT / "bundle" / "install.sh").read_text(encoding="utf-8")
+    assert "2 usage, or a prefix under a path the adapter path policy refuses (for example /root)" in text

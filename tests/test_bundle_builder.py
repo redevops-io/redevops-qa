@@ -334,3 +334,14 @@ def test_the_readme_says_what_uninstall_needs_and_what_it_refuses():
     text = (ROOT / "bundle" / "README.md").read_text(encoding="utf-8")
     assert "needs a Python (`python3.12` or `python3`) on `PATH`" in text
     assert "moved, or is reached through another mount path, is refused" in text and "remove such a directory by hand" in text
+
+
+def test_a_release_bundle_without_the_adapter_kit_wheel_is_found_because_the_installer_reads_the_path_policy_from_it(mini):
+    found = {f.code for f in cb.check_bundle(mini)}
+    assert "PATH_POLICY_SOURCE" in found                      # the mini bundle has no kit wheel (and is a test bundle, so this is only the release view of it)
+
+
+def test_the_readme_tells_root_to_use_a_prefix_outside_root_and_says_what_doctor_checks():
+    text = (ROOT / "bundle" / "README.md").read_text(encoding="utf-8")
+    assert "As root (HOME=/root), use a prefix outside `/root`, for example `/opt/redevops-qa`" in text and "exit status 2" in text and "PROHIBITED_PATH" in text
+    assert "`TMPDIR`" in text and "The evidence directory (`--out`) may be anywhere" in text and "read from the adapter kit inside the bundle" in text

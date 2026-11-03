@@ -181,6 +181,8 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
             out.append(Finding("PINS_RECORD", "BUNDLE.json", "one pinned-upstreams wheel and a pins record are expected"))
         else:
             out += _check_pinned_wheel(root / "wheelhouse" / pinned[0]["filename"], pins)
+    if not allow_test_target and not any(_wheel_nv(w.get("filename", "")) and _wheel_nv(w["filename"])[0] == "redevops-qa-adapter-kit" for w in entries):
+        out.append(Finding("PATH_POLICY_SOURCE", "BUNDLE.json", "install.sh reads the adapter path policy from the adapter kit wheel of the bundle; a release bundle holds it"))
     # --- text
     text_files = {f: (root / f).read_text(encoding="utf-8", errors="replace") for f in ("README.md", "BUNDLE.json")}
     for f, text in text_files.items():
