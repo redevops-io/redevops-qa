@@ -32,6 +32,7 @@ from . import constants as K
 from .deps import verified_bootstrap
 from .errors import EnvironmentFault, PlanError, RunnerError
 from .golden import demo_plan
+from . import anchor_sig
 from .inspect_cmd import inspect_text
 from .plan import MAX_PLAN_BYTES, FrozenPlan, freeze_plan, load_plan_or_lock
 from . import isolated
@@ -81,6 +82,7 @@ def _parser() -> argparse.ArgumentParser:
     sp.add_argument("--require-anchor", action="store_true", help="a finding unless --anchor matches the recomputed manifest digest (a match is not proof of integrity: nothing here authenticates where the supplied value came from)")
     sp.add_argument("--require-plan-digest", action="store_true", help="a finding unless --plan-digest matches the plan digest of the bundle")
     sp.add_argument("--json", action="store_true", help="print the result as JSON")
+    signed_anchor_options(sp)
 
     for name, text in (("report", "print the report of a bundle for people (text, JSON or one HTML file); it verifies the bundle first and never recomputes a verdict"),
                        ("inspect", "list what is in a bundle: files, digests, tool versions, lanes and the heads of the chains inside it")):
@@ -88,10 +90,37 @@ def _parser() -> argparse.ArgumentParser:
         sp.add_argument("bundle", help="a bundle directory or archive")
         sp.add_argument("--anchor", metavar="sha256:HEX", help="external anchor value: the manifest digest published outside the bundle")
         sp.add_argument("--plan-digest", metavar="sha256:HEX", help="the plan digest printed by `freeze`, obtained from outside the bundle")
+        signed_anchor_options(sp)
         if name == "report":
             sp.add_argument("--format", choices=("text", "json", "html"), default="text")
             sp.add_argument("-o", "--output", metavar="FILE", help="write to FILE (never overwritten) instead of standard output")
+
+    sp = sub.add_parser("anchor", help="the optional signed anchor: print the statement to sign for a bundle, or sign it with an operator-held Ed25519 key through the OpenSSH client")
+    asub = sp.add_subparsers(dest="anchor_command", required=True)
+    ap = asub.add_parser("statement", help="verify a bundle and print the statement (run id, manifest digest, plan digest) to be signed with `ssh-keygen -Y sign -n %s`" % anchor_sig.NAMESPACE)
+    ap.add_argument("bundle", help="a bundle directory or archive")
+    ap = asub.add_parser("sign", help="verify a bundle and sign its statement with `ssh-keygen -Y sign`; the key is the operator's and is only passed to ssh-keygen, never read or kept here")
+    ap.add_argument("bundle", help="a bundle directory or archive")
+    ap.add_argument("--key", required=True, metavar="PATH", help="the Ed25519 key file ssh-keygen signs with (with --agent: the PUBLIC key file of the key the ssh-agent named by SSH_AUTH_SOCK must sign with). Without --agent no ssh-agent is used: SSH_AUTH_SOCK and SSH_AGENT_PID are removed from the environment of ssh-keygen")
+    ap.add_argument("--agent", action="store_true", help="sign with the ssh-agent named by SSH_AUTH_SOCK (ssh-keygen -U); --key names the public key file, and only that key signs")
+    ap.add_argument("--out", metavar="FILE", help="where to write the signature (never overwritten); default: <bundle path>.anchor.sig, next to the bundle and outside it")
     return p
+
+
+def signed_anchor_options(sp) -> None:
+    sp.add_argument("--anchor-sig", metavar="FILE", help="a detached OpenSSH signature (namespace %s) of the bundle's statement; needs --anchor-pub" % anchor_sig.NAMESPACE)
+    sp.add_argument("--anchor-pub", metavar="FILE", help="the ONE OpenSSH public key (a single ssh-ed25519 line) the signature must be by, obtained from outside the bundle; never taken from the bundle")
+    sp.add_argument("--require-signed-anchor", action="store_true", help="a finding unless the signature is valid for the bundle's statement and the supplied key (an unsigned bundle is refused, a bad signature always is)")
+
+
+def _signed_anchor_kwargs(args) -> dict:
+    """The options of the optional signed anchor, validated as a whole: a signature without the key to check it against is a usage error, not a state of the bundle."""
+    sig, pub, required = getattr(args, "anchor_sig", None), getattr(args, "anchor_pub", None), bool(getattr(args, "require_signed_anchor", False))
+    if sig is not None and pub is None:
+        raise PlanError("ANCHOR_PUB_REQUIRED", "--anchor-sig needs --anchor-pub: the key to check the signature against must come from you, never from the bundle")
+    if pub is not None and sig is None and not required:
+        raise PlanError("ANCHOR_SIG_REQUIRED", "--anchor-pub without --anchor-sig checks nothing (add --anchor-sig FILE, or --require-signed-anchor to refuse an unsigned bundle)")
+    return {"anchor_sig": sig, "anchor_pub": pub, "require_signed_anchor": required}
 
 
 def _read_plan(path: str) -> bytes:
@@ -307,12 +336,65 @@ def _demo(args, out: TextIO, err: TextIO) -> int:
 
 def _verify(args, out: TextIO, err: TextIO) -> int:
     from .verify import render_text as verify_text, verify_location
+    _signed_anchor_kwargs(args)           # a usage error is reported before the bundle is read
     try:
-        v = verify_location(args.bundle, anchor=args.anchor, plan_digest=args.plan_digest, require_anchor=args.require_anchor, require_plan_digest=args.require_plan_digest)
+        v = verify_location(args.bundle, anchor=args.anchor, plan_digest=args.plan_digest, require_anchor=args.require_anchor, require_plan_digest=args.require_plan_digest,
+                            **_signed_anchor_kwargs(args))
     except isolated.IsolatedReadError as exc:
         raise _bundle_read_error(exc) from None
     out.write(json.dumps(v.to_json(), sort_keys=True, indent=2) + "\n" if args.json else verify_text(args.bundle, v))
     return v.exit_code
+
+
+def _statement_of(args, err: TextIO):
+    """Verify the bundle (no anchor given) and rebuild its statement; ``(None, code)`` when the bundle is not accepted, ``(statement, 0)`` otherwise."""
+    from .verify import verify_snapshot
+    snap = _snapshot(args.bundle)
+    v = verify_snapshot(snap)
+    if v.unavailable:
+        print("error: the verifier cannot run here: nothing is signed or printed", file=err)
+        return None, v.exit_code
+    if not v.accepted:
+        print(f"error: the bundle does not verify ({len(v.findings)} finding(s); run `redevops-qa verify`): refusing to name a statement for it", file=err)
+        return None, K.EXIT_REJECTED
+    report = json.loads(snap.files["report.json"])
+    return anchor_sig.statement_bytes(report["run_id"], v.qe.manifest_digest, report["plan_digest"]), 0
+
+
+def _anchor(args, out: TextIO, err: TextIO) -> int:
+    statement, code = _statement_of(args, err)
+    if statement is None:
+        return code
+    if args.anchor_command == "statement":
+        out.write(statement.decode("ascii"))
+        print(f"sign exactly these bytes (save them as FILE): ssh-keygen -Y sign -n {anchor_sig.NAMESPACE} -f <your private key> FILE   (writes FILE.sig); give the signature and the public key to `redevops-qa verify --anchor-sig ... --anchor-pub ...`", file=err)
+        return 0
+    out_path = args.out or (os.path.abspath(args.bundle).rstrip("/") + ".anchor.sig")
+    # the output file is created exclusively BEFORE ssh-keygen is started: an existing file (or a link, even a dangling one) or an unwritable location fails here, not after the operator has typed a passphrase or touched a key
+    try:
+        fh = open(out_path, "xb")
+    except FileExistsError:
+        raise PlanError("OUTPUT_EXISTS", f"{safe_text(out_path)} already exists: a signature is never overwritten") from None
+    except OSError as exc:
+        raise PlanError("OUTPUT_UNWRITABLE", f"cannot write {safe_text(out_path)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+    try:
+        with fh:
+            try:
+                signature, fingerprint = anchor_sig.sign_statement(statement, args.key, agent=args.agent)
+                fh.write(signature)
+            except anchor_sig.AnchorSigError as exc:
+                os.unlink(out_path)              # nothing was signed: no empty file is left behind
+                print(f"error: {safe_text(exc.message, 300)}", file=err)
+                return K.EXIT_VERIFIER_UNAVAILABLE if exc.state == anchor_sig.UNAVAILABLE else K.EXIT_USAGE
+            except BaseException:
+                os.unlink(out_path)
+                raise
+    except OSError as exc:
+        raise PlanError("OUTPUT_UNWRITABLE", f"cannot write {safe_text(out_path)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+    out.write(signature.decode("ascii"))
+    print(f"signed with the key {safe_text(fingerprint, 60)}; signature written to {out_path}", file=err)
+    print("  check it with: redevops-qa verify BUNDLE --anchor-sig %s --anchor-pub <the public key you published> --require-signed-anchor" % safe_text(out_path, 200), file=err)
+    return 0
 
 
 def _bundle_read_error(exc: "isolated.IsolatedReadError") -> Exception:
@@ -335,10 +417,14 @@ def _snapshot(location: str):
 def _recomputed(args, snapshot):
     """The recomputation of the verdicts from the bundle alone (``verify``), over the snapshot ``report`` and ``inspect`` also show."""
     from .verify import verify_snapshot
-    return verify_snapshot(snapshot, anchor=args.anchor, plan_digest=args.plan_digest)
+    return verify_snapshot(snapshot, anchor=args.anchor, plan_digest=args.plan_digest, **_signed_anchor_kwargs(args))
 
 
 def _recomputed_line(v) -> str:
+    if v.accepted and v.signature.state == anchor_sig.VERIFIED:
+        return (f"verdicts recomputed from the bundle alone: {v.agreeing} of {v.recomputed} agree with the report (ACCEPTED as internally consistent); signed anchor VERIFIED, key {safe_text(v.signature.fingerprint or '', 60)} "
+                "(supplied to this verification; it does not show who holds that key or when the signature was made). The external anchor and frozen assertion set lines below describe values supplied with --anchor and --plan-digest, "
+                "not this signature")
     if v.accepted:
         return f"verdicts recomputed from the bundle alone: {v.agreeing} of {v.recomputed} agree with the report (ACCEPTED as internally consistent)"
     if v.unavailable:
@@ -355,6 +441,7 @@ def _findings_lines(v, limit: int = 30) -> List[str]:
 
 
 def _report(args, out: TextIO, err: TextIO) -> int:
+    _signed_anchor_kwargs(args)
     snap = _snapshot(args.bundle)
     ins = inspect_source(snap, anchor=args.anchor, plan_digest=args.plan_digest)
     v = _recomputed(args, snap)
@@ -389,6 +476,7 @@ def _report(args, out: TextIO, err: TextIO) -> int:
 
 
 def _inspect(args, out: TextIO, err: TextIO) -> int:
+    _signed_anchor_kwargs(args)
     snap = _snapshot(args.bundle)              # ONE snapshot: the listing and the recomputation below see the same bytes
     v = _recomputed(args, snap)
     if not v.accepted:
@@ -409,7 +497,7 @@ def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Op
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else K.EXIT_USAGE
     try:
-        return {"doctor": _doctor, "freeze": _freeze, "run": _run, "verify": _verify, "demo": _demo, "report": _report, "inspect": _inspect}[args.command](args, out, err)
+        return {"doctor": _doctor, "freeze": _freeze, "run": _run, "verify": _verify, "demo": _demo, "report": _report, "inspect": _inspect, "anchor": _anchor}[args.command](args, out, err)
     except PlanError as exc:
         print(f"error: {safe_text(str(exc))}", file=err)
         return K.EXIT_USAGE
