@@ -108,7 +108,9 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
-"$python_bin" -m venv "$prefix/venv" || fail 6 "the virtual environment could not be created (on Debian and Ubuntu: apt-get install python3-venv)"
+# HOME points into the prefix while the venv is made: a CPython from a toolcache has been seen creating a directory (.rustup) under whatever HOME it is started with when it makes a venv.
+mkdir "$prefix/venv"
+HOME="$prefix/venv" "$python_bin" -m venv "$prefix/venv" || fail 6 "the virtual environment could not be created (on Debian and Ubuntu: apt-get install python3-venv)"
 
 # A clean environment for pip: no user configuration, no cache, no index.
 if ! env -i PATH="$PATH" LC_ALL=C HOME="$prefix/venv" PIP_CONFIG_FILE=/dev/null PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_INPUT=1 \

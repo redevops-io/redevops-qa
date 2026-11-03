@@ -266,6 +266,20 @@ def test_a_signal_during_the_install_leaves_nothing_behind(bundles, box):
     assert proc.returncode != 0 and not (box / "qa").exists()
 
 
+def test_the_venv_is_made_with_a_home_inside_the_prefix_so_nothing_a_python_creates_under_home_lands_outside_it(bundles, box):
+    """A CPython from a runner's toolcache creates a directory (.rustup) under the HOME it is started with when it makes a venv; the installer must not leave that outside the prefix."""
+    log = box / "venv-home.txt"
+    wrapper = box / "homepy"
+    wrapper.write_text(f"#!/bin/sh\nif [ \"$1\" = \"-m\" ] && [ \"$2\" = \"venv\" ]; then echo \"$HOME\" > '{log}'; mkdir -p \"$HOME/.leftover\"; fi\nexec '{sys.executable}' \"$@\"\n")
+    wrapper.chmod(0o755)
+    prefix = box / "qa"
+    done = run_script(bundles["v1"], "install.sh", ["--prefix", str(prefix), "--python", str(wrapper)], box / "home", python=None)
+    assert done.returncode == 0, done.stderr
+    assert log.read_text().strip() == f"{prefix}/venv" and (prefix / "venv" / ".leftover").is_dir()
+    assert tree_listing(box / "home") == []
+    assert run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(prefix)], box / "home").returncode == 0 and not prefix.exists()
+
+
 def test_install_browser_refuses_a_directory_that_is_not_an_installation(bundles, box):
     done = run_script(bundles["v1"], "install-browser.sh", ["--prefix", str(box / "nothing")], box / "home")
     assert done.returncode == 5 and "not an installation" in done.stderr
