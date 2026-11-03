@@ -230,6 +230,7 @@ def check_matrix(matrix: dict) -> List[Finding]:
                 findings.append(Finding("MATRIX_CLAIM", cid, f"the matrix never says a component is cleared, approved, compatible or permitted ({text[:70]!r})"))
                 break
     findings += check_required_decisions(matrix)
+    findings += check_inventory_block(matrix)
     if any((c.get("redistribution") or {}).get("status") == "staged_unmodified" for c in by_id.values()):
         block = matrix.get("bundle_public_distribution")
         if not isinstance(block, dict) or block.get("status") != "owner_decision_required" or block.get("pending_decisions") != pending_decisions(matrix):
@@ -1057,7 +1058,7 @@ IMPORT_TABLE_SCHEMA = "redevops-qa/playwright-import-candidates"
 _YEARS = r"(?:(?:19|20)\d\d(?:\s*[-,\u2013]\s*(?:(?:19|20)\d\d|present))*[,\s]*)+"
 _INV_HOLD = re.compile(r"copyright\s*(?:\(c\)|\u00a9)?\s*" + _YEARS + r"([^\n\r*]{2,80})|(?:\(c\)|\u00a9)\s*" + _YEARS + r"([^\n\r*]{2,80})", re.I)
 _INV_HOLD2 = re.compile(r"(?:\(c\)|\u00a9)\s+([A-Z][A-Za-z0-9.,' &-]{2,60})|(?<![a-z])copyright[\s#]+(?!notice|and\b|holder|law|statement|information|\(c\)|owner|the\b|of\b|\d)([A-Z][A-Za-z.' -]{3,50})")
-_INV_MARK = re.compile(r"@license|spdx-license-identifier|permission is hereby granted|dual licensed|licensed under|released under the|all rights reserved|redistribution and use in source", re.I)
+_INV_MARK = re.compile(r"adapted from [A-Za-z]|@license|spdx-license-identifier|permission is hereby granted|dual licensed|licensed under|released under the|all rights reserved|redistribution and use in source", re.I)
 _INV_SKIP = {"wasm", "ttf", "png", "ico", "gif", "jpg", "jpeg", "woff", "woff2", "pyc", "map", "svg"}
 
 
@@ -1107,6 +1108,29 @@ def check_inventory_scan(matrix: dict, comp: dict, rec: dict, zf, at: str) -> Li
     return out
 
 
+def check_inventory_block(matrix: dict) -> List[Finding]:
+    """The inventory block is REQUIRED whenever a shipped component has evidence items: without it the header scan and the candidate-package coverage would stop running silently. Required shape: a
+    method, limits that say the scan cannot prove completeness, a non-empty own_holders list, an excluded_packages mapping and the pinned import-candidates table (path and sha256)."""
+    if not any(c.get("third_party_evidence") for c in matrix.get("components", []) if isinstance(c, dict)):
+        return []
+    inv = matrix.get("inventory")
+    if not isinstance(inv, dict) or not inv:
+        return [Finding("INVENTORY_BLOCK", "matrix", "the inventory block is required (method, limits, own_holders, excluded_packages, import_candidates): without it the header scan and the candidate coverage do not run")]
+    out = []
+    if not _nonempty(inv.get("method")):
+        out.append(Finding("INVENTORY_BLOCK", "matrix", "inventory.method is missing"))
+    if "cannot prove completeness" not in str(inv.get("limits", "")) or "BEST EFFORT" not in str(inv.get("limits", "")):
+        out.append(Finding("INVENTORY_BLOCK", "matrix", "inventory.limits must say that the scan is BEST EFFORT and cannot prove completeness"))
+    if not isinstance(inv.get("own_holders"), list) or not inv["own_holders"] or not all(_nonempty(h) for h in inv["own_holders"]):
+        out.append(Finding("INVENTORY_BLOCK", "matrix", "inventory.own_holders must be a non-empty list"))
+    if not isinstance(inv.get("excluded_packages"), dict):
+        out.append(Finding("INVENTORY_BLOCK", "matrix", "inventory.excluded_packages must be a mapping of package to reason"))
+    ic = inv.get("import_candidates")
+    if not isinstance(ic, dict) or not _nonempty(ic.get("path")) or not _SHA256.match(str(ic.get("sha256", ""))):
+        out.append(Finding("INVENTORY_BLOCK", "matrix", "inventory.import_candidates needs the path and the sha256 of the committed table"))
+    return out
+
+
 def check_import_candidates(matrix: dict, root: Path = ROOT) -> List[Finding]:
     """The packages Playwright's own sources import for the parts that end up in the wheel (third_party/evidence/playwright-*-import-candidates.json, made by tools/collect_licence_evidence.py
     import-candidates from the repository tarball and lock file at the pinned tag) against the matrix: each must be one of the inlined npm packages of the sidecar notices, named in an evidence item
@@ -1115,9 +1139,12 @@ def check_import_candidates(matrix: dict, root: Path = ROOT) -> List[Finding]:
     if not isinstance(inv, dict):
         return []
     out: List[Finding] = []
-    table_path = next(((Path(root) / "third_party" / "evidence").glob("playwright-*-import-candidates.json")), None) if (Path(root) / "third_party" / "evidence").is_dir() else None
-    if table_path is None:
-        return [Finding("INVENTORY_CANDIDATES", "matrix", "the inventory block needs third_party/evidence/playwright-*-import-candidates.json")]
+    ic = inv.get("import_candidates") if isinstance(inv.get("import_candidates"), dict) else {}
+    table_path = Path(root) / str(ic.get("path", "")) if ic.get("path") else None
+    if table_path is None or not table_path.is_file() or not str(ic.get("path")).startswith("third_party/evidence/"):
+        return [Finding("INVENTORY_CANDIDATES", "matrix", "inventory.import_candidates must name a file under third_party/evidence/")]
+    if hashlib.sha256(table_path.read_bytes()).hexdigest() != ic.get("sha256"):
+        return [Finding("INVENTORY_CANDIDATES", table_path.name, "the import-candidates table does not have the sha256 the matrix records (it reproduces from the tag tarball with tools/collect_licence_evidence.py import-candidates)")]
     data = _load_json(table_path)
     if data.get("schema") != IMPORT_TABLE_SCHEMA:
         return [Finding("INVENTORY_CANDIDATES", table_path.name, f"schema must be {IMPORT_TABLE_SCHEMA}")]
@@ -1129,7 +1156,7 @@ def check_import_candidates(matrix: dict, root: Path = ROOT) -> List[Finding]:
                 table = item.get("table")
                 if isinstance(table, dict) and table.get("kind") == "npm-inlined-packages" and (Path(root) / str(table.get("path", ""))).is_file():
                     covered |= {r.get("package", "").rsplit("@", 1)[0] for r in _load_json(Path(root) / table["path"]).get("packages", [])}
-    excluded = inv.get("excluded_packages") or {}
+    excluded = inv.get("excluded_packages") if isinstance(inv.get("excluded_packages"), dict) else {}
     for bad, reason in excluded.items():
         if not _nonempty(reason):
             out.append(Finding("INVENTORY_CANDIDATES", "matrix", f"inventory.excluded_packages {bad}: a reason is required"))

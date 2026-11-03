@@ -66,6 +66,7 @@ policy:
 inventory:
   method: "How the inventory of shipped third-party material is derived (third_party/README.md): the notice files each wheel carries; the Playwright lock file and import statements at the pinned tag for the packages the vite bundles and coreBundle.js resolve (third_party/evidence/playwright-*-import-candidates.json, made by tools/collect_licence_evidence.py import-candidates); a licence/copyright header scan of every text file in the Playwright and Robot Framework wheels (tools/check_adapter_licenses.py --wheelhouse, tools/collect_licence_evidence.py inventory); the sections of the Node.js LICENSE; and manual reading of what those leave open."
   limits: "BEST EFFORT. It cannot prove completeness: a minified file whose comments were stripped, a library without a notice or header, data inlined as an opaque string, and code that Playwright's sources reach through a path the import scan does not follow are not found. The checker fails on what the scans find that no item covers; it never claims that nothing else is shipped."
+  import_candidates: {path: "third_party/evidence/playwright-1.64.1-import-candidates.json", sha256: "9bb7e985653bf32f06ae55a53b41e9688c8391cb6b5000aaf8b0c6108460b942"}
   own_holders: ["microsoft corp", "robot framework", "nokia networks"]
   excluded_packages:
     vite: "build tool of the vite applications; its output is the bundles, vite itself is not inlined"
@@ -75,7 +76,7 @@ inventory:
 bundle_public_distribution:
   status: owner_decision_required
   reason: "the owner decides public distribution of the bundle once every shipped third-party item has a decision; this file records facts and the decisions taken so far and decides nothing on its own"
-  pending_decisions: [playwright-python, playwright-python-direct-deps, pw-npm-inlined, pw-vendored-sources, pw-vite-browser-logos, pw-vite-codemirror, pw-vite-codicon, pw-vite-react, pw-vite-vscode-css, pw-vite-xterm, pw-vite-yaml, pw-vite-zipjs, pw-webp-codec, pw-xdg-open, pyyaml-shipped, rf-asserts-unittest, rf-highlighting-burgaud, rf-jquery-3.5.1, rf-jquery-highlight, rf-jquery-tmpl, rf-jsxcompressor, rf-libdoc-handlebars, rf-libdoc-mark-js, rf-libdoc-parcel-runtime, rf-libdoc-source-map, rf-open-iconic, robotframework, typing-extensions-shipped]
+  pending_decisions: [playwright-python, playwright-python-direct-deps, pw-npm-inlined, pw-vendored-sources, pw-vite-browser-logos, pw-vite-codemirror, pw-vite-codicon, pw-vite-react, pw-vite-vscode-css, pw-vite-xterm, pw-vite-yaml, pw-vite-zipjs, pw-webp-codec, pw-xdg-open, pyyaml-shipped, rf-asserts-unittest, rf-highlighting-burgaud, rf-htmldog-tabs, rf-jquery-3.5.1, rf-jquery-highlight, rf-jquery-tmpl, rf-jsxcompressor, rf-libdoc-handlebars, rf-libdoc-mark-js, rf-libdoc-parcel-runtime, rf-libdoc-source-map, rf-open-iconic, robotframework, typing-extensions-shipped]
 components:
   # ------------------------------------------------------------------------------------------------ Selenium
   - id: selenium-python
@@ -147,11 +148,12 @@ components:
       - {name: "Parcel bundler runtime code in libdoc.html (parcelRequire module registry, Parcel 2.16.4)", spdx: MIT, evidence: rf-libdoc-parcel-runtime, note: "the small module-registry code the bundler adds around the CommonJS modules; the licence text is that of the Parcel repository at v2.16.4"}
       - {name: "robot/utils/asserts.py (assertion functions copied from unittest.TestCase, Steve Purcell)", spdx: unverified, evidence: rf-asserts-unittest, note: "UNVERIFIED, no owner decision: the file's docstring carries the unittest copyright line and says 'the same terms as Python itself, so long as this copyright message and disclaimer are retained'; the Python terms are not reproduced"}
       - {name: "Windows console highlighting code in robot/output/console/highlighting.py (adapted from Andre Burgaud's color_console.py)", spdx: unverified, evidence: rf-highlighting-burgaud, note: "UNVERIFIED, no owner decision: a comment names the author and the MIT License; no licence text"}
+      - {name: "tab styles in robot/htmldata/rebot/report.css, adapted from an HTML Dog article", spdx: unverified, evidence: rf-htmldog-tabs, note: "UNVERIFIED, no owner decision: an attribution comment only; no licence found"}
       - {name: "Open Iconic icons in robot/htmldata/rebot/log.css (six SVG data URIs)", spdx: MIT, evidence: rf-open-iconic, note: "byte for byte six SVG files of iconic/open-iconic; MIT text of the icon licence shipped in THIRD_PARTY_NOTICES"}
       - {name: "the rest of libdoc.html (templates, styles, scripts, the favicon)", spdx: Apache-2.0, note: "Robot Framework's own source under src/web/libdoc of the repository at v7.5, under the repository's LICENSE.txt, which the wheel carries; the other files under robot/htmldata (common, rebot, testdoc: css, js, html) carry no header and are Robot Framework's own code, except that log.html, report.html and testdoc.html load the jquery assets listed here"}
     not_checked: ["the other files under robot/htmldata (common, rebot, testdoc: css, js, html) were read for headers only and are taken to be Robot Framework's own code", "the licence of Johann Burkard's 'highlight v3', the origin of the jQuery Highlight plugin"]
     trademark: {status: verified, note: "the wheel's package description states that the Robot Framework trademark is owned by the Robot Framework Foundation; repository rule: the name identifies the integration only, no logos, no use in a ReDevOps product name"}
-    redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, public_distribution_blockers: [rf-asserts-unittest, rf-highlighting-burgaud, rf-jquery-highlight, rf-jquery-tmpl, rf-jsxcompressor, rf-tablesorter-2.30.5], reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified wheel is shipped in the pinned bundle with its LICENSE.txt and AUTHORS.rst. Identified and with their licence text shipped in the bundle's THIRD_PARTY_NOTICES: jQuery 3.5.1 (with Sizzle) and the libraries inlined in libdoc.html (Handlebars, mark.js, source-map, Parcel runtime). Open facts, each with a declared licence and no licence text that can be tied to the shipped bytes: jQuery tablesorter 2.30.5 (declared (MIT OR GPL-2.0); the original project's MIT text ships as a related text), jQuery Templates (MIT or GPL Version 2 header), jQuery Highlight (MIT header) and JSXCompressor (Apache-2.0 or LGPL-3.0 header). Owner decisions are recorded per item; the items without one say none yet"}
+    redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, public_distribution_blockers: [rf-asserts-unittest, rf-highlighting-burgaud, rf-htmldog-tabs, rf-jquery-highlight, rf-jquery-tmpl, rf-jsxcompressor, rf-tablesorter-2.30.5], reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified wheel is shipped in the pinned bundle with its LICENSE.txt and AUTHORS.rst. Identified and with their licence text shipped in the bundle's THIRD_PARTY_NOTICES: jQuery 3.5.1 (with Sizzle) and the libraries inlined in libdoc.html (Handlebars, mark.js, source-map, Parcel runtime). Open facts, each with a declared licence and no licence text that can be tied to the shipped bytes: jQuery tablesorter 2.30.5 (declared (MIT OR GPL-2.0); the original project's MIT text ships as a related text), jQuery Templates (MIT or GPL Version 2 header), jQuery Highlight (MIT header) and JSXCompressor (Apache-2.0 or LGPL-3.0 header). Owner decisions are recorded per item; the items without one say none yet"}
     shipped_wheels:
       - name: robotframework
         version: "7.5"
@@ -168,6 +170,8 @@ components:
           - {path: "robot/htmldata/lib/jquery.highlight.min.js", size: 1524, sha256: "595f2a0621a75c7dc18e5076ce7bca1064600ccc974cbd8229be6ef263243f33"}
           - {path: "robot/htmldata/lib/jquery.tmpl.min.js", size: 6141, sha256: "58fe3741dce607dc6a2abbaddda4f489f9be856f26c20c67a820131018ae153f"}
           - {path: "robot/htmldata/lib/jsxcompressor.min.js", size: 13667, sha256: "b8269afbdc3549e56fe693b04928ace2141bf7df455e0700588a596185de8780"}
+          - {path: "robot/htmldata/rebot/common.css", size: 9369, sha256: "2f4b1b6ffc0d0ba25417dc408493437216f840f0ac4419f40859d11f255c6fd5"}
+          - {path: "robot/htmldata/rebot/report.css", size: 6419, sha256: "c500148c5dfb78e1d26c7a115d13087a4882657d6d8d2d0ed1495e6ce18e73f8"}
           - {path: "robot/htmldata/rebot/log.css", size: 7625, sha256: "9c3962fb91baa4611d4b80d4ba34f31d71f17ef2fc0ee1d63ae9043d38e30f09"}
           - {path: "robot/utils/asserts.py", size: 8669, sha256: "0bb95c0a1aa8e06583a9080fb2799e47a36b78d230ce6256706a0571141e53be"}
           - {path: "robot/output/console/highlighting.py", size: 7859, sha256: "9afac39cb6ca3f044df9ef7b0e98f7850a7bb75d2b011f5b2bdc87d7754fb202"}
@@ -199,8 +203,8 @@ components:
         status: declared_only
         spdx: "unverified"
         declared_spdx: "(MIT OR GPL-2.0)"
-        shipped_members: ["robot/htmldata/lib/jquery.tablesorter.min.js"]
-        identified_by: "the code sets version:'2.30.5'; the shipped file (43881 bytes) is dist/js/jquery.tablesorter.min.js of the upstream tag v2.30.5 (43880 bytes, sha256 87005dc1...) followed by one newline byte, and the npm package tablesorter 2.30.5 holds the same dist file; src/robot/htmldata/lib/versions.txt at the Robot Framework tag v7.5 names https://github.com/Mottie/tablesorter, Version 2.30.5; the shipped minified file carries NO licence header and no copyright line (it begins with the bare function wrapper)"
+        shipped_members: ["robot/htmldata/lib/jquery.tablesorter.min.js", "robot/htmldata/rebot/common.css"]
+        identified_by: "the code sets version:'2.30.5'; the shipped file (43881 bytes) is dist/js/jquery.tablesorter.min.js of the upstream tag v2.30.5 (43880 bytes, sha256 87005dc1...) followed by one newline byte, and the npm package tablesorter 2.30.5 holds the same dist file; src/robot/htmldata/lib/versions.txt at the Robot Framework tag v7.5 names https://github.com/Mottie/tablesorter, Version 2.30.5; the shipped minified file carries NO licence header and no copyright line (it begins with the bare function wrapper); the same project's blue theme is also adapted in the shipped robot/htmldata/rebot/common.css (comment 'Tablesorter - adapted from provided Blue Skin', the .tablesorter-header* rules and seven base64 GIF icons), which carries no licence statement at all and is named here as shipped material under the same declared-only position (no text of the theme was fetched or verified)"
         sources:
           - {role: "identification", url: "https://raw.githubusercontent.com/Mottie/tablesorter/v2.30.5/dist/js/jquery.tablesorter.min.js", retrieved_on: "2026-11-03", sha256: "87005dc1e53261187ae8285060afa8f5b483d5fc984a177aa1057067a8aaed6c"}
           - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/versions.txt", retrieved_on: "2026-11-03", sha256: "8d8643766422971aa2467da445f2e93f44991b140018cc09bc48c8b20238f936"}
@@ -370,6 +374,25 @@ components:
         licence_texts: [open-iconic-icon-license]
         obligations_as_the_texts_state: "MIT: the copyright notice and the permission notice are included in all copies or substantial portions"
         residual: "the commit is the head of the upstream repository at the retrieval date; an older commit with the same six files is equally possible (the files are tiny and unchanged for years, not verified); other Robot Framework stylesheets were not found to carry icons without a header"
+        owner_decision:
+          decision: "none yet"
+      - id: rf-htmldog-tabs
+        component: "the tab styles of robot/htmldata/rebot/report.css, adapted from an article of HTML Dog"
+        version: "Robot Framework 7.5"
+        wheel: robotframework
+        status: unverified
+        spdx: "unverified"
+        shipped_members: ["robot/htmldata/rebot/report.css"]
+        reason: "a comment in the shipped stylesheet says 'Tabs - adapted from http://www.htmldog.com/articles/tabs'; the article is now at https://www.htmldog.com/techniques/tabs/ and its page footer reads '(c) 2003-2026. Terms of use'; no licence statement was found in the stylesheet or on the page text that was read, and the terms of use were not read"
+        identified_by: "found by the header scan (the marker 'adapted from'); the shipped report.css is the file at the Robot Framework tag v7.5; the rules are the #detail-tabs and .detail-tab rules"
+        sources:
+          - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/rebot/report.css", retrieved_on: "2026-11-03", sha256: "c500148c5dfb78e1d26c7a115d13087a4882657d6d8d2d0ed1495e6ce18e73f8", note: "the shipped file at the tag v7.5 (equal to the wheel's file)"}
+          - {role: "identification", url: "https://www.htmldog.com/techniques/tabs/", retrieved_on: "2026-11-03", sha256: "1848ff9aad364b3a5cd5f496ba7ddcb852e6c73cae20bbd509019f83b9d8d32d", note: "the article's current address (the cited address redirects to it); a volatile web page"}
+        options:
+          - "ask Robot Framework or HTML Dog for the terms the styles may be redistributed under; nothing was filed"
+          - "treat the rules as Robot Framework's own generic CSS adapted from an article; the owner decides"
+          - "replace or remove: not possible without modifying the Robot Framework wheel"
+        residual: "the rules are short and generic and the article's terms of use were not read; the comment is an attribution, not a licence"
         owner_decision:
           decision: "none yet"
       - id: rf-libdoc-handlebars
@@ -935,7 +958,7 @@ components:
           - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/edge/-/edge-2.0.7.tgz", retrieved_on: "2026-11-03", sha256: "cb0b4edbcc7d420d73764e3cbe388112d7d4663146f28083499f3735db7a8114", note: "@browser-logos/edge 2.0.7: resolved by Playwright's lock file (sha512 integrity equal to the registry's and to the tarball fetched here); no licence in the registry, no licence file; its package/edge.svg is NOT byte for byte any shipped file (the logo is inlined as a data: URI in the dashboard bundle)"}
           - {role: "declared_licence", url: "https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/README.md", retrieved_on: "2026-11-03", sha256: "5f70d1ea560f8d45b36d0090903a32bb1e61fb617cc6aa1332fc52d713bdb3be", quote: "All logos and trademarks are the property of their respective owners. / Everything else is available under the [MIT license][license]."}
           - {role: "related_licence_text", url: "https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/LICENSE.txt", retrieved_on: "2026-11-03", sha256: "a8fa11ef7da0447b701294ffa4c9649670f33bd727ceac0ac47f7e0cce4087c4", notice: "browser-logos-repo-license", ships_as_fetched: true, note: "the MIT text of the repository, which by its README does not cover the logos"}
-        licence_text_absent: "none of the four @browser-logos packages declares a licence or contains a licence file; the upstream repository alrra/browser-logos says 'All logos and trademarks are the property of their respective owners' and offers 'everything else' under MIT, so there is no licence for the artwork of the logos themselves, whose owners are the browser vendors"
+        licence_text_absent: "none of the ten @browser-logos packages declares a licence or contains a licence file; the upstream repository alrra/browser-logos says 'All logos and trademarks are the property of their respective owners' and offers 'everything else' under MIT, so there is no licence for the artwork of the logos themselves, whose owners are the browser vendors"
         licence_texts: [browser-logos-repo-license]
         options:
           - "upstream clarification: ask Playwright and alrra/browser-logos on what terms the logo SVGs are redistributed; nothing was filed"
@@ -1019,7 +1042,7 @@ components:
         spdx: "MIT"
         shipped_members: []
         inlined_in: "playwright/driver/package/lib/vite/traceViewer/defaultSettingsView.C8BeHuxd.css"
-        identified_by: "all 533 --vscode-* custom properties defined by colors.css at the tag v1.64.1 appear in the shipped CSS files of the vite bundles (533 of 533), whose header comment is stripped; the folder holds a LICENSE.txt (MIT, Copyright (c) 2015 - present Microsoft Corporation) and the headers of colors.css and codicon.css read 'Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License. See License.txt in the project root for license information.'"
+        identified_by: "colors.css at the tag v1.64.1 defines 527 distinct --vscode-* custom properties and refers to 533 distinct --vscode-* names (six only through var()); all 533 appear in the shipped CSS files of the vite bundles (533 of 533), whose header comment is stripped; the folder holds a LICENSE.txt (MIT, Copyright (c) 2015 - present Microsoft Corporation) and the headers of colors.css and codicon.css read 'Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License. See License.txt in the project root for license information.'"
         sources:
           - {role: "identification", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/colors.css", retrieved_on: "2026-11-03", sha256: "ac0ae041873e9eb794c2bf2769417369cb83fe8dd73e62d6e859677d8c182496"}
           - {role: "identification", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/codicon.css", retrieved_on: "2026-11-03", sha256: "475c72e3a1766bd9989d15906507878e7218885d9b3a937dc91a68682befda6d"}

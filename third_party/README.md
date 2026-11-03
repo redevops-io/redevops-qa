@@ -26,9 +26,10 @@ where the exact component and version were identified from the shipped bytes and
 for byte the official release executable, with the release's `LICENSE`, whose 44 listed libraries are tabulated in `third_party/evidence/node-24.22.1-licence-sections.json`), the inlined npm packages
 (`third_party/evidence/playwright-1.64.1-inlined-npm-packages.json`: per notice section, the registry entry and the published tarball of the exact version), minimatch (Blue Oak Model License 1.0.0),
 jQuery 3.5.1 with Sizzle, and the libraries inlined in `libdoc.html` (Handlebars 4.7.9, mark.js 8.11.1, source-map 0.6.1, the Parcel runtime; the file was reproduced byte for byte from Robot Framework's
-own build inputs). Two items have no licence text in any primary source that was looked at and stay open as `declared_only` (a licence is declared, no text exists): `proxy-agent-negotiate` 1.1.0
-(declared MIT) and jQuery tablesorter 2.30.5 (declared `(MIT OR GPL-2.0)`); each lists the options the owner has and is named under `public_distribution_blockers`. A `verified` item records facts; it is
-never a clearance, `public_distribution` stays `owner_decision_required`, and the checker fails on a `verified` item that lacks its evidence fields.
+own build inputs). 
+<!-- evidence-status:begin -->
+At this head the matrix has 29 evidence items: 19 `verified`, 9 `declared_only` (`pw-proxy-agent-negotiate`, `pw-vite-browser-logos`, `pw-vite-codicon`, `rf-asserts-unittest`, `rf-highlighting-burgaud`, `rf-jquery-highlight`, `rf-jquery-tmpl`, `rf-jsxcompressor`, `rf-tablesorter-2.30.5`) and 1 `unverified` (`rf-htmldog-tabs`). Every item that is not `verified` is named under `public_distribution_blockers` of its entry. 5 items carry a recorded owner decision and 29 shipped items (the evidence items and components without a settled decision) still say `none yet`. This paragraph is checked against the matrix by `tests/test_third_party_evidence.py`; a `verified` item records facts, never a clearance, `public_distribution` stays `owner_decision_required`, and the checker fails on a `verified` item that lacks its evidence fields.
+<!-- evidence-status:end -->
 
 The licence and notice texts that ship are listed in `third_party/notices/notices.lock.json` (the licence files of the shipped wheels, read from those wheels, and the texts fetched from upstream, kept
 under `third_party/notices/upstream/`, each with its sha256). `tools/build_bundle.py` writes them into the bundle as `THIRD_PARTY_NOTICES/` with an `INDEX.json`, refuses a file whose sha256 is not the
@@ -63,3 +64,11 @@ not to show that no further item exists. Quotes of declaring sources are checked
 **Owner decisions.** The wording of the owner's decisions of 2026-11-03 (the decision, its date, the elected licence and the minimum conditions) is kept in the checker as `REQUIRED_DECISIONS`, so deleting or
 weakening a condition in the record is a finding (`OWNER_CONDITION_WEAKENED`); the record may state more than the owner required, never less. The checker cannot know that the owner took a decision: it keeps the
 recorded wording from being edited away, it does not authenticate the decision.
+
+**Known limits of the header scan** (listed, not closed; each was found by a reviewer or by reading the scan's own code):
+* a file whose only marker is an Apache-2.0 header and that has no copyright line is skipped by design (it is taken to be the product's own);
+* `.map` files, files that start with NUL bytes and non-text assets (SVG, PNG, fonts, icons, favicons, data URIs) are not scanned; the logo and icon data inlined as `data:` URIs are tied to their packages by hand;
+* `covers_paths` globs can be wide (the vite items cover `lib/vite/**`), so a new foreign header under a covered glob is accepted;
+* `inventory.own_holders` is editable data: adding a name to it silences that holder; a holder is judged by its own text, not by the file mentioning an own holder elsewhere (a file with a foreign holder next to "Microsoft Corporation" is still a candidate);
+* small snippets taken from public Q&A and recipe sites and credited only in a comment (`log.js`, `common/storage.js`, `dialogs_py.py` and the stylesheets link stackoverflow answers; `running/timeouts/windows.py` cites an ActiveState recipe) are not licence-bearing headers and are not inventoried;
+* an unpinned declaring quote (a `package.json`, a `composer.json`, a registry document) is checked for presence and format only; the pinned ones are checked against the stored bytes.

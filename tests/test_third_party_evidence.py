@@ -653,7 +653,7 @@ def test_the_robot_assets_the_review_found_are_open_declared_only_items_with_the
     for iid, quote in (("rf-jquery-tmpl", "Dual licensed under the MIT or GPL Version 2 licenses."), ("rf-jquery-highlight", "Licensed under MIT license."), ("rf-jsxcompressor", "Dual licensed under the Apache License Version 2.0, or LGPL Version 3 licenses.")):
         it = item(REAL, "robotframework", iid)
         assert it["status"] == "declared_only" and it["spdx"] == "unverified" and any(quote in s_.get("quote", "") for s_ in it["sources"]) and it["options"] and it["licence_text_absent"]
-    assert comp(REAL, "robotframework")["redistribution"]["public_distribution_blockers"] == ["rf-asserts-unittest", "rf-highlighting-burgaud", "rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
+    assert comp(REAL, "robotframework")["redistribution"]["public_distribution_blockers"] == ["rf-asserts-unittest", "rf-highlighting-burgaud", "rf-htmldog-tabs", "rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
 
 
 def test_tablesorter_records_five_declarations_verbatim_the_wording_difference_and_the_original_repositorys_text():
@@ -970,3 +970,122 @@ def test_the_matrix_check_and_the_run_function_apply_the_required_decisions_and_
     shutil.copytree(ROOT / "third_party" / "evidence", tmp_path / "third_party" / "evidence")
     path.write_text(yaml.safe_dump(m, sort_keys=False))
     assert "INVENTORY_UNCOVERED_PACKAGE" in codes(chk.run(path, tmp_path))
+
+
+# ============================================================================================ round 3
+def readme_status_block(m):
+    rows = {"declared_only": [], "unverified": []}
+    verified = 0
+    for c in m["components"]:
+        for i in c.get("third_party_evidence") or []:
+            if i["status"] == "verified":
+                verified += 1
+            else:
+                rows[i["status"]].append(i["id"])
+    decided = sum(1 for c in m["components"] for i in c.get("third_party_evidence") or [] if i["owner_decision"]["decision"] != "none yet")
+    pending = len(m["bundle_public_distribution"]["pending_decisions"])
+    total = verified + len(rows["declared_only"]) + len(rows["unverified"])
+    names = lambda k: ", ".join(f"`{x}`" for x in sorted(rows[k]))
+    return (f"At this head the matrix has {total} evidence items: {verified} `verified`, {len(rows['declared_only'])} `declared_only` ({names('declared_only')}) and {len(rows['unverified'])} `unverified` ({names('unverified')}). "
+            f"Every item that is not `verified` is named under `public_distribution_blockers` of its entry. {decided} items carry a recorded owner decision and {pending} shipped items (the evidence items and components without a settled decision) still say `none yet`. "
+            "This paragraph is checked against the matrix by `tests/test_third_party_evidence.py`; a `verified` item records facts, never a clearance, `public_distribution` stays `owner_decision_required`, and the checker fails on a `verified` item that lacks its evidence fields.")
+
+
+def test_the_readme_paragraph_about_the_open_items_is_the_one_derived_from_the_matrix_so_it_cannot_go_stale():
+    text = (ROOT / "third_party" / "README.md").read_text(encoding="utf-8")
+    block = text.split("<!-- evidence-status:begin -->\n", 1)[1].split("\n<!-- evidence-status:end -->", 1)[0]
+    assert block == readme_status_block(REAL)
+    assert "Two items have no licence text" not in text
+    blockers = sorted(b for c in REAL["components"] for b in (c["redistribution"].get("public_distribution_blockers") or []))
+    assert blockers == sorted(i["id"] for c in REAL["components"] for i in c.get("third_party_evidence") or [] if i["status"] != "verified")
+
+
+def test_no_item_still_says_four_logo_packages_and_the_vscode_colours_are_counted_as_defined_and_referenced():
+    logos = item(REAL, "playwright-python", "pw-vite-browser-logos")
+    assert "none of the four" not in json.dumps(logos) and "none of the ten @browser-logos packages" in logos["licence_text_absent"]
+    css = item(REAL, "playwright-python", "pw-vite-vscode-css")["identified_by"]
+    assert "defines 527 distinct --vscode-*" in css and "refers to 533 distinct" in css and "533 of 533" in css and "all 533 --vscode-* custom properties defined" not in css
+
+
+def cli(matrix, root, capsys, *extra):
+    path = root / "third_party" / "adapter-license-matrix.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(matrix, sort_keys=False))
+    code = chk.main(["x", "--matrix", str(path), "--root", str(root), *extra])
+    return code, capsys.readouterr().out
+
+
+def repo_for_cli(tmp_path):
+    root = make_repo(tmp_path)
+    return root
+
+
+def test_the_command_line_requires_the_inventory_block_and_its_parts(tmp_path, capsys):
+    root = repo_for_cli(tmp_path)
+    code, out = cli(fresh(), root, capsys)
+    assert code == 0 and out.startswith("OK")
+    for mutate in (lambda m: m.pop("inventory"), lambda m: m.update(inventory={}), lambda m: m["inventory"].pop("method"), lambda m: m["inventory"].update(limits="complete"),
+                   lambda m: m["inventory"].update(own_holders=[]), lambda m: m["inventory"].update(excluded_packages=["vite"]), lambda m: m["inventory"].pop("import_candidates")):
+        m = fresh()
+        mutate(m)
+        code, out = cli(m, root, capsys)
+        assert code == 1 and "INVENTORY_BLOCK" in out, out
+
+
+def test_the_command_line_fails_when_a_candidate_is_deleted_from_the_pinned_import_table_or_the_pin_is_not_the_files_digest(tmp_path, capsys):
+    root = repo_for_cli(tmp_path)
+    table_path = root / "third_party" / "evidence" / "playwright-1.64.1-import-candidates.json"
+    assert fresh()["inventory"]["import_candidates"]["sha256"] == hashlib.sha256(table_path.read_bytes()).hexdigest()
+    table = json.loads(table_path.read_text())
+    table["packages"] = [p for p in table["packages"] if p["name"] != "@zip.js/zip.js"]
+    table["count"] = len(table["packages"])
+    table_path.write_text(json.dumps(table, indent=1, sort_keys=True) + "\n")                       # the deletion, with the table otherwise intact
+    code, out = cli(fresh(), root, capsys)
+    assert code == 1 and "INVENTORY_CANDIDATES" in out and "does not have the sha256" in out
+    m = fresh()                                                                                        # re-recording the digest is a visible change of the matrix, and the deleted package is then simply not checked
+    m["inventory"]["import_candidates"]["sha256"] = hashlib.sha256(table_path.read_bytes()).hexdigest()
+    m["inventory"]["import_candidates"]["path"] = "third_party/notices/README.md"
+    code, out = cli(m, root, capsys)
+    assert code == 1 and "must name a file under third_party/evidence" in out
+
+
+def test_the_scan_judges_a_holder_by_its_own_text_not_by_a_mention_of_an_own_holder_elsewhere_in_the_file(tmp_path):
+    path, rec = inventory_wheel(tmp_path, {"w/spoof.js": "// built with tools from Microsoft Corporation\\n/* Copyright (c) 2019 Foreign Authors. */\\nvar a=1;", "w/own.js": "// Copyright (c) 2020 Microsoft Corporation\\nvar b=2;"})
+    with zipfile.ZipFile(path) as zf:
+        hits = chk.scan_wheel_inventory(zf, ["microsoft corp"])
+    assert set(hits) == {"w/spoof.js"} and "Foreign Authors" in hits["w/spoof.js"][0][0]
+
+
+def test_the_adapted_from_marker_finds_a_stylesheet_with_an_attribution_only_comment(tmp_path):
+    path, rec = inventory_wheel(tmp_path, {"w/a.css": "/* Tablesorter - adapted from provided Blue Skin */\\n.x{}", "w/b.css": "/* tabs - adapted from http://example.org/a */\\n.y{}", "w/c.css": ".z{}"})
+    with zipfile.ZipFile(path) as zf:
+        assert set(chk.scan_wheel_inventory(zf, [])) == {"w/a.css", "w/b.css"}
+
+
+def test_the_tablesorter_item_names_the_stylesheet_with_the_adapted_theme_and_a_tab_style_item_exists():
+    it = item(REAL, "robotframework", "rf-tablesorter-2.30.5")
+    assert "robot/htmldata/rebot/common.css" in it["shipped_members"] and "Blue Skin" in it["identified_by"] and "seven base64 GIF icons" in it["identified_by"] and "no licence statement at all" in it["identified_by"]
+    assert "robot/htmldata/rebot/common.css" in {m["path"] for m in comp(REAL, "robotframework")["shipped_wheels"][0]["recorded_members"]}
+    tabs = item(REAL, "robotframework", "rf-htmldog-tabs")
+    assert tabs["status"] == "unverified" and tabs["spdx"] == "unverified" and tabs["owner_decision"] == {"decision": "none yet"} and "htmldog.com" in tabs["reason"] and "rf-htmldog-tabs" in comp(REAL, "robotframework")["redistribution"]["public_distribution_blockers"]
+
+
+def test_the_readme_lists_the_known_limits_of_the_header_scan():
+    text = (ROOT / "third_party" / "README.md").read_text(encoding="utf-8")
+    assert "Known limits of the header scan" in text
+    for needle in ("Apache-2.0 header", "`.map` files", "NUL bytes", "`covers_paths` globs can be wide", "`inventory.own_holders` is editable data", "stackoverflow", "ActiveState", "unpinned declaring quote"):
+        assert needle in text, needle
+    assert "which the checker requires" not in text or "the checker requires" in text
+
+
+@pytest.mark.parametrize("phrase", ["is cleared", "are cleared", "licence cleared", "license cleared", "approved for distribution", "approved for public"])
+def test_every_phrase_of_the_bundle_checkers_forbidden_list_is_found_in_the_readme_and_the_manifest(phrase, tmp_path):
+    import importlib.util as iu
+    from bundle_helpers import cb as bundle_checker, make_mini_bundle
+    bundle = make_mini_bundle(tmp_path, with_kit=False)
+    readme = bundle / "README.md"
+    readme.write_text(readme.read_text(encoding="utf-8") + f"\\nThe third-party content {phrase}.\\n", encoding="utf-8")
+    from bundle_helpers import resum
+    resum(bundle)
+    assert any(f.code == "FORBIDDEN_TEXT" and phrase in f.message for f in bundle_checker.check_bundle(bundle, allow_test_target=True))
+    assert phrase in bundle_checker.FORBIDDEN

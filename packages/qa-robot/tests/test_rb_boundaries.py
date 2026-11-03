@@ -76,8 +76,8 @@ def test_the_matrix_records_robot_as_shipped_unmodified_for_private_staging_only
     assert ROBOT["redistribution"]["status"] == "staged_unmodified" and ROBOT["redistribution"]["public_distribution"] == "owner_decision_required"
     assert "PRIVATE STAGING ONLY" in ROBOT["redistribution"]["reason"]
     unverified = [d for d in ROBOT["bundled_deps"] if d["spdx"] == "unverified"]
-    assert len(unverified) == 6 and all("robot/" in d["name"] for d in unverified) and any("tablesorter" in d["name"] for d in unverified)       # the other assets are identified, with their licence text shipped
-    assert ROBOT["redistribution"]["public_distribution_blockers"] == ["rf-asserts-unittest", "rf-highlighting-burgaud", "rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
+    assert len(unverified) == 7 and all("robot/" in d["name"] for d in unverified) and any("tablesorter" in d["name"] for d in unverified)       # the other assets are identified, with their licence text shipped
+    assert ROBOT["redistribution"]["public_distribution_blockers"] == ["rf-asserts-unittest", "rf-highlighting-burgaud", "rf-htmldog-tabs", "rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
 
 
 def test_the_default_allowlist_matches_the_documented_one():
