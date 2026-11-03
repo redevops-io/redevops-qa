@@ -470,6 +470,10 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           for d in build-1 build-previous; do python -I "$GITHUB_WORKSPACE/tools/check_bundle.py" "$RUNNER_TEMP/$d"/redevops-qa-bundle-*-cp312-linux-x86_64; done
+      - name: Check the licence matrix against the wheels of the bundle just built (digests, licence files, the breakdown of the inlined notices)
+        run: |
+          python -m pip install "pyyaml>=6,<7"
+          python tools/check_adapter_licenses.py --wheelhouse "$(ls -d "$RUNNER_TEMP"/build-1/redevops-qa-bundle-*-cp312-linux-x86_64)/wheelhouse"
       - name: Print the digest of the archive (the value to compare a download with)
         run: |
           sha256sum "$RUNNER_TEMP"/build-1/*.tar

@@ -18,6 +18,9 @@ status `staged_unmodified`: **private staging only; public distribution requires
 (same name, version, file name and sha256), when a recorded wheel is not in the lock, or when a shipped wheel sits under any other status.
 
 What the two large wheels contain, from unpacking them: the Playwright wheel holds a Node.js runtime binary (`playwright/driver/node`, licence file `playwright/driver/LICENSE`), the
-Playwright driver with 79 npm packages inlined into `lib/utilsBundle.js` and 2 into `lib/serverRegistry.js` (sidecar `.LICENSE` files) and libwebp (`lib/webp_codec.LICENSE`), none of
-which is classified one by one. The Robot Framework wheel holds five report assets in `robot/htmldata/lib`; the licence of two of them (`jquery.min.js`, `jquery.tablesorter.min.js`)
-could not be established from the wheel and is recorded as unverified. Nothing here is a clearance.
+Playwright driver with 79 npm packages inlined into `lib/utilsBundle.js` and 2 into `lib/serverRegistry.js` (sidecar `.LICENSE` files) and libwebp (`lib/webp_codec.LICENSE`). Read from the
+sidecar file, the 79 are 65 MIT, 7 ISC, 4 a BSD licence with an endorsement clause, 1 (dotenv) a BSD licence without one, 1 (minimatch) the Blue Oak Model License 1.0.0 and 1
+(proxy-agent-negotiate) a section with no licence text ("declared licenses: MIT"); the last two are recorded as unverified, as are the components of the Node.js binary. The Robot Framework
+wheel holds five report assets in `robot/htmldata/lib` and an inlined JavaScript bundle in `robot/htmldata/libdoc/libdoc.html`; the licence of `jquery.min.js`, `jquery.tablesorter.min.js` and
+that bundle (it contains the Handlebars runtime) could not be established from the wheel and is recorded as unverified. `python tools/check_adapter_licenses.py --wheelhouse DIR` re-checks the
+recorded digests, licence files and the notice breakdown against the wheels of a built bundle (the `bundle` CI job does). Nothing here is a clearance.

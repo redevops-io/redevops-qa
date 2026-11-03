@@ -71,7 +71,7 @@ def test_selenium_manager_crates_with_mpl_keep_selenium_out_of_the_redistributab
 
 def test_robot_framework_report_assets_without_a_stated_licence_are_recorded_as_unverified():
     rank, why = chk.effective_rank(comp(REAL, "robotframework"), POLICY)
-    assert rank == chk.UNVERIFIED and sum("unverified" in w for w in why) == 2
+    assert rank == chk.UNVERIFIED and sum("unverified" in w for w in why) == 3          # jquery.min.js, jquery.tablesorter.min.js, libdoc.html
 
 
 def test_the_playwright_pin_in_the_package_is_the_pin_in_the_matrix():
@@ -474,12 +474,13 @@ def test_the_playwright_entry_describes_the_node_runtime_the_inlined_npm_package
     assert any(d["spdx"] == "unverified" for d in pw["bundled_deps"])          # the components nobody classified one by one are not claimed
 
 
-def test_the_two_robot_assets_of_unestablished_licence_are_recorded_unverified_with_their_exact_paths():
+def test_the_robot_assets_of_unestablished_licence_are_recorded_unverified_with_their_exact_paths():
     rb = comp(REAL, "robotframework")
     unverified = [d for d in rb["bundled_deps"] if d["spdx"] == "unverified"]
-    assert len(unverified) == 2
+    assert len(unverified) == 3
     joined = json.dumps(unverified)
-    assert "robot/htmldata/lib/jquery.min.js" in joined and "robot/htmldata/lib/jquery.tablesorter.min.js" in joined and "UNVERIFIED" in joined
+    assert "robot/htmldata/lib/jquery.min.js" in joined and "robot/htmldata/lib/jquery.tablesorter.min.js" in joined and "robot/htmldata/libdoc/libdoc.html" in joined and "UNVERIFIED" in joined
+    assert "Handlebars" in joined
     assert all(re.search(r"sha256 [0-9a-f]{64}", d["name"]) for d in rb["bundled_deps"])
     assert "PRIVATE STAGING ONLY" in rb["redistribution"]["reason"] and "UNVERIFIED" in rb["redistribution"]["reason"]
 
@@ -578,3 +579,118 @@ def test_run_checks_the_lock_of_the_repository_and_reports_a_finding_for_an_unre
     (tmp_path / "bundle" / "third-party.lock.json").write_text("{")
     (tmp_path / "packages").mkdir()
     assert "BUNDLE_LOCK_UNREADABLE" in codes(chk.run(MATRIX_PATH, tmp_path))
+
+
+# ------------------------------------------------------------------------------------------------------------ the notices inside the Playwright wheel
+EXPECTED_BREAKDOWN = {"BSD-2-Clause": 1, "BSD-3-Clause": 4, "BlueOak-1.0.0": 1, "ISC": 7, "MIT": 65, "none-declared": 1}
+
+
+def playwright_record():
+    return shipped_owner(REAL, "playwright")["shipped_wheels"][0]
+
+
+def test_the_breakdown_of_the_inlined_npm_notices_is_recorded_and_is_not_only_mit_and_isc():
+    notices = {n["path"]: n for n in playwright_record()["inlined_notices"]}
+    util = notices["playwright/driver/package/lib/utilsBundle.js.LICENSE"]
+    assert util["sections"] == 79 == sum(util["breakdown"].values()) and util["breakdown"] == EXPECTED_BREAKDOWN
+    assert notices["playwright/driver/package/lib/serverRegistry.js.LICENSE"]["breakdown"] == {"MIT": 2}
+    text = json.dumps(comp(REAL, "playwright-python"))
+    assert "only the identifiers MIT and ISC" not in text
+    for needle in ("65 MIT", "7 ISC", "4 BSD-3-Clause", "1 BSD-2-Clause", "Blue Oak Model License 1.0.0", "no licence text at all", "no license text found; declared licenses: MIT"):
+        assert needle in text, needle
+
+
+def test_minimatch_and_the_package_without_a_licence_text_are_separate_unverified_owner_decision_entries():
+    deps = {d["name"].split(" ")[0]: d for d in comp(REAL, "playwright-python")["bundled_deps"]}
+    for name in ("minimatch@10.2.5", "proxy-agent-negotiate@1.1.0"):
+        assert deps[name]["spdx"] == "unverified" and "owner decision" in deps[name]["note"] and "UNVERIFIED" in deps[name]["note"]
+    assert "Blue Oak" in deps["minimatch@10.2.5"]["note"] and "no license text found" in deps["proxy-agent-negotiate@1.1.0"]["note"]
+    assert any(d["spdx"] == "BSD-2-Clause" and d["name"].startswith("dotenv@") for d in comp(REAL, "playwright-python")["bundled_deps"])
+
+
+NOTICE_SAMPLES = {
+    "MIT": "The MIT License (MIT)\n\nPermission is hereby granted, free of charge, to any person obtaining a copy",
+    "ISC": "Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted",
+    "BSD-3-Clause": "Redistribution and use in source and binary forms, with or without modification, are permitted. Neither the name of X may be used to endorse or promote products",
+    "BSD-2-Clause": "Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met",
+    "BlueOak-1.0.0": "# Blue Oak Model License\n\nVersion 1.0.0",
+    "none-declared": "(no license text found; declared licenses: MIT)",
+    "Apache-2.0": "Apache License Version 2.0",
+    "other": "do what you like",
+}
+
+
+@pytest.mark.parametrize("expected,text", sorted(NOTICE_SAMPLES.items()))
+def test_a_notice_section_is_read_by_its_own_words(expected, text):
+    assert chk.classify_notice(text) == expected
+
+
+def test_a_notice_file_is_split_into_sections_and_counted():
+    body = "".join(f"%% {n}@1 NOTICES AND INFORMATION BEGIN HERE\n===\n{NOTICE_SAMPLES[k]}\n===\nEND OF {n}@1 NOTICES AND INFORMATION\n\n" for n, k in (("a", "MIT"), ("b", "MIT"), ("c", "ISC"), ("d", "none-declared")))
+    assert chk.notice_breakdown("header\n\n" + body) == (4, {"ISC": 1, "MIT": 2, "none-declared": 1})
+
+
+def make_wheel_with_notice(tmp_path, notice_text, extra=None):
+    import zipfile
+    path = tmp_path / "w-1-py3-none-any.whl"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("w-1.dist-info/licenses/LICENSE", "licence")
+        zf.writestr("w/lib/b.js.LICENSE", notice_text)
+        for name, data in (extra or {}).items():
+            zf.writestr(name, data)
+    return path
+
+
+def wheelhouse_matrix(path, notice_text):
+    sha = lambda b: hashlib.sha256(b).hexdigest()
+    sections, counts = chk.notice_breakdown(notice_text)
+    return {"components": [{"id": "x", "shipped_wheels": [{"name": "w", "version": "1", "file": path.name, "sha256": sha(path.read_bytes()),
+                                                            "license_files": [{"path": "w-1.dist-info/licenses/LICENSE", "sha256": sha(b"licence")},
+                                                                              {"path": "w/lib/b.js.LICENSE", "sha256": sha(notice_text.encode())}],
+                                                            "inlined_notices": [{"path": "w/lib/b.js.LICENSE", "sections": sections, "breakdown": counts}]}]}]}
+
+
+NOTICE = "".join(f"%% {n}@1 NOTICES AND INFORMATION BEGIN HERE\n===\n{NOTICE_SAMPLES[k]}\n===\nEND OF {n}@1 NOTICES AND INFORMATION\n\n" for n, k in (("a", "MIT"), ("b", "ISC")))
+
+
+def test_the_wheelhouse_check_passes_for_wheels_that_bear_the_matrix_out(tmp_path):
+    wheel = make_wheel_with_notice(tmp_path, NOTICE)
+    assert chk.check_wheelhouse(wheelhouse_matrix(wheel, NOTICE), tmp_path) == []
+
+
+def test_the_wheelhouse_check_finds_a_breakdown_a_digest_a_licence_file_and_an_unrecorded_licence_file_that_disagree_with_the_wheel(tmp_path):
+    wheel = make_wheel_with_notice(tmp_path, NOTICE)
+    m = wheelhouse_matrix(wheel, NOTICE)
+    rec = m["components"][0]["shipped_wheels"][0]
+    rec["inlined_notices"][0]["breakdown"] = {"MIT": 2}                                  # the matrix says only MIT: the file also holds an ISC section
+    assert "NOTICE_BREAKDOWN_MISMATCH" in codes(chk.check_wheelhouse(m, tmp_path))
+    rec["inlined_notices"][0]["breakdown"] = {"ISC": 1, "MIT": 1}
+    rec["inlined_notices"][0]["sections"] = 3
+    assert "NOTICE_BREAKDOWN_MISMATCH" in codes(chk.check_wheelhouse(m, tmp_path))
+    m = wheelhouse_matrix(wheel, NOTICE)
+    m["components"][0]["shipped_wheels"][0]["license_files"][0]["sha256"] = "0" * 64
+    assert "LICENCE_FILE_DIGEST" in codes(chk.check_wheelhouse(m, tmp_path))
+    m = wheelhouse_matrix(wheel, NOTICE)
+    m["components"][0]["shipped_wheels"][0]["license_files"].pop(0)
+    assert "UNRECORDED_LICENCE_FILE" in codes(chk.check_wheelhouse(m, tmp_path))
+    m = wheelhouse_matrix(wheel, NOTICE)
+    m["components"][0]["shipped_wheels"][0]["sha256"] = "0" * 64
+    assert "WHEEL_DIGEST" in codes(chk.check_wheelhouse(m, tmp_path))
+    m["components"][0]["shipped_wheels"][0]["file"] = "gone.whl"
+    assert "WHEEL_MISSING" in codes(chk.check_wheelhouse(m, tmp_path))
+    other = make_wheel_with_notice(tmp_path / "x" if (tmp_path / "x").mkdir() is None else tmp_path, NOTICE, extra={"w/NOTICE": "new"})
+    m = wheelhouse_matrix(other, NOTICE)
+    assert "UNRECORDED_LICENCE_FILE" in codes(chk.check_wheelhouse(m, other.parent))
+
+
+def test_the_command_line_checks_a_wheelhouse_when_given_one(tmp_path):
+    import subprocess
+    (tmp_path / "bad").mkdir()
+    done = subprocess.run([sys.executable, str(ROOT / "tools" / "check_adapter_licenses.py"), "--wheelhouse", str(tmp_path / "bad")], capture_output=True, text=True, cwd=str(tmp_path))
+    assert done.returncode == 1 and "WHEEL_MISSING" in done.stdout
+
+
+def test_the_bundle_job_checks_the_matrix_against_the_wheels_it_built():
+    wf = yaml.safe_load((ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8"))
+    run = "\n".join(str(s.get("run", "")) for s in wf["jobs"]["bundle"]["steps"])
+    assert "tools/check_adapter_licenses.py --wheelhouse" in run

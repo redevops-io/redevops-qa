@@ -76,7 +76,7 @@ def test_the_matrix_records_robot_as_shipped_unmodified_for_private_staging_only
     assert ROBOT["redistribution"]["status"] == "staged_unmodified" and ROBOT["redistribution"]["public_distribution"] == "owner_decision_required"
     assert "PRIVATE STAGING ONLY" in ROBOT["redistribution"]["reason"]
     unverified = [d for d in ROBOT["bundled_deps"] if d["spdx"] == "unverified"]
-    assert len(unverified) == 2 and all("robot/htmldata/lib/" in d["name"] for d in unverified)
+    assert len(unverified) == 3 and all("robot/htmldata/" in d["name"] for d in unverified)
 
 
 def test_the_default_allowlist_matches_the_documented_one():

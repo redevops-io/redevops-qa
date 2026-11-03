@@ -8,6 +8,7 @@ Reads ``third_party/adapter-license-matrix.yaml`` and fails (exit 1) when:
 * a claim of ``redistributable`` is not supported by a verified licence text, an inspected bundle and recorded notices;
 * a commercial SDK or Apple toolchain is enabled by default;
 * a package that an adapter package or a workflow installs is not listed in the matrix, or is pinned differently;
+* (with --wheelhouse DIR) a recorded wheel, licence file or notice breakdown that the wheels of a built bundle do not bear out, or a licence-like file the matrix does not record;
 * a wheel of bundle/third-party.lock.json (what the pinned bundle ships) has no entry here with the same name, version, file name and sha256 under a shipping status
   (``redistributable`` or ``staged_unmodified``), a shipped wheel is recorded under any other status, or the matrix lists a shipped wheel the lock does not hold;
 * an adapter framework is installed without an exact pin.
@@ -469,6 +470,75 @@ def check_bundle_lock(matrix: dict, lock: dict) -> List[Finding]:
     return out
 
 
+# --------------------------------------------------------------------------------------------- the wheels themselves
+_SECTION = re.compile(r"^%% (\S+) NOTICES AND INFORMATION BEGIN HERE\n", re.M)
+_LICENCE_FILE_NAME = re.compile(r"(^|/)(LICEN[SC]E|NOTICE|COPYING|AUTHORS|ThirdPartyNotices)[^/]*$|\.LICENSE$", re.I)
+
+
+def classify_notice(text: str) -> str:
+    """The licence a notice section states, from its own words (a deterministic reading of the file, not a legal classification)."""
+    t = text.lower()
+    if "no license text found" in t:
+        return "none-declared"
+    if "blue oak model license" in t:
+        return "BlueOak-1.0.0"
+    if "redistribution and use in source and binary forms" in t:
+        return "BSD-3-Clause" if "endorse" in t else "BSD-2-Clause"
+    if "permission to use, copy, modify, and/or distribute" in t or "permission to use, copy, modify, and distribute" in t:
+        return "ISC"
+    if "permission is hereby granted, free of charge" in t:
+        return "MIT"
+    if "apache license" in t:
+        return "Apache-2.0"
+    return "other"
+
+
+def notice_breakdown(text: str) -> Tuple[int, Dict[str, int]]:
+    """(number of sections, {licence: count}) of a sidecar notice file made of '%% name@version NOTICES AND INFORMATION BEGIN HERE' sections."""
+    parts = _SECTION.split(text)
+    counts: Dict[str, int] = {}
+    for i in range(1, len(parts), 2):
+        kind = classify_notice(parts[i + 1].split("END OF ", 1)[0])
+        counts[kind] = counts.get(kind, 0) + 1
+    return len(parts) // 2, dict(sorted(counts.items()))
+
+
+def check_wheelhouse(matrix: dict, wheelhouse: Path) -> List[Finding]:
+    """What the matrix says about the shipped wheels against the wheels themselves (the built bundle's wheelhouse): the file and its sha256, every recorded licence file by path and sha256,
+    no licence-like file the matrix does not record, and, where the matrix records a breakdown of an inlined notice file, the breakdown recomputed from the file."""
+    import zipfile
+    out: List[Finding] = []
+    for comp in matrix.get("components", []):
+        for rec in comp.get("shipped_wheels") or []:
+            at = f"{comp['id']}/{rec.get('name')}"
+            path = Path(wheelhouse) / str(rec.get("file"))
+            if not path.is_file():
+                out.append(Finding("WHEEL_MISSING", at, f"{rec.get('file')} is not in {wheelhouse}"))
+                continue
+            if hashlib.sha256(path.read_bytes()).hexdigest() != rec.get("sha256"):
+                out.append(Finding("WHEEL_DIGEST", at, f"{rec.get('file')} does not have the recorded sha256"))
+                continue
+            with zipfile.ZipFile(path) as zf:
+                names = set(zf.namelist())
+                recorded = {lf["path"]: lf["sha256"] for lf in rec.get("license_files") or []}
+                for member, digest in recorded.items():
+                    if member not in names:
+                        out.append(Finding("LICENCE_FILE_MISSING", at, f"{member} is not in the wheel"))
+                    elif hashlib.sha256(zf.read(member)).hexdigest() != digest:
+                        out.append(Finding("LICENCE_FILE_DIGEST", at, f"{member} does not have the recorded sha256"))
+                for member in sorted(n for n in names if _LICENCE_FILE_NAME.search(n) and not n.endswith("/") and n not in recorded):
+                    out.append(Finding("UNRECORDED_LICENCE_FILE", at, f"{member} is in the wheel but not recorded in license_files"))
+                for notice in rec.get("inlined_notices") or []:
+                    member = notice.get("path")
+                    if member not in names:
+                        out.append(Finding("LICENCE_FILE_MISSING", at, f"{member} is not in the wheel"))
+                        continue
+                    sections, counts = notice_breakdown(zf.read(member).decode("utf-8", "replace"))
+                    if sections != notice.get("sections") or counts != notice.get("breakdown"):
+                        out.append(Finding("NOTICE_BREAKDOWN_MISMATCH", at, f"{member}: the file has {sections} sections {counts}, the matrix records {notice.get('sections')} {notice.get('breakdown')}"))
+    return out
+
+
 # --------------------------------------------------------------------------------------------- optional upstream check
 Fetcher = Callable[[str], bytes]
 
@@ -533,9 +603,12 @@ def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--matrix", type=Path, default=DEFAULT_MATRIX)
     ap.add_argument("--root", type=Path, default=ROOT)
+    ap.add_argument("--wheelhouse", type=Path, help="a built bundle's wheelhouse: check the recorded wheels, licence files and notice breakdowns against the wheels themselves")
     ap.add_argument("--verify-upstream", action="store_true", help="re-fetch each licence file at its pinned tag and compare hashes (network)")
     args = ap.parse_args(argv[1:])
     findings = run(args.matrix, args.root, args.verify_upstream)
+    if args.wheelhouse:
+        findings += check_wheelhouse(load_matrix(args.matrix), args.wheelhouse)
     for finding in findings:
         print(finding)
     if findings:
