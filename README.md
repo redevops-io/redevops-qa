@@ -11,15 +11,26 @@ against pinned *releases* of its dependencies, [`runtime-contracts`](https://git
 packages. See [LICENSE.md](LICENSE.md).
 
 ## What runs in CI today
-The push and pull-request workflow runs the offline test suites, the `qa/v1` conformance suite against both pinned contract states, and four jobs that
-exercise a real engine: Playwright with Chromium, Selenium with Chrome, Robot Framework, and the Appium server with the UiAutomator2 driver (no device).
-The real-device Android lane is a separate manual workflow, because hosted runners have no emulator: it passed locally on one Android 17 emulator and has
-never run in CI. There is no iOS evidence; the iOS adapter reports `UNAVAILABLE`. An engine's own PASS is a framework result, not an independent
+The push and pull-request workflow runs the offline test suites, the `qa/v1` conformance suite against both pinned contract states, and jobs that exercise a real
+engine: Playwright with Chromium, Selenium with Chrome, Robot Framework, and the Appium server with the UiAutomator2 driver (no device). The `redevops-qa` command
+is run end to end with real Chromium and Robot Framework together (`runner-e2e`), and the public demo (`demo` jobs) runs it three times from the installed bundle against the
+fixture app: with no defect (verified), with a seeded discount defect (the Robot lane fails) and with a seeded settings defect (the Playwright lane fails); each evidence bundle is
+kept as a workflow artifact and re-verified in a second job. The real-device Android lane is a separate manual workflow, because hosted runners have no emulator: it passed locally on
+one Android 17 emulator and has never run in CI. There is no iOS evidence; the iOS adapter reports `UNAVAILABLE`. An engine's own PASS is a framework result, not an independent
 verdict. Details per package are in the READMEs below; vulnerability reporting is in [SECURITY.md](SECURITY.md).
 
+## Install and run
+
+From a pinned bundle (CPython 3.12 on Linux x86_64 only; nothing is published, so you build it from a checkout or take the archive of a workflow run): the steps, the checks the install makes
+and what it does not check are in [bundle/README.md](bundle/README.md); `python tools/build_bundle.py build --out DIR` builds it. The installer profile `local-python-qa`
+([docs/QA_INSTALL_PROFILES.md](docs/QA_INSTALL_PROFILES.md)) lists the same steps as data and is run by CI. A real run, with its output, is in [docs/QA_DEMO.md](docs/QA_DEMO.md).
+Chromium is downloaded by the bundle's separate browser step; the bundle records the build it expects and does not hash it. macOS and Windows are not claimed.
+
 ## Layout
-Product packages (`qa-api`, `qa-ui`, `qa-runner`, `qa-playwright`, `qa-evidence`, `qa-bridge`, `qa-egress`, `qa-adapter-kit`, `qa-selenium`,
-`qa-robot`, `qa-appium`, `qa-checks`, `qa-fixture-app`), deployment (`deploy/`), examples and benchmarks.
+Packages (under `packages/`): `qa-runner`, `qa-playwright`, `qa-evidence`, `qa-bridge`, `qa-egress`, `qa-adapter-kit`, `qa-selenium`, `qa-robot`, `qa-appium`, `qa-checks`, `qa-fixture-app`.
+Also in the repository: the pinned bundle (`bundle/`, `tools/build_bundle.py`), the tools of the CI checks (`tools/`), the licence matrix (`third_party/`), and examples that ship with the runner
+(`packages/qa-runner/examples`). **Not in this repository:** `qa-api`, `qa-ui`, a `deploy/` directory (no Compose file, no Dockerfile, no Helm chart), standalone examples and benchmarks; earlier text
+named them, and none of them exists.
 
 Configuration of the pinned upstream versions: [pins.toml](pins.toml). The contracts bridge is in
 [packages/qa-bridge](packages/qa-bridge/README.md).

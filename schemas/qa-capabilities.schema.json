@@ -57,7 +57,8 @@
         }
       }
     },
-    "engines": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/engine"}}
+    "engines": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/engine"}},
+    "product_capabilities": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/product_capability"}}
   },
   "$defs": {
     "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
@@ -100,6 +101,21 @@
           "then": {"properties": {"pin_literal": {"type": "null"}, "pin_source": {"type": "null"}, "note": {"minLength": 1}}}
         }
       ]
+    },
+    "product_capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "summary", "test_level", "test_level_scope", "docs_url", "evidence", "limitations"],
+      "properties": {
+        "id": {"$ref": "#/$defs/slug"},
+        "title": {"type": "string", "minLength": 1},
+        "summary": {"type": "string", "minLength": 1},
+        "test_level": {"$ref": "#/$defs/level"},
+        "test_level_scope": {"type": "string", "minLength": 1},
+        "docs_url": {"$ref": "#/$defs/repo_path"},
+        "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}},
+        "limitations": {"$ref": "#/$defs/text_list"}
+      }
     },
     "evidence": {
       "type": "object",

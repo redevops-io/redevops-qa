@@ -866,5 +866,101 @@
       "docs_url": "packages/qa-appium/README.md",
       "example_id": null
     }
+  ],
+  "product_capabilities": [
+    {
+      "id": "qa-runner-two-lane-run",
+      "title": "One frozen plan run through two engines, Playwright Chromium and Robot Framework, with one evidence bundle (`redevops-qa run`, `redevops-qa demo`)",
+      "summary": "A plan is frozen (the strict runtime-contracts parser, every assertion's digest, the plan digest), the fixture app starts on loopback with a seeded defect or none, the browser lane and the Robot lane run one after the other as supervised child processes under one run id, and one evidence bundle is written. A seeded defect fails exactly its own lane and the other lane's result is still recorded.",
+      "test_level": "engine-backed-ci",
+      "test_level_scope": "the runner's end-to-end lane on a GitHub-hosted ubuntu-24.04 runner: real Chromium through Playwright 1.64.1 and Robot Framework 7.5 together, the fixture app only, each seeded defect, partial success, timeouts, cancellation and a killed parent checked with a process table",
+      "docs_url": "packages/qa-runner/README.md",
+      "evidence": [
+        {
+          "id": "ev-runner-e2e",
+          "kind": "ci-job",
+          "claim": "real Chromium and Robot Framework 7.5 in one run, the two-lane plan for each seeded defect, timeouts, cancellation and a killed parent; the job fails on zero tests or any skip",
+          "workflow": "tests.yml",
+          "job_key": "runner-e2e",
+          "job_name": "runner end to end",
+          "run_id": 41407615435,
+          "job_id": 125153175628,
+          "head_sha": "1b40a361ff1854ff387ce5da416735db79d43fa3",
+          "conclusion": "success",
+          "completed_on": "2026-11-02",
+          "tests": "103 passed, 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41407615435",
+          "run_conclusion": "success",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41407615435/job/125153175628"
+        },
+        {
+          "id": "ev-runner-e2e-tests",
+          "kind": "repo-path",
+          "path": "packages/qa-runner/tests/e2e",
+          "claim": "the tests the end-to-end job runs"
+        }
+      ],
+      "limitations": [
+        "The target is the bundled fixture app: this release runs plans against it only, not against an arbitrary application.",
+        "Linux x86_64 only; Playwright with Chromium only; Selenium and Appium are not part of this workflow.",
+        "The Robot lane's egress is not enforced (a Robot library opens its own sockets); the browser lane's traffic goes through the egress gateway.",
+        "The pinned bundle's install and the public CI demo are run by CI jobs added after this evidence; they get their own rows once a run on the main branch backs them."
+      ]
+    },
+    {
+      "id": "qa-verify-recompute",
+      "title": "Re-verification of a finished run from its evidence bundle alone (`redevops-qa verify`)",
+      "summary": "`verify` recomputes every digest, the frozen assertions and every verdict from the bundle in a process of its own and rejects any finding with exit status 5; `run` and `demo` end by calling it in a fresh interpreter. A tamper and negative suite is run over real bundles.",
+      "test_level": "engine-backed-ci",
+      "test_level_scope": "the end-to-end job (bundles of real engine runs, verified at the end of every run) and the offline runner job (the tamper and negative suite), on ubuntu-24.04",
+      "docs_url": "packages/qa-runner/README.md",
+      "evidence": [
+        {
+          "id": "ev-verify-e2e",
+          "kind": "ci-job",
+          "claim": "every run in this job ends with `verify` in a separate process over the bundle the run wrote; the job installs Playwright 1.64.1 and Robot Framework 7.5",
+          "workflow": "tests.yml",
+          "job_key": "runner-e2e",
+          "job_name": "runner end to end",
+          "run_id": 41407615435,
+          "job_id": 125153175628,
+          "head_sha": "1b40a361ff1854ff387ce5da416735db79d43fa3",
+          "conclusion": "success",
+          "completed_on": "2026-11-02",
+          "tests": "103 passed, 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41407615435",
+          "run_conclusion": "success",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41407615435/job/125153175628"
+        },
+        {
+          "id": "ev-verify-tamper-suite",
+          "kind": "ci-job",
+          "claim": "the offline runner suite, which includes the tamper and negative suite for `verify`",
+          "workflow": "tests.yml",
+          "job_key": "runner",
+          "job_name": "runner (Python",
+          "run_id": 41407615435,
+          "job_id": 125153175570,
+          "head_sha": "1b40a361ff1854ff387ce5da416735db79d43fa3",
+          "conclusion": "success",
+          "completed_on": "2026-11-02",
+          "tests": "926 passed, 0 skipped, 0 failed",
+          "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41407615435",
+          "run_conclusion": "success",
+          "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41407615435/job/125153175570"
+        },
+        {
+          "id": "ev-verify-tests",
+          "kind": "repo-path",
+          "path": "packages/qa-runner/tests/test_qr_tamper_suite.py",
+          "claim": "the tamper suite over real bundles"
+        }
+      ],
+      "limitations": [
+        "It is a re-verification by the same code the run used, in a separate process; it is not an independent implementation of the verdicts. `independent` here means independent of the engine's own status.",
+        "The hash chain inside a bundle is unkeyed: someone who can rewrite a whole bundle can rewrite its digests too. Only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite, passed with `--anchor`, shows that a bundle is the one the value was taken from; nothing in the tool authenticates where the value came from.",
+        "A verified run does not show that the application under test is correct."
+      ]
+    }
   ]
 }

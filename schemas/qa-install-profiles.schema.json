@@ -29,7 +29,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["supported", "reason"],
-      "properties": {"supported": {"const": false}, "reason": {"type": "string", "minLength": 1}}
+      "properties": {"supported": {"type": "boolean"}, "reason": {"type": "string", "minLength": 1}}
     },
     "targets": {
       "type": "object",
@@ -129,6 +129,8 @@
       "properties": {
         "id": {"$ref": "#/$defs/slug"},
         "title": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["checkout", "bundle"]},
+        "verifier": {"type": "boolean"},
         "target": {"enum": ["local-python"]},
         "engines": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/slug"}},
         "status": {"$ref": "#/$defs/status"},

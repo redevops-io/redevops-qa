@@ -557,12 +557,13 @@ def test_the_real_manifest_names_commits_that_exist_in_a_full_clone_only_and_nev
 class FakeApi:
     def __init__(self, manifest, **override):
         self.runs, self.jobs = {}, {}
-        for e in manifest["engines"]:
+        for e in list(manifest["engines"]) + list(manifest.get("product_capabilities", [])):
             for x in e["evidence"]:
                 if x["kind"] == "ci-job":
                     self.runs[x["run_id"]] = {"head_sha": x["head_sha"], "conclusion": x["run_conclusion"]}
-                    self.jobs.setdefault(x["run_id"], []).append({"id": x["job_id"], "name": x["job_name"] + " (full name)", "conclusion": "success",
-                                                                  "completed_at": x["completed_on"] + "T01:00:00Z"})
+                    if not any(j["id"] == x["job_id"] for j in self.jobs.get(x["run_id"], [])):
+                        self.jobs.setdefault(x["run_id"], []).append({"id": x["job_id"], "name": x["job_name"] + " (full name)", "conclusion": "success",
+                                                                      "completed_at": x["completed_on"] + "T01:00:00Z"})
         self.override = override
 
     def __call__(self, url):
@@ -657,3 +658,64 @@ def test_the_cross_check_agrees_with_a_validator_that_behaves_the_same(monkeypat
 def test_the_manifest_is_linked_from_the_readme():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "qa-capabilities.json" in readme and "docs/QA_CAPABILITIES.md" in readme
+
+
+# ------------------------------------------------------------------------------------------------ product capabilities (features of the redevops-qa command)
+def row(m, rid):
+    return next(r for r in m["product_capabilities"] if r["id"] == rid)
+
+
+def sem(m):
+    assert qj.validate(m, SCHEMA) == []
+    return chk.semantic_problems(m, ROOT)
+
+
+def test_the_two_product_rows_are_backed_by_ci_jobs_of_the_main_branch_and_pass_every_check():
+    assert [r["id"] for r in REAL["product_capabilities"]] == ["qa-runner-two-lane-run", "qa-verify-recompute"]
+    assert sem(REAL) == []
+    for r in REAL["product_capabilities"]:
+        assert r["test_level"] == "engine-backed-ci" and any(e["kind"] == "ci-job" for e in r["evidence"])
+
+
+def test_the_product_rows_say_what_they_do_not_show():
+    text = json.dumps(REAL["product_capabilities"])
+    assert "fixture app" in text and "not an independent implementation" in text and "unkeyed" in text and "does not show that the application under test is correct" in text
+    assert not re.search(r"(?<!not )open[ -]source|tamper-proof|soc 2", text, re.IGNORECASE)
+
+
+@pytest.mark.parametrize("label,fn,needle", [
+    ("an unknown job key", lambda m: row(m, "qa-runner-two-lane-run")["evidence"][0].__setitem__("job_key", "no-such-job"), "has no job"),
+    ("a job named differently", lambda m: row(m, "qa-runner-two-lane-run")["evidence"][0].__setitem__("job_name", "something else"), "is not named"),
+    ("a url that does not match the ids", lambda m: row(m, "qa-runner-two-lane-run")["evidence"][0].__setitem__("job_id", 5), "run_url and url must be built"),
+    ("a repo path that does not exist", lambda m: row(m, "qa-runner-two-lane-run")["evidence"][1].__setitem__("path", "packages/nothing"), "does not exist"),
+    ("a docs path that does not exist", lambda m: row(m, "qa-runner-two-lane-run").__setitem__("docs_url", "docs/NOTHING.md"), "docs_url"),
+    ("a local run as evidence", lambda m: row(m, "qa-runner-two-lane-run")["evidence"].__setitem__(1, {"id": "ev-x", "kind": "local-run", "claim": "c"}), "not by a local run"),
+    ("a device level", lambda m: row(m, "qa-runner-two-lane-run").__setitem__("test_level", "device-backed-ci"), "cannot be at a device level"),
+    ("a level without a CI job", lambda m: row(m, "qa-runner-two-lane-run").__setitem__("evidence", [row(m, "qa-runner-two-lane-run")["evidence"][1]]), "needs a CI job"),
+    ("engine-backed without the engines", lambda m: row(m, "qa-verify-recompute").__setitem__("evidence", [e for e in row(m, "qa-verify-recompute")["evidence"]
+                                                                                                    if e["kind"] != "ci-job" or e["job_key"] == "runner"]),
+     "installs the pinned Playwright and Robot Framework"),
+    ("a duplicate id", lambda m: m["product_capabilities"].append(copy.deepcopy(row(m, "qa-verify-recompute"))), "duplicate id"),
+    ("a job cited twice in one row", lambda m: row(m, "qa-verify-recompute")["evidence"].insert(0, copy.deepcopy(row(m, "qa-verify-recompute")["evidence"][0]) | {"id": "ev-again"}), "cited twice"),
+])
+def test_a_product_row_that_strays_from_its_evidence_is_found(label, fn, needle):
+    m = fresh()
+    fn(m)
+    found = joined(chk.semantic_problems(m, ROOT)) + joined(qj.validate(m, SCHEMA))
+    assert needle in found, (label, found)
+
+
+def test_a_product_row_cites_commits_that_must_be_on_main(tmp_path):
+    m = fresh()
+    row(m, "qa-runner-two-lane-run")["evidence"][0]["head_sha"] = "e" * 40
+    assert "is not a commit of this repository" in joined(chk.freshness_problems(m, ROOT, "HEAD"))
+
+
+def test_re_checking_product_rows_against_the_api_finds_a_different_head():
+    assert "head is" in joined(chk.verify_ci_problems(REAL, FakeApi(REAL, run={"head_sha": "e" * 40, "conclusion": "success"})))
+
+
+def test_the_generated_page_has_the_product_section_with_its_caveats():
+    text = (ROOT / "docs" / "QA_CAPABILITIES.md").read_text(encoding="utf-8")
+    assert "## Product capabilities (the `redevops-qa` command)" in text and "not an independent implementation" in text
+    assert "get their rows once a run on the main branch exists" in text

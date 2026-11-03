@@ -108,6 +108,9 @@ def test_every_verified_profile_is_pinned_exactly_and_each_pin_matches_the_capab
         if p["status"] == "planned":
             continue
         assert p["python"]["version"] == "3.12" and p["python"]["requires"] == ">=3.11"
+        if p.get("kind") == "bundle":
+            assert p["pip_pins"] == [] and p["packages"] == []                  # the pins of a bundle profile are the bundle's lock
+            continue
         assert all(re.fullmatch(r"[0-9]+(\.[0-9]+)*", x["version"]) for x in p["pip_pins"])
         cap = {e["engine"]: e for e in CAPS["engines"]}
         for e in p["engines"]:
@@ -155,7 +158,8 @@ SCHEMA_CASES = [
     ("a step without an argv", mutate(R + ("steps", "install", 0, "argv"), []), "argv"),
     ("an unknown step field", mutate(R + ("steps", "install", 0, "shell"), True), "shell"),
     ("an unknown phase", mutate(R + ("steps", "deploy"), []), "deploy"),
-    ("a verifier that is supported", mutate(("verifier", "supported"), True), "supported"),
+    ("a verifier flag that is not a boolean", mutate(("verifier", "supported"), "yes"), "supported"),
+    ("a profile kind outside the vocabulary", mutate(R + ("kind",), "docker"), "kind"),
     ("an install method that is a registry", mutate(("source", "install_method"), "registry"), "install_method"),
     ("a bad pinned commit", mutate(("source", "pinned_commit"), "main"), "pinned_commit"),
     ("a recorded run without the commit it installed from", mutate(R + ("hosts", 0, "verified_by", "source_commit"), None), "source_commit"),
@@ -240,6 +244,8 @@ def test_an_install_with_nothing_to_install_is_refused():
 
 def test_every_step_of_every_profile_passes_the_closed_shapes():
     for p in PROFILES["profiles"]:
+        if p.get("kind") == "bundle":
+            continue                         # a bundle profile's steps are compared with the exact list (tests below)
         for phase, steps in p["steps"].items():
             for s in steps:
                 assert chk.step_problems(p, phase, s) == [], (p["id"], s["id"])
@@ -464,6 +470,8 @@ def job_problems(workflow_mutation=None, profile_mutation=None):
         shutil.copytree(ROOT / ".github", tmp / ".github")
         shutil.copy(ROOT / "pins.toml", tmp / "pins.toml")
         shutil.copytree(ROOT / "packages", tmp / "packages", ignore=shutil.ignore_patterns("tests", "src", "*.pyc", "__pycache__"))
+        (tmp / "packages" / "qa-runner" / "src" / "qa_runner").mkdir(parents=True)             # the bundle profile's archive name comes from the runner's version
+        shutil.copy(ROOT / "packages" / "qa-runner" / "src" / "qa_runner" / "__init__.py", tmp / "packages" / "qa-runner" / "src" / "qa_runner" / "__init__.py")
         wf = yaml.safe_load((tmp / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8"))
         workflow_mutation(wf["jobs"]["profile-local-python-robot"], wf)
         (tmp / ".github" / "workflows" / "tests.yml").write_text(yaml.safe_dump(wf, sort_keys=False, width=10**6), encoding="utf-8")
@@ -552,6 +560,10 @@ def test_the_workflow_has_one_job_per_offered_profile_and_never_makes_them_a_dep
         job = WORKFLOW["jobs"][f"profile-{p['id']}"]
         text = "\n".join(str(s.get("run", "")) for s in job["steps"])
         assert f"--profile {p['id']}" in text and "tools/run_install_profile.py" in text
+        if p.get("kind") == "bundle":
+            assert job["needs"] == "bundle" and "--phases source,install,smoke,check" in text and "--phases uninstall" in text and "required check" in job["name"]
+            assert not {"if", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "if" in s or "continue-on-error" in s]
+            continue
         assert not {"if", "needs", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "if" in s or "continue-on-error" in s]
         assert "required check" in job["name"] and "--phases install,smoke,check" in text and "--phases uninstall" in text
         assert job["runs-on"] == "ubuntu-24.04"
@@ -564,8 +576,8 @@ def test_the_workflow_has_one_job_per_offered_profile_and_never_makes_them_a_dep
 
 def test_the_profile_jobs_fetch_the_pinned_commit_and_add_no_credentials():
     for key, job in WORKFLOW["jobs"].items():
-        if not key.startswith("profile-"):
-            continue
+        if not key.startswith("profile-") or key == "profile-local-python-qa":
+            continue                         # the bundle profile installs from an archive: no checkout of a pinned commit
         fetch = next(s for s in job["steps"] if s.get("with", {}).get("path") == ".profile-src")
         assert fetch["with"]["ref"] == "${{ steps.profile.outputs.commit }}" and fetch["with"]["persist-credentials"] is False
         assert set(fetch["with"]) == {"repository", "ref", "path", "persist-credentials"}
@@ -851,3 +863,136 @@ def test_the_import_location_code_accepts_only_modules_under_the_given_directory
     bad = subprocess.run([sys.executable, "-I", "-c", chk.CODE_ASSERT, str(tmp_path), "json"], capture_output=True, text=True)
     assert bad.returncode != 0 and "not imported from the virtual environment: json" in bad.stderr
     assert ok.returncode in (0, 1)
+
+
+# ------------------------------------------------------------------------------------------------ the bundle profile (local-python-qa)
+def qa_mutation(fn):
+    m = copy.deepcopy(PROFILES)
+    fn(profile(m, "local-python-qa"), m)
+    return semantic(m)
+
+
+def test_the_bundle_profile_is_offered_with_the_verifier_and_passes_every_check():
+    p = profile(PROFILES, "local-python-qa")
+    assert p["kind"] == "bundle" and p["verifier"] is True and sorted(p["engines"]) == ["playwright", "robotframework"]
+    assert PROFILES["verifier"]["supported"] is True and "local-python-qa" in PROFILES["verifier"]["reason"]
+    assert chk.check_all(ROOT, freshness=False) == []
+    assert p["pip_pins"] == [] and p["packages"] == [] and p["evidence"]["files"] == []
+
+
+def test_the_bundle_profile_is_experimental_until_a_run_on_main_is_recorded_and_says_why():
+    p = profile(PROFILES, "local-python-qa")
+    h = host(p, "linux-x86_64")
+    assert p["status"] == "experimental" and h["status"] == "experimental" and h["verified_by"] is None
+    assert "no run on the main branch" in json.dumps(gen.generate(sel_qa(), CAPS, PROFILES)["warnings"]) and "recorded" in h["note"]
+
+
+def sel_qa(**over):
+    sel = {"engines": ["playwright", "robotframework"], "target": "local-python", "host": "linux-x86_64", "verifier": True, "channel": "experimental", "bundle_dir": "/tmp/b", "install_dir": "/tmp/i"}
+    sel.update(over)
+    return sel
+
+
+def test_the_steps_of_the_bundle_profile_are_exactly_the_expected_ones_and_every_deviation_is_found():
+    p = profile(PROFILES, "local-python-qa")
+    name = chk.bundle_name(ROOT)
+    assert name == "redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64"
+    assert {ph: [s["argv"] for s in steps] for ph, steps in p["steps"].items()} == chk.expected_bundle_steps(name, "python3.12")
+
+    def change(phase, i, argv):
+        return lambda q, m: q["steps"][phase][i].__setitem__("argv", argv)
+    for label, fn, needle in (
+        ("an extra option in the install", change("install", 0, ["x"] + p["steps"]["install"][0]["argv"][1:]), "install steps must be exactly"),
+        ("another executable", change("smoke", 1, ["sh", "-c", "true"]), "smoke steps must be exactly"),
+        ("a download tool", lambda q, m: q["steps"]["source"].insert(0, {"id": "fetch", "title": "t", "argv": ["curl", "https://example.invalid/x.tar"]}), "source steps must be exactly"),
+        ("an environment on a step", lambda q, m: q["steps"]["check"][0].__setitem__("env", {"QA_CHROME_BINARY": "/bin/sh"}), "no environment"),
+        ("a manual step", lambda q, m: q["steps"]["check"][0].__setitem__("manual", True), "no environment and no manual step"),
+        ("a verify that is not run", lambda q, m: q["steps"].__setitem__("check", []), "check steps must be exactly"),
+        ("a different digest check", lambda q, m: q["steps"]["source"][0]["argv"].__setitem__(3, "print(1)"), "source steps must be exactly"),
+    ):
+        assert needle in joined(qa_mutation(fn)), label
+
+
+@pytest.mark.parametrize("label,fn,needle", [
+    ("a pin of its own", lambda q, m: q["pip_pins"].append({"name": "robotframework", "version": "7.5"}), "pins nothing itself"),
+    ("a package", lambda q, m: q["packages"].append("packages/qa-robot"), "pins nothing itself"),
+    ("the verifier switched off", lambda q, m: q.__setitem__("verifier", False), "installs and runs the verifier"),
+    ("another engine set", lambda q, m: q.__setitem__("engines", ["robotframework"]), "exactly the engines of the bundle"),
+    ("another python", lambda q, m: (q["python"].__setitem__("version", "3.11"), q["python"].__setitem__("executable", "python3.11")), "the bundle is for Python 3.12"),
+    ("an evidence file", lambda q, m: q["evidence"]["files"].append("x.xml"), "not JUnit files"),
+    ("another parameter", lambda q, m: q["params"]["bundle_dir"].__setitem__("required", False), "the parameters must be exactly"),
+    ("a macOS host that is not planned", lambda q, m: q["hosts"].append({"os_arch": "macos-x86_64", "status": "experimental", "prerequisites": ["x"], "verified_by": None, "disabled_reason": None, "note": ""}),
+     "for linux-x86_64 only"),
+    ("a verified status", lambda q, m: (q.__setitem__("status", "verified"), host(q, "linux-x86_64").__setitem__("status", "verified")), "not supported yet"),
+    ("the verifier flag on a checkout profile", lambda q, m: profile(m, "local-python-robot").__setitem__("verifier", True), "only a bundle profile installs the verifier"),
+    ("a top-level verifier claim without a profile", lambda q, m: q.__setitem__("status", "planned"), "verifier: supported must be true exactly when"),
+])
+def test_a_bundle_profile_that_strays_from_the_bundle_is_found(label, fn, needle):
+    m = copy.deepcopy(PROFILES)
+    fn(profile(m, "local-python-qa"), m)
+    assert needle in joined(chk.semantic_problems(m, CAPS, ROOT)) or needle in joined(qj.validate(m, SCHEMA)), label
+
+
+def test_the_ci_job_of_the_bundle_profile_runs_every_phase_from_the_bundle_job_and_every_deviation_is_found():
+    base = chk.bundle_problems(profile(PROFILES, "local-python-qa"), ROOT, WORKFLOW)
+    assert base == []
+
+    def with_job(fn):
+        wf = copy.deepcopy(WORKFLOW)
+        fn(wf["jobs"]["profile-local-python-qa"])
+        return joined(chk.bundle_problems(profile(PROFILES, "local-python-qa"), ROOT, wf))
+    assert "needs: bundle" in with_job(lambda j: j.__setitem__("needs", "pins"))
+    assert "no condition, no continue-on-error and no matrix" in with_job(lambda j: j.__setitem__("if", "always()"))
+    assert "no condition" in with_job(lambda j: j["steps"][0].__setitem__("continue-on-error", True))
+    assert "--channel experimental" in with_job(lambda j: [s.__setitem__("run", s["run"].replace("--channel experimental", "--channel stable")) for s in j["steps"] if "run" in s])
+    assert "does not run the uninstall phase" in with_job(lambda j: [s.__setitem__("run", s["run"].replace("uninstall", "nothing")) for s in j["steps"] if "run" in s])
+    assert "phases source,install,smoke,check" in with_job(lambda j: [s.__setitem__("run", s["run"].replace("source,install,smoke,check", "install,smoke,check")) for s in j["steps"] if "run" in s])
+    assert "NOT a required check until proven" in with_job(lambda j: j.__setitem__("name", "profile"))
+    assert "runs on" in with_job(lambda j: j.__setitem__("runs-on", "ubuntu-22.04"))
+    assert "no job profile-local-python-qa" in joined(chk.bundle_problems(profile(PROFILES, "local-python-qa"), ROOT, {"jobs": {}}))
+
+
+def test_the_generator_gives_the_bundle_profile_its_steps_and_a_manifest_that_says_a_verifier_is_enabled_and_no_commit_is_installed():
+    r = gen.generate(sel_qa(), CAPS, PROFILES)
+    assert r["ok"], r["errors"]
+    cfg = r["config"]
+    assert cfg["manifest"]["verifier"] == {"enabled": True} and cfg["manifest"]["source"] == {"repository": "redevops-io/redevops-qa", "commit": None, "kind": "bundle-archive"}
+    assert cfg["manifest"]["pins"] == {"python": "3.12", "pip": []} and cfg["manifest"]["params"] == {"bundle_dir": "/tmp/b", "evidence_dir": "qa-evidence", "install_dir": "/tmp/i"}
+    assert [w["code"] for w in r["warnings"]] == ["SOURCE_IS_A_BUNDLE_ARCHIVE", "EXPERIMENTAL_PROFILE", "VERIFIER_INCLUDED"]
+    assert cfg["steps"]["install"][0]["argv"][:3] == ["redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install.sh", "--prefix", "/tmp/i"]
+    assert cfg["steps"]["smoke"][1]["argv"][-4:] == ["--out", "qa-evidence", "--run-id", "profile-demo"]
+    assert gen.generate(sel_qa(verifier=False), CAPS, PROFILES)["config"]["manifest"]["verifier"] == {"enabled": True}      # the verifier is part of this profile
+
+
+def test_the_generator_still_refuses_a_verifier_for_every_engine_set_that_has_no_profile_with_one_and_requires_the_parameters():
+    for engines in (["robotframework"], ["selenium"], ["playwright"], ["selenium", "robotframework"]):
+        r = gen.generate({"engines": engines, "target": "local-python", "host": "linux-x86_64", "verifier": True, "channel": "experimental"}, CAPS, PROFILES)
+        assert ("VERIFIER_UNAVAILABLE", "verifier") in [(e["code"], e["field"]) for e in r["errors"]], engines
+    missing = gen.generate(sel_qa(), CAPS, PROFILES)
+    assert missing["ok"]
+    r = gen.generate({k: v for k, v in sel_qa().items() if k not in ("bundle_dir", "install_dir")}, CAPS, PROFILES)
+    assert [(e["code"], e["field"]) for e in r["errors"]] == [("MISSING_PARAM", "bundle_dir"), ("MISSING_PARAM", "install_dir")]
+    r = gen.generate(sel_qa(venv_dir="x"), CAPS, PROFILES)
+    assert [(e["code"], e["field"]) for e in r["errors"]] == [("UNEXPECTED_PARAM", "venv_dir")]
+    r = gen.generate(sel_qa(channel="stable"), CAPS, PROFILES)
+    assert [(e["code"], e["field"]) for e in r["errors"]] == [("NEEDS_EXPERIMENTAL_CHANNEL", "channel")]
+    r = gen.generate(sel_qa(host="macos-arm64"), CAPS, PROFILES)
+    assert [(e["code"], e["field"]) for e in r["errors"]] == [("HOST_NOT_SUPPORTED", "host")] and "linux x86_64 only" in r["errors"][0]["message"]
+
+
+def test_the_runner_takes_only_the_parameters_the_profile_declares_and_needs_no_checkout_for_a_bundle_profile(tmp_path):
+    p = profile(PROFILES, "local-python-qa")
+
+    class A:
+        host, channel, work, checkout = "linux-x86_64", "experimental", str(tmp_path), None
+    sel = runner.selection_for(p, A, {"bundle_dir": "/tmp/b"})
+    assert sel["verifier"] is True and set(sel) == {"engines", "target", "host", "verifier", "channel", "evidence_dir", "install_dir", "bundle_dir"}
+    done = subprocess.run([sys.executable, str(ROOT / "tools" / "run_install_profile.py"), "--profile", "local-python-robot", "--host", "linux-x86_64", "--channel", "stable", "--work", str(tmp_path),
+                           "--phases", "install"], capture_output=True, text=True)
+    assert done.returncode == 2 and "--checkout is required" in done.stdout
+
+
+def test_the_generated_page_names_the_one_profile_that_installs_the_verifier():
+    text = (ROOT / "docs" / "QA_INSTALL_PROFILES.md").read_text(encoding="utf-8")
+    assert "Independent verifier: offered by `local-python-qa` only." in text and "installs from a bundle archive instead" in text
+    assert "linux-x86_64 | experimental" in text and "No bundle is published" in text

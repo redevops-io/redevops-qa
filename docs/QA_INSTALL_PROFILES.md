@@ -2,7 +2,7 @@
 
 # ReDevOps QA: install profiles
 
-This page is generated from [`qa-install-profiles.json`](../qa-install-profiles.json), the data the installer configurator is built from. Every profile installs from a clone of https://github.com/redevops-io/redevops-qa at the pinned commit `5e9c8da6248f9c4e170b77ab4ff202b519c970a8`; The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them.
+This page is generated from [`qa-install-profiles.json`](../qa-install-profiles.json), the data the installer configurator is built from. Every profile but `local-python-qa` installs from a clone of https://github.com/redevops-io/redevops-qa at the pinned commit `5e9c8da6248f9c4e170b77ab4ff202b519c970a8`; The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them. The profile `local-python-qa` installs from a bundle archive instead (see its section).
 
 A profile is **verified** only when a CI job runs that exact profile, step by step, on the host named; **experimental** means the steps are written and partly or not at all run for that host; **planned** means nothing is offered yet and the reason is given.
 
@@ -14,7 +14,7 @@ A profile is **verified** only when a CI job runs that exact profile, step by st
 | docker-compose | planned | The main branch of this repository ships no Compose file, no Dockerfile and no runner service. A Compose packaging exists only as unmerged work and its files have been validated statically, never started; a Compose profile will be offered only when one is merged and run in CI. |
 | kubernetes-helm | planned | This repository ships no Helm chart and no Kubernetes manifests for the runner, so there is nothing to test; the cluster checks in qa-checks inspect other people's manifests and are not a deployment of this runtime. |
 
-Independent verifier: not offered. No profile installs or runs an independent verifier: the verifier belongs to the agent harness, which no tested step installs. A native engine pass or fail is not a verdict.
+Independent verifier: offered by `local-python-qa` only. The independent verifier is installed and run only by the profile local-python-qa (`redevops-qa verify`, Playwright Chromium and Robot Framework, Linux x86_64); no other profile installs one, and an engine's own pass or fail is not a verdict.
 
 ## Profiles
 
@@ -25,6 +25,7 @@ Independent verifier: not offered. No profile installs or runs an independent ve
 | [local-python-appium-android](#local-python-appium-android) | appium-android | experimental | macos-arm64 (experimental); linux-x86_64 (experimental) |
 | [local-python-playwright](#local-python-playwright) | playwright | planned | none |
 | [local-python-appium-ios](#local-python-appium-ios) | appium-ios | planned | none |
+| [local-python-qa](#local-python-qa) | playwright, robotframework | experimental | linux-x86_64 (experimental); linux-arm64 (planned); macos-arm64 (planned) |
 
 ## local-python-robot
 
@@ -307,3 +308,85 @@ Not offered: The adapter imports the pinned agent-harness tree (pins.toml names 
 Appium iOS. Status: **planned**.
 
 Not offered: No iOS session has ever been run: the adapter reports UNAVAILABLE for every action. iOS needs macOS with Xcode, WebDriverAgent and a supported simulator or device, which are never bundled.
+
+## local-python-qa
+
+ReDevOps QA in a local Python environment: the pinned bundle, the Playwright Chromium and Robot Framework lanes, and the verifier. Status: **experimental**.
+
+Python 3.12 (`python3.12`); pinned pip packages: .
+
+Prerequisites:
+
+* Python 3.12 available as `python3.12` with the `venv` module (Debian and Ubuntu: the `python3.12-venv` package). The bundle is built for CPython 3.12 and install.sh refuses any other minor.
+* The bundle archive and its `.tar.sha256` file in one directory (`bundle_dir`): built from a checkout of https://github.com/redevops-io/redevops-qa with `python tools/build_bundle.py build --out DIR`, or taken from a workflow run. No bundle is published. Compare the sha256 of the archive with a value you obtained from somewhere its producer does not control.
+* bash, tar, and root or sudo for the browser step's `--with-deps` (it installs the operating system libraries Chromium needs with apt).
+* Network access to the Playwright download host for Chromium (the browser is not in the bundle and is not hashed by it). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.
+* All commands are run from one working directory, using a POSIX shell.
+
+Hosts:
+
+| Host | Status | Prerequisites | Verified by |
+|---|---|---|---|
+| linux-x86_64 | experimental | Linux x86_64 with a POSIX shell; the CI job runs these steps on a GitHub-hosted ubuntu-24.04 runner. | Every step of this profile is run by CI on every push (the job profile-local-python-qa), starting from the bundle the bundle job built. The host stays experimental until a run on the main branch is recorded here: verified needs a recorded run whose head commit is an ancestor of main. |
+| linux-arm64 | planned |  | not run |
+| macos-arm64 | planned |  | not run |
+
+Parameters:
+
+* `bundle_dir`: the directory that holds the bundle archive and its .tar.sha256 file (required)
+* `evidence_dir`: where the demo writes its evidence bundle (default `qa-evidence`)
+* `install_dir`: a new directory the installation is made in (it must not exist or be empty; uninstall removes it) (required)
+
+### Get the source
+
+```text
+# Check that the archive has the digest in its .tar.sha256 file (the file only says what the producer wrote: compare the digest with a value from elsewhere)
+python3.12 -I -c 'import hashlib,sys; a,b=sys.argv[1:3]; want=open(b,encoding='"'"'utf-8'"'"').read().split()[0]; got=hashlib.sha256(open(a,'"'"'rb'"'"').read()).hexdigest(); sys.exit(0 if got==want else '"'"'the archive does not have the digest in '"'"'+b)' '{bundle_dir}/redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64.tar' '{bundle_dir}/redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64.tar.sha256'
+# Unpack the archive into the working directory
+tar xf '{bundle_dir}/redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64.tar'
+```
+
+### Install
+
+```text
+# Install into a new directory: checks the Python minor, the platform and every file of the bundle, then pip install --no-index --require-hashes from the wheelhouse
+redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install.sh --prefix '{install_dir}' --python python3.12
+# The separate browser step: downloads Chromium (not part of the bundle, not hashed by it) and the operating system libraries it needs
+redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install-browser.sh --prefix '{install_dir}' --with-deps
+```
+
+### Smoke test
+
+```text
+# Check the machine: Python, platform, the pinned dependencies against pins.toml, Playwright and a real Chromium launch, Robot Framework, the fixture app, the egress gateway
+'{install_dir}/bin/redevops-qa' doctor
+# Run the built-in plan: a Playwright Chromium lane and a Robot Framework lane against the fixture app, one run id, one evidence bundle (exit status 0 only when every frozen assertion is verified)
+'{install_dir}/bin/redevops-qa' demo --out qa-evidence --run-id profile-demo
+```
+
+### Check the evidence
+
+```text
+# Re-verify the evidence bundle from the bundle alone, in a process of its own (exit status 0 for an accepted run that verified every assertion, 5 for any finding)
+'{install_dir}/bin/redevops-qa' verify qa-evidence/profile-demo
+```
+
+### Uninstall
+
+```text
+# Remove the installation directory, and nothing else
+redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/uninstall.sh --prefix '{install_dir}'
+```
+
+Evidence: The demo writes one evidence bundle, {evidence_dir}/profile-demo, and the check step re-verifies it; no JUnit file is involved. Files: .
+
+Uninstall: uninstall.sh removes the installation directory (virtual environment, browser directory, launcher) and refuses a directory it did not make. The evidence directory and the operating system packages installed by --with-deps stay.
+
+Limitations:
+
+* CPython 3.12 on Linux x86_64 only. Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.
+* No bundle is published and no release exists: the archive comes from a build of the repository or from a workflow run, and its digest is only as trustworthy as the place you obtained it from.
+* Chromium is downloaded when the browser step runs; the bundle records the build the pinned Playwright expects and does not hash or ship the browser.
+* The runner in this release runs plans against the bundled fixture app only; the Robot lane's egress is not enforced (a Robot library opens its own sockets).
+* `verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite shows that a bundle is the one it was taken from. A verified run does not show that the application under test is correct.
+* The agent-harness and runtime-contracts trees are installed from the bundle at the commits pins.toml names; the name `agent-harness` on the public package index belongs to an unrelated project and is never installed.

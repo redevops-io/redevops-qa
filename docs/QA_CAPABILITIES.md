@@ -28,6 +28,51 @@ A test level says what kind of evidence stands behind an engine entry. It is not
 
 Each `Last verified` commit is an ancestor of the main branch; for a local run it is the commit that records the run, because the tested tree is not recorded.
 
+## Product capabilities (the `redevops-qa` command)
+
+The engines above are adapters. These rows are features of the command that drives them. A row is added only when a CI job on the main branch backs it; the pinned bundle's install, the public CI demo and the install profile `local-python-qa` are run by CI jobs that were added after the evidence below and get their rows once a run on the main branch exists.
+
+| Capability | Test level | Scope |
+|---|---|---|
+| One frozen plan run through two engines, Playwright Chromium and Robot Framework, with one evidence bundle (`redevops-qa run`, `redevops-qa demo`) | `engine-backed-ci` | the runner's end-to-end lane on a GitHub-hosted ubuntu-24.04 runner: real Chromium through Playwright 1.64.1 and Robot Framework 7.5 together, the fixture app only, each seeded defect, partial success, timeouts, cancellation and a killed parent checked with a process table |
+| Re-verification of a finished run from its evidence bundle alone (`redevops-qa verify`) | `engine-backed-ci` | the end-to-end job (bundles of real engine runs, verified at the end of every run) and the offline runner job (the tamper and negative suite), on ubuntu-24.04 |
+
+### One frozen plan run through two engines, Playwright Chromium and Robot Framework, with one evidence bundle (`redevops-qa run`, `redevops-qa demo`)
+
+A plan is frozen (the strict runtime-contracts parser, every assertion's digest, the plan digest), the fixture app starts on loopback with a seeded defect or none, the browser lane and the Robot lane run one after the other as supervised child processes under one run id, and one evidence bundle is written. A seeded defect fails exactly its own lane and the other lane's result is still recorded.
+
+Documentation: [packages/qa-runner/README.md](../packages/qa-runner/README.md).
+
+Evidence:
+
+* [CI run 41407615435](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435) (whole run green), [job 125153175628](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435/job/125153175628) (runner end to end; 103 passed, 0 skipped, 0 failed): real Chromium and Robot Framework 7.5 in one run, the two-lane plan for each seeded defect, timeouts, cancellation and a killed parent; the job fails on zero tests or any skip. Head commit `1b40a361ff18`, completed 2026-11-02.
+* [packages/qa-runner/tests/e2e](../packages/qa-runner/tests/e2e): the tests the end-to-end job runs.
+
+Limitations:
+
+* The target is the bundled fixture app: this release runs plans against it only, not against an arbitrary application.
+* Linux x86_64 only; Playwright with Chromium only; Selenium and Appium are not part of this workflow.
+* The Robot lane's egress is not enforced (a Robot library opens its own sockets); the browser lane's traffic goes through the egress gateway.
+* The pinned bundle's install and the public CI demo are run by CI jobs added after this evidence; they get their own rows once a run on the main branch backs them.
+
+### Re-verification of a finished run from its evidence bundle alone (`redevops-qa verify`)
+
+`verify` recomputes every digest, the frozen assertions and every verdict from the bundle in a process of its own and rejects any finding with exit status 5; `run` and `demo` end by calling it in a fresh interpreter. A tamper and negative suite is run over real bundles.
+
+Documentation: [packages/qa-runner/README.md](../packages/qa-runner/README.md).
+
+Evidence:
+
+* [CI run 41407615435](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435) (whole run green), [job 125153175628](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435/job/125153175628) (runner end to end; 103 passed, 0 skipped, 0 failed): every run in this job ends with `verify` in a separate process over the bundle the run wrote; the job installs Playwright 1.64.1 and Robot Framework 7.5. Head commit `1b40a361ff18`, completed 2026-11-02.
+* [CI run 41407615435](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435) (whole run green), [job 125153175570](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435/job/125153175570) (runner (Python; 926 passed, 0 skipped, 0 failed): the offline runner suite, which includes the tamper and negative suite for `verify`. Head commit `1b40a361ff18`, completed 2026-11-02.
+* [packages/qa-runner/tests/test_qr_tamper_suite.py](../packages/qa-runner/tests/test_qr_tamper_suite.py): the tamper suite over real bundles.
+
+Limitations:
+
+* It is a re-verification by the same code the run used, in a separate process; it is not an independent implementation of the verdicts. `independent` here means independent of the engine's own status.
+* The hash chain inside a bundle is unkeyed: someone who can rewrite a whole bundle can rewrite its digests too. Only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite, passed with `--anchor`, shows that a bundle is the one the value was taken from; nothing in the tool authenticates where the value came from.
+* A verified run does not show that the application under test is correct.
+
 ## Appium caveats
 
 ### Android

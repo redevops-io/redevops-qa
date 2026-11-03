@@ -186,7 +186,7 @@ def test_the_verify_job_is_a_second_job_that_starts_from_the_kept_artifacts_in_a
 
 def test_the_new_test_files_run_in_the_bundle_tests_job():
     run = "\n".join(str(s.get("run", "")) for s in MAIN["jobs"]["bundle-tests"]["steps"])
-    assert "tests/test_demo_outcome.py" in run
+    assert "tests/test_demo_outcome.py" in run and "tests/test_readme_layout.py" in run
 
 
 @pytest.mark.parametrize("job", DEMO_JOBS)

@@ -4,6 +4,7 @@ import ast
 import copy
 import importlib.util
 import json
+import re
 import random
 import shlex
 import sys
@@ -222,12 +223,13 @@ def test_no_field_that_looks_like_a_credential_is_ever_accepted(name):
 
 def test_the_allowed_fields_are_closed_and_none_is_a_secret():
     allowed = set(gen.SELECTION_FIELDS) | set(gen.PARAM_FIELDS)
-    assert allowed == {"engines", "target", "host", "verifier", "channel", "venv_dir", "evidence_dir", "checkout_dir", "chrome_binary", "chromedriver_path"}
+    assert allowed == {"engines", "target", "host", "verifier", "channel", "venv_dir", "evidence_dir", "checkout_dir", "chrome_binary", "chromedriver_path", "bundle_dir", "install_dir"}
     assert not [f for f in allowed if gen.SECRET_NAME.search(f)]
 
 
 def test_every_command_in_every_accepted_configuration_starts_with_an_allowed_executable():
     allowed = {"git", "python3.12"}
+    bundle_scripts = re.compile(r"^redevops-qa-bundle-[0-9a-z.]+-cp[0-9]+-linux-x86_64/(install|install-browser|uninstall)\.sh$")      # the bundle's own scripts, relative to the unpacked archive
     for v in VECTORS["vectors"]:
         cfg = v["expected"]["config"]
         if not cfg:
@@ -235,8 +237,10 @@ def test_every_command_in_every_accepted_configuration_starts_with_an_allowed_ex
         for phase in cfg["steps"].values():
             for s in phase:
                 first = s["argv"][0]
-                assert first in allowed or first.endswith("/bin/python"), s["argv"][:2]
+                assert first in allowed or first.endswith("/bin/python") or first == "tar" or first.endswith("/bin/redevops-qa") or bundle_scripts.fullmatch(first), s["argv"][:2]
                 assert not {"sh", "bash", "curl", "wget", "sudo", "eval", "-c"} & {first}
+                if first == "tar":
+                    assert s["argv"][1] == "xf" and len(s["argv"]) == 3                       # unpack one archive into the working directory, nothing else
 
 
 def test_quote_arg_round_trips_through_a_real_shell_parser():

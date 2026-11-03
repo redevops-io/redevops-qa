@@ -23,7 +23,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 SELECTION_FIELDS = ("engines", "target", "host", "verifier", "channel")
-PARAM_FIELDS = ("venv_dir", "evidence_dir", "checkout_dir", "chrome_binary", "chromedriver_path")
+PARAM_FIELDS = ("venv_dir", "evidence_dir", "checkout_dir", "chrome_binary", "chromedriver_path", "bundle_dir", "install_dir")
 REQUIRED_FIELDS = SELECTION_FIELDS
 TARGETS = ("local-python", "docker-compose", "kubernetes-helm")
 HOSTS = ("linux-x86_64", "linux-arm64", "macos-arm64", "macos-x86_64", "windows-x86_64", "windows-wsl-x86_64")
@@ -145,7 +145,7 @@ def generate(selection: Any, capabilities: Dict[str, Any], profiles: Dict[str, A
     engines = sorted(selection["engines"])
     target, host, channel = selection["target"], selection["host"], selection["channel"]
     # stage 2: refusals that do not depend on a profile (every problem is reported)
-    if selection["verifier"]:
+    if selection["verifier"] and not any(p.get("verifier") and p["status"] != "planned" and p["target"] == target and sorted(p["engines"]) == engines for p in profiles["profiles"]):
         _err(errors, "VERIFIER_UNAVAILABLE", "verifier", profiles["verifier"]["reason"])
     tinfo = profiles["targets"][target]
     if tinfo["status"] != "available":
@@ -195,15 +195,26 @@ def generate(selection: Any, capabilities: Dict[str, Any], profiles: Dict[str, A
         return _result(errors, warnings)
     values["source_commit"] = profiles["source"]["pinned_commit"]
     # warnings
-    _warn(warnings, "SOURCE_IS_A_CHECKOUT", "there is no release tag and no package-registry package: the install is a clone of the repository at the pinned commit")
-    if status != "verified":
+    bundle = profile.get("kind") == "bundle"
+    if bundle:
+        _warn(warnings, "SOURCE_IS_A_BUNDLE_ARCHIVE", "no bundle is published: build the archive from a checkout of the repository with tools/build_bundle.py or take the archive of a workflow run, and compare its "
+                                                         "sha256 with a value you obtained from somewhere its producer does not control; the digest file next to it is only as good as where you got it")
+    else:
+        _warn(warnings, "SOURCE_IS_A_CHECKOUT", "there is no release tag and no package-registry package: the install is a clone of the repository at the pinned commit")
+    if status != "verified" and bundle:
+        _warn(warnings, "EXPERIMENTAL_PROFILE", f"this profile on this host is {status}: CI runs its steps from the bundle a job of the same workflow builds, and no run on the main branch is recorded for it yet")
+    elif status != "verified":
         _warn(warnings, "EXPERIMENTAL_PROFILE", f"this profile on this host is {status}: its steps were not run end to end in CI for this host")
     if host_entry["status"] != "verified" and profile["status"] == "verified":
         _warn(warnings, "HOST_NOT_VERIFIED", f"the profile is verified on {', '.join(h['os_arch'] for h in profile['hosts'] if h['status'] == 'verified')} only")
     if "appium-android" in engines:
         _warn(warnings, "DEVICE_NOT_BUNDLED", "no device, emulator, Android SDK or Appium server is bundled or installed by these steps; a real session needs a "
                                               "device worker the operator provides")
-    _warn(warnings, "NATIVE_RESULT_IS_NOT_A_VERDICT", "the engine's own pass or fail is not an independent verdict; no verifier is installed")
+    if profile.get("verifier"):
+        _warn(warnings, "VERIFIER_INCLUDED", "this profile installs and runs `redevops-qa verify`, which recomputes the verdicts from a run's evidence bundle in a separate process; it is not an independent "
+                                             "implementation of the harness, the chain inside a bundle is unkeyed (only an anchor obtained elsewhere helps), and a verified run does not show that the application is correct")
+    else:
+        _warn(warnings, "NATIVE_RESULT_IS_NOT_A_VERDICT", "the engine's own pass or fail is not an independent verdict; no verifier is installed")
     # the configuration
     steps = {}
     for phase in PHASES:
@@ -216,8 +227,9 @@ def generate(selection: Any, capabilities: Dict[str, Any], profiles: Dict[str, A
     cap_by_engine = {e["engine"]: e for e in capabilities["engines"]}
     manifest = {
         "schema": MANIFEST_SCHEMA, "profile": profile["id"], "profile_status": profile["status"], "host_status": host_entry["status"], "target": target,
-        "host": host, "channel": channel, "verifier": {"enabled": False},
-        "source": {"repository": profiles["source"]["repository"], "commit": profiles["source"]["pinned_commit"]},
+        "host": host, "channel": channel, "verifier": {"enabled": bool(profile.get("verifier"))},
+        "source": ({"repository": profiles["source"]["repository"], "commit": None, "kind": "bundle-archive"} if bundle
+                   else {"repository": profiles["source"]["repository"], "commit": profiles["source"]["pinned_commit"]}),
         "engines": [{"engine": e, "adapter_version": cap_by_engine[e]["adapter_version"], "engine_version": cap_by_engine[e]["runtime_version"],
                      "test_level": cap_by_engine[e]["test_level"]} for e in engines],
         "pins": {"python": profile["python"]["version"], "pip": [f"{p['name']}=={p['version']}" for p in profile["pip_pins"]]},
