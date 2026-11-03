@@ -74,6 +74,25 @@ def test_the_egress_profile_of_a_robot_lane_says_it_is_not_enforced(up, frozen):
     assert profile["profile"] == "not-enforced" and "own sockets" in profile["note"]
 
 
+def test_the_report_states_that_egress_is_not_enforced_for_the_robot_lane_in_json_text_and_html(up, frozen, tmp_path):
+    from qa_evidence.inspector import inspect_bundle
+    from qa_evidence.render import render_html, render_text
+    s = run(up, frozen, "live")
+    (lim,) = [x for x in rep(s)["limitations"] if x["id"] == K.ROBOT_EGRESS_LIMITATION_ID]
+    assert lim["text"] == K.robot_egress_limitation_text(["robot"]) and "NOT enforced" in lim["text"] and "(robot)" in lim["text"]
+    assert "guard, not a sandbox" in lim["text"] and "Nothing in this report shows" in lim["text"]
+    target = tmp_path / "bundle"
+    s.bundle.write_directory(str(target))
+    ins = inspect_bundle(str(target))
+    assert lim["text"] in render_text(ins) and "egress-not-enforced-robot" in render_html(ins)
+
+
+def test_a_plan_without_a_robot_lane_does_not_carry_the_statement(up, golden_frozen):
+    s = run_plan(up, golden_frozen, RunOptions(lane_command=lambda lane, path: [sys.executable, str(Path(__file__).resolve().parent / "fake_lane.py"), "pass", path], run_id="r0-test"))
+    assert K.ROBOT_EGRESS_LIMITATION_ID not in [x["id"] for x in rep(s)["limitations"]]
+    assert verify_files(s.bundle.files, plan_digest=golden_frozen.plan_digest).ok
+
+
 def test_the_native_result_and_the_verdict_stay_separate_for_the_robot_lane(up, frozen):
     r = rep(run(up, frozen, "live", defect="discount"))
     assert r["lanes"][0]["native"]["status"] == "NATIVE_FAIL" and r["accounting"]["results"][0]["native_status"] == "NATIVE_FAIL"

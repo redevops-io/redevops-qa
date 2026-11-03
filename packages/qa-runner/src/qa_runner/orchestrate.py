@@ -209,6 +209,10 @@ def run_browser_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], work
         raw_status = "lane-error"
     else:
         raw_status = f"child-exit-{proc.exit_code}" if proc.exit_code is not None else f"child-signal-{proc.signal}"
+    if proc.exit_code != 0 and raw_status != "lane-error":
+        # The child did not end normally (a signal, a timeout, an exit code of its own): nothing it left in its output directory is kept as the engine's own record. A result file it wrote
+        # before it died would say COMPLETED while the report says it did not, and `verify` rightly refuses that mismatch as a relabelled status; an honest crash must not read as tampering.
+        native.clear()
     if status in ("NATIVE_ERROR", "NATIVE_TIMEOUT", "NATIVE_UNAVAILABLE") and exit_code == 0:
         exit_code = None
     if status == "NATIVE_ERROR" and exit_code is None and proc.exit_code not in (None, 0):

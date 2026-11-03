@@ -52,3 +52,17 @@ def test_an_unreadable_report_fails(tmp_path, capsys):
     (tmp_path / "bad.xml").write_text("<not xml")
     assert check_junit.main(["x", str(tmp_path / "bad.xml")]) == 1
     assert check_junit.main(["x"]) == 2
+
+
+def test_an_expected_count_that_matches_passes_and_one_that_does_not_fails(tmp_path, capsys):
+    path = _report(tmp_path, dict(tests=2, skipped=0, failures=0, errors=0), [OK, '<testcase classname="a" name="u"/>'])
+    assert check_junit.main(["x", path, "--expect-tests", "2"]) == 0
+    capsys.readouterr()
+    assert check_junit.main(["x", path, "--expect-tests", "3"]) == 1
+    assert "UNEXPECTED_TEST_COUNT" in capsys.readouterr().out
+    assert check_junit.main(["x", path, "--expect-tests", "1"]) == 1
+
+
+def test_a_malformed_expectation_is_a_usage_error(tmp_path):
+    path = _report(tmp_path, dict(tests=1, skipped=0, failures=0, errors=0), [OK])
+    assert check_junit.main(["x", path, "--expect-tests", "many"]) == 2
