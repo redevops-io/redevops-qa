@@ -17,6 +17,16 @@ built by `tools/build_bundle.py`): a wheelhouse with a hash for every wheel, ins
 directory, for CPython 3.12 on Linux x86_64 only. A bundle install keeps `pins.toml` and the pinned trees under `<prefix>/share/redevops-qa/` and the pin check runs against those copies
 (`REDEVOPS_QA_PINS` still overrides; a checkout above the environment is not used instead). Chromium is downloaded by the bundle's separate browser step and is recorded, not hashed, by the bundle.
 
+## The public CI demo
+
+Every push to this repository runs `redevops-qa demo` three times (the `demo` jobs of `tests.yml`), from the bundle that the `bundle` job built, installed with the commands of its README on a
+clean `ubuntu-24.04` runner: `--defect none` must end `VERIFIED` (exit 0), `--defect discount` must fail in the Robot Framework lane (exit 1) and `--defect settings` in the Playwright Chromium lane (exit 1);
+`tools/check_demo_outcome.py` checks the outcome, the lane that failed, that every other assertion was verified and the printed manifest digest. Each evidence bundle is kept as a workflow artifact
+(`demo-evidence-<defect>`) and its anchor, the sha256 of its `bundle-manifest.json`, is printed in the job log and kept beside it (`demo-anchor-<defect>`). A second job (`demo-verify`) starts from nothing but
+those artifacts, installs the bundle into a new directory and runs `redevops-qa verify --anchor ... --plan-digest ... --require-anchor --require-plan-digest`; the same command on a copy with one byte added,
+and with a wrong anchor, must exit 5. The anchor is recorded where the demo job's own machine cannot change it after the fact (the workflow log and artifact of a finished run); nothing in the bundle
+authenticates it, and a match shows only that the bundle is the one the value was taken from.
+
 ## Commands
 
 ```text

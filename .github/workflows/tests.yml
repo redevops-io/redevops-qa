@@ -461,7 +461,7 @@ jobs:
       - name: Run the bundle and workflow tests in a scrubbed environment
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
-            python -m pytest -q tests/test_bundle_builder.py tests/test_bundle_install.py tests/test_bundle_pinned.py tests/test_bundle_workflow.py tests/test_workflow.py \
+            python -m pytest -q tests/test_bundle_builder.py tests/test_bundle_install.py tests/test_bundle_pinned.py tests/test_bundle_workflow.py tests/test_demo_outcome.py tests/test_workflow.py \
               --junitxml="$RUNNER_TEMP/junit-bundle-tests.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-bundle-tests.xml"
@@ -573,6 +573,168 @@ jobs:
         run: bash tools/bundle_acceptance.sh --current "$RUNNER_TEMP/current" --previous "$RUNNER_TEMP/previous"
       - name: Fail if the run left anything in the working tree
         run: test -z "$(git status --porcelain)"
+
+  demo:
+    name: demo ${{ matrix.defect }} (the installed bundle on a clean runner; expected exit status ${{ matrix.exit }}; the evidence bundle is kept and the anchor printed)
+    # The product's public demonstration, three times: against the correct fixture app (VERIFIED, exit 0), with the seeded discount defect (the Robot lane fails, exit 1) and with the seeded
+    # settings defect (the Playwright lane fails, exit 1). The bundle is installed with the commands of its own README, as a user would; the browser step downloads Chromium. The anchor
+    # printed here is the sha256 of the bundle's manifest: this log and the kept artifact are where it is recorded; nothing in the bundle authenticates it. Read-only, no secret.
+    runs-on: ubuntu-24.04
+    needs: bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - defect: none
+            exit: 0
+          - defect: discount
+            exit: 1
+          - defect: settings
+            exit: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download the bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: qa-bundle-current
+          path: ${{ runner.temp }}/current
+      - name: Take the commands out of the README inside the archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/dl" "$RUNNER_TEMP/blocks"
+          cp "$RUNNER_TEMP"/current/*.tar "$RUNNER_TEMP"/current/*.tar.sha256 "$RUNNER_TEMP/dl/"
+          name="$(basename "$(ls "$RUNNER_TEMP"/dl/*.tar)" .tar)"
+          tar xOf "$RUNNER_TEMP/dl/$name.tar" "$name/README.md" > "$RUNNER_TEMP/blocks/README.md"
+          echo "NAME=$name" >> "$GITHUB_ENV"
+      - name: Install the bundle with the README commands (unpack, install, browser step)
+        run: |
+          { echo "set -euo pipefail"; python tools/readme_block.py "$RUNNER_TEMP/blocks/README.md" unpack; python tools/readme_block.py "$RUNNER_TEMP/blocks/README.md" install; } > "$RUNNER_TEMP/blocks/install.sh"
+          cat "$RUNNER_TEMP/blocks/install.sh"
+          cd "$RUNNER_TEMP/dl" && bash "$RUNNER_TEMP/blocks/install.sh"
+      - name: Run the demo (the exit status is checked in the next step)
+        env:
+          DEFECT: ${{ matrix.defect }}
+        run: |
+          status=0
+          "$HOME/redevops-qa/bin/redevops-qa" demo --defect "$DEFECT" --out "$RUNNER_TEMP/evidence" > "$RUNNER_TEMP/demo.out" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/demo.out"
+          echo "demo exit status: $status"
+          echo "STATUS=$status" >> "$GITHUB_ENV"
+      - name: Check the outcome against the seeded defect and print the anchor
+        env:
+          DEFECT: ${{ matrix.defect }}
+        run: |
+          cd "$RUNNER_TEMP"
+          python -I "$GITHUB_WORKSPACE/tools/check_demo_outcome.py" run --defect "$DEFECT" --exit-code "$STATUS" --output "$RUNNER_TEMP/demo.out" \
+            --evidence-root "$RUNNER_TEMP/evidence" --anchor-out "$RUNNER_TEMP/anchor/anchor-$DEFECT.txt" > "$RUNNER_TEMP/anchor.out"
+          cat "$RUNNER_TEMP/anchor.out"
+          { echo "### demo $DEFECT"; echo; echo '```'; cat "$RUNNER_TEMP/anchor.out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-evidence-${{ matrix.defect }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
+          retention-days: 14
+      - name: Keep the anchor
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-anchor-${{ matrix.defect }}
+          path: ${{ runner.temp }}/anchor/anchor-${{ matrix.defect }}.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  demo-verify:
+    name: demo ${{ matrix.defect }} re-verified in a second job (a fresh machine, a fresh virtual environment, the kept bundle and the printed anchor; a changed bundle and a wrong anchor are refused)
+    # Starts from nothing but the kept artifacts: it installs the bundle into a new directory (no browser step: verification needs none), downloads the evidence bundle and the anchor the demo job
+    # kept, and runs `redevops-qa verify` with the anchor and the plan digest, which must be accepted with the exit status the run had. Then the same command on a copy with one byte added to
+    # report.json, and with a wrong anchor, must refuse (exit status 5). Read-only, no secret.
+    runs-on: ubuntu-24.04
+    needs: [bundle, demo]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - defect: none
+            exit: 0
+          - defect: discount
+            exit: 1
+          - defect: settings
+            exit: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download the bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: qa-bundle-current
+          path: ${{ runner.temp }}/current
+      - name: Take the commands out of the README inside the archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/dl" "$RUNNER_TEMP/blocks"
+          cp "$RUNNER_TEMP"/current/*.tar "$RUNNER_TEMP"/current/*.tar.sha256 "$RUNNER_TEMP/dl/"
+          name="$(basename "$(ls "$RUNNER_TEMP"/dl/*.tar)" .tar)"
+          tar xOf "$RUNNER_TEMP/dl/$name.tar" "$name/README.md" > "$RUNNER_TEMP/blocks/README.md"
+          echo "NAME=$name" >> "$GITHUB_ENV"
+      - name: Install the bundle into a new directory (unpack, install; no browser)
+        run: |
+          { echo "set -euo pipefail"; python tools/readme_block.py "$RUNNER_TEMP/blocks/README.md" unpack; echo './install.sh --prefix "$RUNNER_TEMP/verifier"'; } > "$RUNNER_TEMP/blocks/install.sh"
+          cd "$RUNNER_TEMP/dl" && bash "$RUNNER_TEMP/blocks/install.sh"
+      - name: Download the evidence bundle the demo kept
+        uses: actions/download-artifact@v4
+        with:
+          name: demo-evidence-${{ matrix.defect }}
+          path: ${{ runner.temp }}/evidence
+      - name: Download the anchor the demo kept
+        uses: actions/download-artifact@v4
+        with:
+          name: demo-anchor-${{ matrix.defect }}
+          path: ${{ runner.temp }}/anchor
+      - name: Verify the bundle with the anchor and the plan digest
+        env:
+          DEFECT: ${{ matrix.defect }}
+          EXPECTED: ${{ matrix.exit }}
+        run: |
+          cd "$RUNNER_TEMP"
+          anchor="$(grep '^anchor=' "anchor/anchor-$DEFECT.txt" | cut -d= -f2)"
+          plan="$(grep '^plan_digest=' "anchor/anchor-$DEFECT.txt" | cut -d= -f2)"
+          bundle="$(ls -d "$RUNNER_TEMP"/evidence/r0-*)"
+          echo "anchor $anchor"; echo "plan digest $plan"
+          status=0
+          "$RUNNER_TEMP/verifier/bin/redevops-qa" verify "$bundle" --anchor "$anchor" --plan-digest "$plan" --require-anchor --require-plan-digest --json > "$RUNNER_TEMP/verify.json" || status=$?
+          echo "verify exit status: $status (expected $EXPECTED)"
+          python -I "$GITHUB_WORKSPACE/tools/check_demo_outcome.py" verify --defect "$DEFECT" --exit-code "$status" --result "$RUNNER_TEMP/verify.json"
+      - name: A bundle with one byte added to its report is refused
+        run: |
+          cd "$RUNNER_TEMP"
+          cp -R "$(ls -d "$RUNNER_TEMP"/evidence/r0-*)" "$RUNNER_TEMP/changed"
+          printf 'x' >> "$RUNNER_TEMP/changed/report.json"
+          status=0
+          "$RUNNER_TEMP/verifier/bin/redevops-qa" verify "$RUNNER_TEMP/changed" > "$RUNNER_TEMP/changed.out" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/changed.out"
+          echo "verify exit status on the changed copy: $status"
+          test "$status" -eq 5
+          grep -q "^  SIZE_MISMATCH report.json:" "$RUNNER_TEMP/changed.out"
+          grep -q "^  REPORT_UNREADABLE report.json:" "$RUNNER_TEMP/changed.out"
+      - name: A wrong anchor is refused
+        run: |
+          cd "$RUNNER_TEMP"
+          status=0
+          "$RUNNER_TEMP/verifier/bin/redevops-qa" verify "$(ls -d "$RUNNER_TEMP"/evidence/r0-*)" --anchor "sha256:$(printf '0%.0s' $(seq 64))" --require-anchor > "$RUNNER_TEMP/wrong-anchor.out" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/wrong-anchor.out"
+          echo "verify exit status with a wrong anchor: $status"
+          test "$status" -eq 5
+          grep -q "^  ANCHOR_MISMATCH anchor:" "$RUNNER_TEMP/wrong-anchor.out"
+          grep -q "^  ANCHOR_REQUIRED anchor:" "$RUNNER_TEMP/wrong-anchor.out"
 
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
