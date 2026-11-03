@@ -214,9 +214,10 @@ def test_the_bundle_install_job_also_runs_the_root_check_after_the_acceptance_sc
 def test_the_root_check_script_covers_the_refusal_the_working_prefix_the_evidence_under_root_and_the_tmpdir_case():
     text = (ROOT / "tools" / "bundle_root_check.sh").read_text(encoding="utf-8")
     for fragment in ('./install.sh --prefix /root/redevops-qa', "[ $st -eq 2 ]", "the directory /root", "PROHIBITED_PATH", "/opt/redevops-qa-root-check", "--out \"$evidence\"", "evidence=/root/qa-root-check-evidence",
-                     'TMPDIR="$tmpd" "$prefix/bin/redevops-qa" doctor', "[ $st -eq 3 ]", "adapter path policy: the temporary directory is /root/qa-root-check-tmp", "ROOT CHECK OK", '[ "$(id -u)" -eq 0 ]'):
+                     'TMPDIR="$tmpd" "$prefix/bin/redevops-qa" doctor', "[ $st -eq 3 ]", "adapter path policy: the temporary working directory of a run (from TMPDIR) is /root/qa-root-check-tmp/redevops-qa-<random> (the prefix /root is on the refused list)", "Nothing was started",
+                     "2b. the positive control", "HOME=/tmp/qa-root-check-home TMPDIR=/tmp/qa-root-check-tmp", "ROOT CHECK OK", '[ "$(id -u)" -eq 0 ]'):
         assert fragment in text, fragment
     assert "curl" not in text and "wget" not in text
     for line in text.splitlines():
         if re.search(r"\brm -rf\b", line) and not line.lstrip().startswith("#"):
-            assert '"$work"' in line and '"$evidence"' in line and '"$tmpd"' in line, line               # it removes only what it made
+            assert '"$work"' in line and '"$evidence"' in line and '"$tmpd"' in line and "/tmp/qa-root-check-" in line, line               # it removes only what it made

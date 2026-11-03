@@ -58,7 +58,7 @@ The same command on a copy with one byte added to `report.json`, and with a wron
 Run as root with the default `HOME=/root`, the demo of an installation under `/root` ends `INCONCLUSIVE`, not `VERIFIED`: the Robot lane is refused with `PROHIBITED_PATH`, because the command line of that lane names the
 interpreter of the installation (`/root/redevops-qa/venv/bin/python`) and the adapter path policy refuses every path under `/root` (and under `/etc`, `/proc`, `/sys`, `/dev`, `/run`, `/var/run`, `/boot`, and any path with a
 component such as `.config`). The browser lane is not affected. `install.sh` now refuses such a prefix (exit status 2, the rule named; the list is read from the adapter kit inside the bundle), `doctor` has a check that names the
-interpreter, the guard script or a `TMPDIR` under a refused path before `demo` runs, and the bundle's CI job runs this case as root. As root use a prefix such as `/opt/redevops-qa`; the evidence directory may stay under `/root`.
+interpreter, the guard script or a `TMPDIR` under a refused path (the paths that are on the lane's command line) with the rule, exit status 3, and `run` and `demo` make the same check and refuse to start, and the bundle's CI job runs these cases as root. The refused-path list is not relaxed. As root use a prefix such as `/opt/redevops-qa`; `HOME` and the evidence directory may stay under `/root` (measured: the demo ends `VERIFIED`).
 
 ## What this does not show
 

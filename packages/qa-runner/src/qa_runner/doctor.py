@@ -82,22 +82,56 @@ def _share(prefix: Optional[str]) -> Path:
     return Path(prefix or sys.prefix) / "share" / "redevops-qa"
 
 
+def effective_lane_paths() -> List[Tuple[str, str]]:
+    """The paths a run will put on the command line of its lanes, derived from the same things the run derives them from: the interpreter that starts the lane child, the Robot guard script
+    (``lane_robot.GUARD``), and the working directory ``make_workdir`` creates under the temporary directory (``tempfile.gettempdir()``, which honours ``TMPDIR``), below which the Robot
+    lane's workspace and output directory lie (``lane_robot``: ``workdir/lanes/<lane>/workspace/suite`` and ``.../output``). The evidence directory and ``HOME`` are not on any command line
+    (the lane children get a ``HOME`` of their own under that working directory), so they are not listed; a path that the code starts to hand to a lane belongs here."""
+    try:
+        from .lane_robot import GUARD
+    except ImportError:                          # the Robot packages are not installed: doctor says so in its own check
+        GUARD = str(Path(__file__).with_name("robot_guard.py"))
+    workdir = Path(tempfile.gettempdir()) / "redevops-qa-<random>"
+    lane = workdir / "lanes" / "robot"
+    return [("the interpreter", sys.executable), ("the Robot guard script", GUARD), ("the temporary working directory of a run (from TMPDIR)", str(workdir)),
+            ("the Robot lane's workspace", str(lane / "workspace" / "suite")), ("the Robot lane's output directory", str(lane / "output"))]
+
+
+def path_rule(path: str) -> str:
+    """The rule of ``qa_adapter_kit.paths`` that refuses ``path`` ('' when none does), read from the kit's own constants."""
+    from qa_adapter_kit.paths import DENIED_COMPONENTS, DENIED_NAMES, DENIED_PREFIXES
+    norm = os.path.normpath(path)
+    for prefix in DENIED_PREFIXES:
+        if norm == prefix or norm.startswith(prefix + "/"):
+            return f"the prefix {prefix} is on the refused list"
+    parts = [x for x in norm.split("/") if x]
+    for part in parts:
+        if part in DENIED_COMPONENTS:
+            return f"a path component named {part} is on the refused list"
+    last = parts[-1] if parts else ""
+    for name in DENIED_NAMES:
+        if last == name or last.startswith(name + "."):
+            return f"a file named {name} is on the refused list"
+    return ""
+
+
 def check_path_policy(paths: Optional[Sequence[Tuple[str, str]]] = None, is_denied: Optional[Callable[[str], bool]] = None) -> Check:
-    """The Robot lane's command line names the interpreter, the guard script and a temporary directory; the adapter kit refuses a command whose arguments name a prohibited path
-    (``/root``, ``/etc``, a ``.config`` component, ...). A run whose interpreter or temporary directory lies under such a path ends INCONCLUSIVE (``PROHIBITED_PATH``) when the Robot lane
-    starts: this names the cause before ``demo`` runs. The rule is the adapter kit's own (``qa_adapter_kit.paths.is_denied``), not a copy."""
+    """The adapter kit refuses a command whose arguments name a prohibited path (``/root``, ``/etc``, a ``.config`` component, ...). A run whose lane command lines would name one ends
+    INCONCLUSIVE (``PROHIBITED_PATH``) when the Robot lane starts; this names the path and the rule before ``demo`` runs, and ``run`` and ``demo`` make the same check themselves before
+    they start anything. The rule is the adapter kit's own (``qa_adapter_kit.paths.is_denied``); it is not relaxed or special-cased here."""
     from qa_adapter_kit.paths import DENIED_COMPONENTS as kit_components, DENIED_PREFIXES as kit_prefixes
     if is_denied is None:
         from qa_adapter_kit.paths import is_denied as kit_is_denied
         is_denied = kit_is_denied
     if paths is None:
-        paths = [("the interpreter", sys.executable), ("the Robot guard script", str(Path(__file__).with_name("robot_guard.py"))), ("the temporary directory", tempfile.gettempdir())]
+        paths = effective_lane_paths()
     bad = [(what, os.path.normpath(p)) for what, p in paths if is_denied(os.path.normpath(p)) or is_denied(os.path.realpath(p))]
     if bad:
-        return Check("adapter path policy", "FAIL", "; ".join(f"{what} is {p}" for what, p in bad) + ": the adapter path policy refuses these paths, so the Robot lane of a run would end INCONCLUSIVE (PROHIBITED_PATH)",
+        return Check("adapter path policy", "FAIL", "; ".join(f"{what} is {p} ({path_rule(p) or 'its real path is refused'})" for what, p in bad)
+                     + ": the adapter path policy refuses these paths, so the Robot lane of a run would end INCONCLUSIVE (PROHIBITED_PATH)",
                      "install into a directory the policy accepts (as root, not under /root: for example /opt/redevops-qa) and set TMPDIR to such a directory; the refused places are "
-                     + ", ".join(kit_prefixes) + " and any path with a component such as " + ", ".join(sorted(kit_components)[:4]) + " (the list of qa_adapter_kit.paths)")
-    return Check("adapter path policy", "OK", "the interpreter, the Robot guard script and the temporary directory are paths the adapter path policy accepts")
+                     + ", ".join(kit_prefixes) + " and any path with a component such as " + ", ".join(sorted(kit_components)[:4]) + " (the list of qa_adapter_kit.paths, which is not relaxed)")
+    return Check("adapter path policy", "OK", "the interpreter, the Robot guard script and the working directory of a run (TMPDIR) are paths the adapter path policy accepts; HOME and the evidence directory are not on a lane command line")
 
 
 def check_first_party_modules(prefix: Optional[str] = None, locate: Callable = importlib.util.find_spec) -> Check:

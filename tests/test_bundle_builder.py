@@ -344,4 +344,5 @@ def test_a_release_bundle_without_the_adapter_kit_wheel_is_found_because_the_ins
 def test_the_readme_tells_root_to_use_a_prefix_outside_root_and_says_what_doctor_checks():
     text = (ROOT / "bundle" / "README.md").read_text(encoding="utf-8")
     assert "As root (HOME=/root), use a prefix outside `/root`, for example `/opt/redevops-qa`" in text and "exit status 2" in text and "PROHIBITED_PATH" in text
-    assert "`TMPDIR`" in text and "The evidence directory (`--out`) may be anywhere" in text and "read from the adapter kit inside the bundle" in text
+    assert "`TMPDIR`" in text and "`HOME` and the evidence directory (`--out`) may be anywhere" in text and "read from the adapter kit inside the bundle" in text
+    assert "`run` and `demo` make the same check and do not start otherwise" in text and "is not relaxed" in text

@@ -158,7 +158,7 @@ def test_the_default_check_looks_at_this_interpreter_the_guard_script_and_the_te
     assert doctor.check_path_policy().status == "OK" or doctor.check_path_policy().status == "FAIL"           # whichever this machine gives, it ran the three
     monkeypatch.setattr(tempfile, "gettempdir", lambda: "/root/tmp")
     c = doctor.check_path_policy()
-    assert c.status == "FAIL" and "the temporary directory is /root/tmp" in c.detail
+    assert c.status == "FAIL" and "the temporary working directory of a run (from TMPDIR) is /root/tmp/redevops-qa-<random>" in c.detail
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
     monkeypatch.setattr(doctor.sys, "executable", "/root/venv/bin/python")
     assert "the interpreter is /root/venv/bin/python" in doctor.check_path_policy().detail
@@ -167,3 +167,105 @@ def test_the_default_check_looks_at_this_interpreter_the_guard_script_and_the_te
 def test_doctor_runs_the_path_policy_check_among_its_defaults():
     import inspect
     assert "check_path_policy" in inspect.getsource(doctor.run_doctor)
+
+
+# ------------------------------------------------------------------------------------------------------------------------ the effective configuration, not only the prefix
+import io
+import os
+import tempfile
+
+import qa_runner.cli as cli
+
+
+def run_cli(*argv):
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(list(argv), out, err)
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_the_denied_prefix_list_is_unchanged_or_only_grows_and_the_root_case_is_not_special_cased():
+    """The owner's rule: the root case is made to pass by configuring the run, never by relaxing the rule. Pinned: today's lists, as a floor."""
+    from qa_adapter_kit.paths import DENIED_COMPONENTS, DENIED_NAMES, DENIED_PREFIXES, is_denied
+    assert set(DENIED_PREFIXES) >= {"/etc", "/proc", "/sys", "/dev", "/run", "/var/run", "/root", "/boot", "/private/etc", "/private/var/run"}
+    assert set(DENIED_COMPONENTS) >= {".ssh", ".aws", ".gnupg", ".docker", ".kube", ".azure", ".config", ".netrc", ".git-credentials", ".npmrc", ".pypirc"}
+    assert set(DENIED_NAMES) >= {"docker.sock", "containerd.sock", "podman.sock", "id_rsa", "id_ed25519", "id_ecdsa", "credentials"}
+    assert is_denied("/root/redevops-qa/venv/bin/python") and is_denied("/root") and not is_denied("/opt/redevops-qa/venv/bin/python")
+    text = Path(doctor.__file__).read_text(encoding="utf-8")
+    assert "DENIED_PREFIXES =" not in text and "DENIED_PREFIXES.remove" not in text                  # doctor reads the list; it does not hold or edit one
+
+
+def test_the_paths_on_the_lane_command_lines_are_the_ones_the_check_looks_at_and_home_and_the_evidence_directory_are_not_among_them(monkeypatch):
+    from qa_runner.procs import child_env
+    monkeypatch.setenv("HOME", "/root")
+    listed = dict(doctor.effective_lane_paths())
+    from qa_runner.lane_robot import GUARD
+    assert listed["the interpreter"] == __import__("sys").executable and listed["the Robot guard script"] == GUARD
+    assert any("workspace" in k for k in listed) and any("output directory" in k for k in listed)
+    assert not any(v == "/root" or v.startswith("/root/") for v in listed.values()) or str(tempfile.gettempdir()).startswith("/root")          # HOME=/root is not what is checked
+    assert child_env("/some/home")["HOME"] == "/some/home" and child_env("/some/home")["TMPDIR"] == "/some/home"        # a lane child gets a HOME and a TMPDIR of its own, not the process's
+
+
+def test_a_prefix_under_a_refused_directory_fails_doctor_with_exit_3_naming_the_path_and_the_rule(monkeypatch):
+    monkeypatch.setattr(doctor.sys, "executable", "/root/redevops-qa/venv/bin/python")
+    monkeypatch.setattr(doctor, "run_doctor", lambda engines=(): [doctor.check_path_policy()])
+    code, out, _err = run_cli("doctor")
+    assert code == 3 and "[FAIL] adapter path policy: the interpreter is /root/redevops-qa/venv/bin/python (the prefix /root is on the refused list)" in out
+
+
+def test_a_prefix_outside_with_a_tmpdir_under_a_refused_directory_fails_doctor_with_exit_3_naming_the_path_and_the_rule(monkeypatch):
+    monkeypatch.setattr(doctor.sys, "executable", "/opt/redevops-qa/venv/bin/python")
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: "/root/tmp")
+    monkeypatch.setattr(doctor, "run_doctor", lambda engines=(): [doctor.check_path_policy()])
+    code, out, _err = run_cli("doctor")
+    assert code == 3 and "the temporary working directory of a run (from TMPDIR) is /root/tmp/redevops-qa-<random> (the prefix /root is on the refused list)" in out
+    assert "Robot lane's workspace is /root/tmp/redevops-qa-<random>/lanes/robot/workspace/suite" in out and "TMPDIR" in out
+
+
+def test_a_tmpdir_under_a_refused_component_is_named_with_that_rule(monkeypatch):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: "/home/u/.config/tmp")
+    monkeypatch.setattr(doctor.sys, "executable", "/opt/redevops-qa/venv/bin/python")
+    c = doctor.check_path_policy()
+    assert c.status == "FAIL" and "a path component named .config is on the refused list" in c.detail
+
+
+def test_home_and_an_evidence_directory_under_a_refused_directory_do_not_fail_doctor_because_they_are_not_on_a_lane_command_line(monkeypatch, tmp_path):
+    """Measured: an installation under /opt with HOME=/root and the evidence directory under /root ends VERIFIED (tools/bundle_root_check.sh runs it as root in CI), so doctor does not call it a
+    failure; the checks above are the ones that fail."""
+    monkeypatch.setenv("HOME", "/root")
+    monkeypatch.setattr(doctor.sys, "executable", "/opt/redevops-qa/venv/bin/python")
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    assert doctor.check_path_policy().status == "OK"
+
+
+def test_demo_and_run_do_not_start_when_the_path_policy_would_end_them_inconclusive_and_say_why(monkeypatch, tmp_path):
+    started = []
+    monkeypatch.setattr(doctor.sys, "executable", "/root/redevops-qa/venv/bin/python")
+    import qa_runner.orchestrate as orchestrate
+    monkeypatch.setattr(orchestrate, "run_plan", lambda *a, **k: started.append(1))
+    from qa_runner.golden import golden_plan
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps(golden_plan()))
+    out_dir = tmp_path / "evidence"
+    for argv in (("demo", "--out", str(out_dir)), ("run", str(plan), "--out", str(out_dir))):
+        code, out, err = run_cli(*argv)
+        assert code == 3 and started == [] and not out_dir.exists(), argv
+        assert "the interpreter is /root/redevops-qa/venv/bin/python (the prefix /root is on the refused list)" in err and "PROHIBITED_PATH" in err and "Nothing was started" in err
+
+
+def test_demo_starts_as_before_when_the_effective_paths_are_accepted(monkeypatch, tmp_path):
+    reached = []
+    import qa_runner.orchestrate as orchestrate
+
+    def stop(*a, **k):
+        reached.append(1)
+        raise RuntimeError("stop here")
+    monkeypatch.setattr(orchestrate, "run_plan", stop)
+    monkeypatch.setattr(doctor, "effective_lane_paths", lambda: [("the interpreter", "/opt/redevops-qa/venv/bin/python")])
+    code, _out, err = run_cli("demo", "--out", str(tmp_path / "evidence"))
+    assert reached == [1] and "adapter path policy" not in err
+
+
+def test_the_rule_names_agree_with_the_kits_own_decision_on_a_battery_of_paths():
+    from qa_adapter_kit.paths import is_denied
+    for p in ["/root", "/root/x", "/rootless/x", "/etc/x", "/etc2", "/run/x", "/runner", "/home/u/.ssh/k", "/home/u/ssh", "/srv/credentials", "/srv/credentials.json", "/srv/credentialsx", "/opt/x", "/dev/shm", "/boot"]:
+        assert bool(doctor.path_rule(p)) == is_denied(p), p
