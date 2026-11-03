@@ -469,6 +469,8 @@ def assemble(out_dir: Path, *, name: str, entries: Sequence[WheelEntry], target:
             "redevops_qa_packages": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause); not open source. licences/redevops-qa/",
             "runtime_contracts": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause); not open source. licences/runtime-contracts/",
             "agent_harness": "AGPL-3.0-or-later (plain, without the Commons Clause). licences/agent-harness/",
+            "third_party_staging": "PRIVATE STAGING ONLY: the third-party wheels are shipped unmodified under the status staged_unmodified of third_party/adapter-license-matrix.yaml; public distribution of this bundle requires an owner decision.",
+            "third_party_notes": {"playwright": "The Playwright wheel contains a Node.js runtime binary (playwright/driver/node) with its licence file (playwright/driver/LICENSE), the Playwright driver with 81 npm packages inlined into lib/utilsBundle.js and lib/serverRegistry.js (sidecar .LICENSE files) and libwebp (lib/webp_codec.LICENSE), each under its own notice; the declared licence of the wheel, Apache-2.0, does not describe them. They are not classified one by one."},
             "third_party": f"{len(third)} wheels under their own licences, unmodified, each carrying its licence files in its dist-info: " + ", ".join(f"{w['name']} {w['version']} ({w['license']})" for w in third),
             "chromium": "downloaded at install time under its own licences; not part of this bundle",
         },

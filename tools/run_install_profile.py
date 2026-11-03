@@ -27,8 +27,11 @@ import qa_install_config as gen  # noqa: E402
 
 
 def selection_for(profile: Dict, args, params: Dict[str, str]) -> Dict:
-    sel = {"engines": profile["engines"], "target": profile["target"], "host": args.host, "verifier": False, "channel": args.channel,
-           "venv_dir": str(Path(args.work) / "venv"), "evidence_dir": str(Path(args.work) / "evidence"), "checkout_dir": str(Path(args.checkout))}
+    sel = {"engines": profile["engines"], "target": profile["target"], "host": args.host, "verifier": bool(profile.get("verifier")), "channel": args.channel}
+    defaults = {"venv_dir": str(Path(args.work) / "venv"), "evidence_dir": str(Path(args.work) / "evidence"), "install_dir": str(Path(args.work) / "install")}
+    if args.checkout:
+        defaults["checkout_dir"] = str(Path(args.checkout))
+    sel.update({k: v for k, v in defaults.items() if k in profile["params"]})          # only the parameters the profile declares: the generator refuses any other
     sel.update(params)
     return sel
 
@@ -43,7 +46,7 @@ def main(argv=None) -> int:
     ap.add_argument("--host", required=True)
     ap.add_argument("--channel", required=True, choices=gen.CHANNELS)
     ap.add_argument("--work", required=True, help="directory the steps run in; the venv and the evidence go here")
-    ap.add_argument("--checkout", required=True, help="where the repository is (or will be cloned) at the pinned commit")
+    ap.add_argument("--checkout", default=None, help="where the repository is (or will be cloned) at the pinned commit (profiles that install from a checkout)")
     ap.add_argument("--phases", default="install,smoke,check")
     ap.add_argument("--param", action="append", default=[], help="name=value for a parameter the profile declares")
     ap.add_argument("--profiles-file", default=str(HERE.parent / "qa-install-profiles.json"))
@@ -72,9 +75,12 @@ def main(argv=None) -> int:
     work.mkdir(parents=True, exist_ok=True)
     home = tempfile.mkdtemp(prefix="home-", dir=str(work))
     base_env = {"HOME": home, "PATH": os.environ["PATH"], "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1"}
-    checkout = Path(args.checkout)
+    checkout = Path(args.checkout) if args.checkout else None
     commit = config["manifest"]["source"]["commit"]
-    if "source" not in phases:
+    if profile.get("kind") != "bundle" and checkout is None:
+        print("FAIL --checkout is required for a profile that installs from a checkout")
+        return 2
+    if "source" not in phases and profile.get("kind") != "bundle":
         head = subprocess.run(["git", "-C", str(checkout), "rev-parse", "HEAD"], capture_output=True, text=True)
         dirty = subprocess.run(["git", "-C", str(checkout), "status", "--porcelain"], capture_output=True, text=True)
         if head.returncode != 0 or head.stdout.strip() != commit:
@@ -100,8 +106,9 @@ def main(argv=None) -> int:
             if missing:
                 print(f"FAIL evidence files missing: {missing}")
                 return 1
-    if "uninstall" in phases and Path(config["manifest"]["params"]["venv_dir"]).exists():
-        print("FAIL the virtual environment is still there after the uninstall phase")
+    installed = config["manifest"]["params"].get("venv_dir") or config["manifest"]["params"].get("install_dir")
+    if "uninstall" in phases and installed and Path(installed).exists():
+        print("FAIL the installation directory is still there after the uninstall phase")
         return 1
     print(f"OK profile {args.profile} on {args.host}: phases {', '.join(phases)}")
     print(f"manifest digest {config['manifest_digest']}")

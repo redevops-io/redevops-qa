@@ -18,8 +18,8 @@
     "note": "The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them."
   },
   "verifier": {
-    "supported": false,
-    "reason": "No profile installs or runs an independent verifier: the verifier belongs to the agent harness, which no tested step installs. A native engine pass or fail is not a verdict."
+    "supported": true,
+    "reason": "Re-verification of a run's evidence in a separate process (`redevops-qa verify`: the same code the run used, so not independent of the harness and the libraries, and the hash chain it checks is unkeyed) is installed and run only by the profile local-python-qa (Playwright Chromium and Robot Framework, Linux x86_64); no other profile installs it, and an engine's own pass or fail is not a verdict."
   },
   "targets": {
     "local-python": {
@@ -1005,6 +1005,187 @@
       "uninstall_note": "none",
       "limitations": [
         "No iOS session has ever been run: the adapter reports UNAVAILABLE for every action. iOS needs macOS with Xcode, WebDriverAgent and a supported simulator or device, which are never bundled."
+      ]
+    },
+    {
+      "id": "local-python-qa",
+      "title": "ReDevOps QA in a local Python environment: the pinned bundle, the Playwright Chromium and Robot Framework lanes, and the verifier",
+      "kind": "bundle",
+      "verifier": true,
+      "target": "local-python",
+      "engines": [
+        "playwright",
+        "robotframework"
+      ],
+      "status": "experimental",
+      "disabled_reason": null,
+      "python": {
+        "version": "3.12",
+        "executable": "python3.12",
+        "requires": ">=3.11"
+      },
+      "pip_pins": [],
+      "packages": [],
+      "prerequisites": [
+        "Python 3.12 available as `python3.12` with the `venv` module (Debian and Ubuntu: the `python3.12-venv` package). The bundle is built for CPython 3.12 and install.sh refuses any other minor.",
+        "The bundle archive and its `.tar.sha256` file in one directory (`bundle_dir`): built from a checkout of https://github.com/redevops-io/redevops-qa with `python tools/build_bundle.py build --out DIR`, or taken from a workflow run. No bundle is published. Compare the sha256 of the archive with a value you obtained from somewhere its producer does not control.",
+        "bash, tar, and root or sudo for the browser step's `--with-deps` (it installs the operating system libraries Chromium needs with apt).",
+        "Network access to the Playwright download host for Chromium (the browser is not in the bundle and is not hashed by it). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.",
+        "All commands are run from one working directory, using a POSIX shell."
+      ],
+      "params": {
+        "bundle_dir": {
+          "kind": "abs-path",
+          "default": null,
+          "required": true,
+          "description": "the directory that holds the bundle archive and its .tar.sha256 file"
+        },
+        "install_dir": {
+          "kind": "abs-path",
+          "default": null,
+          "required": true,
+          "description": "a new directory the installation is made in (it must not exist or be empty; uninstall removes it)"
+        },
+        "evidence_dir": {
+          "kind": "dir-path",
+          "default": "qa-evidence",
+          "required": false,
+          "description": "where the demo writes its evidence bundle"
+        }
+      },
+      "hosts": [
+        {
+          "os_arch": "linux-x86_64",
+          "status": "experimental",
+          "prerequisites": [
+            "Linux x86_64 with a POSIX shell; the CI job runs these steps on a GitHub-hosted ubuntu-24.04 runner."
+          ],
+          "verified_by": null,
+          "disabled_reason": null,
+          "note": "Every step of this profile is run by CI on every push (the job profile-local-python-qa), starting from the bundle the bundle job built. The host stays experimental until a run on the main branch is recorded here: verified needs a recorded run whose head commit is an ancestor of main."
+        },
+        {
+          "os_arch": "linux-arm64",
+          "status": "planned",
+          "prerequisites": [],
+          "verified_by": null,
+          "disabled_reason": "The bundle is built for linux x86_64 only: its compiled wheels and its Playwright wheel are for that platform.",
+          "note": ""
+        },
+        {
+          "os_arch": "macos-arm64",
+          "status": "planned",
+          "prerequisites": [],
+          "verified_by": null,
+          "disabled_reason": "The bundle is built for linux x86_64 only, and the supervisor of the runner is POSIX-only but has no CI evidence on macOS; macOS runs are development evidence.",
+          "note": ""
+        }
+      ],
+      "steps": {
+        "source": [
+          {
+            "id": "archive-digest",
+            "title": "Check that the archive has the digest in its .tar.sha256 file (the file only says what the producer wrote: compare the digest with a value from elsewhere)",
+            "argv": [
+              "python3.12",
+              "-I",
+              "-c",
+              "import hashlib,sys; a,b=sys.argv[1:3]; want=open(b,encoding='utf-8').read().split()[0]; got=hashlib.sha256(open(a,'rb').read()).hexdigest(); sys.exit(0 if got==want else 'the archive does not have the digest in '+b)",
+              "{bundle_dir}/redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64.tar",
+              "{bundle_dir}/redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64.tar.sha256"
+            ]
+          },
+          {
+            "id": "unpack",
+            "title": "Unpack the archive into the working directory",
+            "argv": [
+              "tar",
+              "xf",
+              "{bundle_dir}/redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64.tar"
+            ]
+          }
+        ],
+        "install": [
+          {
+            "id": "install",
+            "title": "Install into a new directory: checks the Python minor, the platform and every file of the bundle, then pip install --no-index --require-hashes from the wheelhouse",
+            "argv": [
+              "redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install.sh",
+              "--prefix",
+              "{install_dir}",
+              "--python",
+              "python3.12"
+            ]
+          },
+          {
+            "id": "browser",
+            "title": "The separate browser step: downloads Chromium (not part of the bundle, not hashed by it) and the operating system libraries it needs",
+            "argv": [
+              "redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install-browser.sh",
+              "--prefix",
+              "{install_dir}",
+              "--with-deps"
+            ]
+          }
+        ],
+        "smoke": [
+          {
+            "id": "doctor",
+            "title": "Check the machine: Python, platform, the pinned dependencies against pins.toml, Playwright and a real Chromium launch, Robot Framework, the fixture app, the egress gateway",
+            "argv": [
+              "{install_dir}/bin/redevops-qa",
+              "doctor"
+            ]
+          },
+          {
+            "id": "demo",
+            "title": "Run the built-in plan: a Playwright Chromium lane and a Robot Framework lane against the fixture app, one run id, one evidence bundle (exit status 0 only when every frozen assertion is verified)",
+            "argv": [
+              "{install_dir}/bin/redevops-qa",
+              "demo",
+              "--out",
+              "{evidence_dir}",
+              "--run-id",
+              "profile-demo"
+            ]
+          }
+        ],
+        "check": [
+          {
+            "id": "verify",
+            "title": "Re-verify the evidence bundle from the bundle alone, in a process of its own (exit status 0 for an accepted run that verified every assertion, 5 for any finding)",
+            "argv": [
+              "{install_dir}/bin/redevops-qa",
+              "verify",
+              "{evidence_dir}/profile-demo"
+            ]
+          }
+        ],
+        "uninstall": [
+          {
+            "id": "uninstall",
+            "title": "Remove the installation directory, and nothing else",
+            "argv": [
+              "redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/uninstall.sh",
+              "--prefix",
+              "{install_dir}"
+            ]
+          }
+        ]
+      },
+      "evidence": {
+        "files": [],
+        "manual_files": [],
+        "description": "The demo writes one evidence bundle, {evidence_dir}/profile-demo, and the check step re-verifies it; no JUnit file is involved."
+      },
+      "uninstall_note": "uninstall.sh removes the installation directory (virtual environment, browser directory, launcher) and refuses a directory it did not make. The evidence directory and the operating system packages installed by --with-deps stay.",
+      "limitations": [
+        "CPython 3.12 on Linux x86_64 only. Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.",
+        "No bundle is published and no release exists: the archive comes from a build of the repository or from a workflow run, and its digest is only as trustworthy as the place you obtained it from.",
+        "Chromium is downloaded when the browser step runs; the bundle records the build the pinned Playwright expects and does not hash or ship the browser.",
+        "The runner in this release runs plans against the bundled fixture app only; the Robot lane's egress is not enforced (a Robot library opens its own sockets).",
+        "`verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite shows that a bundle is the one it was taken from. A verified run does not show that the application under test is correct.",
+        "The agent-harness and runtime-contracts trees are installed from the bundle at the commits pins.toml names; the name `agent-harness` on the public package index belongs to an unrelated project and is never installed."
       ]
     }
   ]

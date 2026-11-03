@@ -28,6 +28,51 @@ A test level says what kind of evidence stands behind an engine entry. It is not
 
 Each `Last verified` commit is an ancestor of the main branch; for a local run it is the commit that records the run, because the tested tree is not recorded.
 
+## Product capabilities (the `redevops-qa` command)
+
+The engines above are adapters. These rows are features of the command that drives them. A row is added only when a CI job on the main branch backs it; the pinned bundle's install, the public CI demo and the install profile `local-python-qa` are run by CI jobs that were added after the evidence below and get their rows once a run on the main branch exists.
+
+| Capability | Test level | Scope |
+|---|---|---|
+| One frozen plan run through two engines, Playwright Chromium and Robot Framework, with one evidence bundle (`redevops-qa run`, `redevops-qa demo`) | `engine-backed-ci` | the runner's end-to-end lane on a GitHub-hosted ubuntu-24.04 runner: real Chromium through Playwright 1.64.1 and Robot Framework 7.5 together, the fixture app only, each seeded defect, partial success, timeouts, cancellation and a killed parent checked with a process table |
+| Re-verification of a finished run from its evidence bundle alone (`redevops-qa verify`) | `engine-backed-ci` | the end-to-end job (bundles of real engine runs, verified at the end of every run) and the offline runner job (the tamper and negative suite), on ubuntu-24.04 |
+
+### One frozen plan run through two engines, Playwright Chromium and Robot Framework, with one evidence bundle (`redevops-qa run`, `redevops-qa demo`)
+
+A plan is frozen (the strict runtime-contracts parser, every assertion's digest, the plan digest), the fixture app starts on loopback with a seeded defect or none, the browser lane and the Robot lane run one after the other as supervised child processes under one run id, and one evidence bundle is written. A seeded defect fails exactly its own lane and the other lane's result is still recorded.
+
+Documentation: [packages/qa-runner/README.md](../packages/qa-runner/README.md).
+
+Evidence:
+
+* [CI run 41407615435](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435) (whole run green), [job 125153175628](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435/job/125153175628) (runner end to end; 103 passed, 0 skipped, 0 failed): real Chromium and Robot Framework 7.5 in one run, the two-lane plan for each seeded defect, timeouts, cancellation and a killed parent; the job fails on zero tests or any skip. Head commit `1b40a361ff18`, completed 2026-11-02.
+* [packages/qa-runner/tests/e2e](../packages/qa-runner/tests/e2e): the tests the end-to-end job runs.
+
+Limitations:
+
+* The target is the bundled fixture app: this release runs plans against it only, not against an arbitrary application.
+* Linux x86_64 only; Playwright with Chromium only; Selenium and Appium are not part of this workflow.
+* The Robot lane's egress is not enforced (a Robot library opens its own sockets); the browser lane's traffic goes through the egress gateway.
+* The pinned bundle's install and the public CI demo are run by CI jobs added after this evidence; they get their own rows once a run on the main branch backs them.
+
+### Re-verification of a finished run from its evidence bundle alone (`redevops-qa verify`)
+
+`verify` recomputes every digest, the frozen assertions and every verdict from the bundle in a process of its own and rejects any finding with exit status 5; `run` and `demo` end by calling it in a fresh interpreter. A tamper and negative suite is run over real bundles.
+
+Documentation: [packages/qa-runner/README.md](../packages/qa-runner/README.md).
+
+Evidence:
+
+* [CI run 41407615435](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435) (whole run green), [job 125153175628](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435/job/125153175628) (runner end to end; 103 passed, 0 skipped, 0 failed): every run in this job ends with `verify` in a separate process over the bundle the run wrote; the job installs Playwright 1.64.1 and Robot Framework 7.5. Head commit `1b40a361ff18`, completed 2026-11-02.
+* [CI run 41407615435](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435) (whole run green), [job 125153175570](https://github.com/redevops-io/redevops-qa/actions/runs/41407615435/job/125153175570) (runner (Python); 926 passed, 0 skipped, 0 failed): the offline runner suite, which includes the tamper and negative suite for `verify`. Head commit `1b40a361ff18`, completed 2026-11-02.
+* [packages/qa-runner/tests/test_qr_tamper_suite.py](../packages/qa-runner/tests/test_qr_tamper_suite.py): the tamper suite over real bundles.
+
+Limitations:
+
+* It is a re-verification by the same code the run used, in a separate process; it is not an independent implementation of the verdicts. `independent` here means independent of the engine's own status.
+* The hash chain inside a bundle is unkeyed: someone who can rewrite a whole bundle can rewrite its digests too. Only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite, passed with `--anchor`, shows that a bundle is the one the value was taken from; nothing in the tool authenticates where the value came from.
+* A verified run does not show that the application under test is correct.
+
 ## Appium caveats
 
 ### Android
@@ -89,7 +134,7 @@ Limitations:
 * Network isolation is the egress gateway's job (packages/qa-egress); the adapter's request gate is a second layer.
 * A native PASS or FAIL from the engine is not the verifier's verdict: the canonical status stays UNVERIFIED until an independent verifier supplies one, and no install profile in this repository installs a verifier yet.
 
-Licences: the adapter is source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source (LicenseRef-AGPL-3.0-or-later-with-Commons-Clause). Components: playwright-python Apache-2.0 (optional_extra). Technical triage in [third_party](../third_party/README.md), not legal advice.
+Licences: the adapter is source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source (LicenseRef-AGPL-3.0-or-later-with-Commons-Clause). Components: playwright-python Apache-2.0 (staged_unmodified). Technical triage in [third_party](../third_party/README.md), not legal advice.
 
 ### Selenium (Python)
 
@@ -121,7 +166,7 @@ Dependencies:
 Evidence:
 
 * [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716398989](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398989) (selenium browser lane; 11 passed, 0 skipped, 0 failed): real Chrome and ChromeDriver through Selenium 4.52.0: the interactive driver against a loopback page and a real Selenium suite run under the supervisor. Head commit `938eb486b508`, completed 2026-11-01.
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716398886](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398886) (selenium adapter (offline; 135 passed, 0 skipped, 0 failed): the adapter against a fake browser and recorded pytest JUnit reports, with real pytest under the supervisor; no Selenium installed. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716398886](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716398886) (selenium adapter (offline); 135 passed, 0 skipped, 0 failed): the adapter against a fake browser and recorded pytest JUnit reports, with real pytest under the supervisor; no Selenium installed. Head commit `938eb486b508`, completed 2026-11-01.
 
 Limitations:
 
@@ -161,7 +206,7 @@ Dependencies:
 Evidence:
 
 * [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399117](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399117) (robot real lane; 10 passed, 0 skipped, 0 failed): real Robot Framework 7.5 run by the supervisor through the suite adapter: native statuses, selectors, library refusals, timeout, scrubbed environment. Head commit `938eb486b508`, completed 2026-11-01.
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399114](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399114) (robot adapter (offline; 133 passed, 0 skipped, 0 failed): the importer against output.xml files recorded from real runs and against hostile ones, plus the allowlist scan; no Robot Framework installed. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399114](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399114) (robot adapter (offline); 133 passed, 0 skipped, 0 failed): the importer against output.xml files recorded from real runs and against hostile ones, plus the allowlist scan; no Robot Framework installed. Head commit `938eb486b508`, completed 2026-11-01.
 
 Limitations:
 
@@ -172,7 +217,7 @@ Limitations:
 * Pre-release adapter (0.1.0); nothing is published.
 * A native PASS or FAIL from the engine is not the verifier's verdict: the canonical status stays UNVERIFIED until an independent verifier supplies one, and no install profile in this repository installs a verifier yet.
 
-Licences: the adapter is source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source (LicenseRef-AGPL-3.0-or-later-with-Commons-Clause). Components: robotframework Apache-2.0 (optional_extra). Technical triage in [third_party](../third_party/README.md), not legal advice.
+Licences: the adapter is source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source (LicenseRef-AGPL-3.0-or-later-with-Commons-Clause). Components: robotframework Apache-2.0 (staged_unmodified). Technical triage in [third_party](../third_party/README.md), not legal advice.
 
 ### Appium (Android, UiAutomator2)
 
@@ -208,7 +253,7 @@ Evidence:
 
 * [packages/qa-appium/README.md](../packages/qa-appium/README.md): local run observed on 2026-11-01, Apple-silicon Mac, Android 17 (API 37, arm64-v8a, Google APIs with Play) emulator, Appium 3.9.0, UiAutomator2 8.7.3, client 6.1.1; 3 run(s); one test (the Settings app opens on the attached device and the screenshot is a real PNG): 0 skipped, 0 failed in each of three runs; a full adapter session on the same emulator also passed open_app, read, check, tap, type and back but is not part of the suite. a real Android emulator session through the adapter, recorded in the package README; the tested tree is not recorded, so the commit that records it is used.
 * [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399113](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399113) (appium server lane; 5 passed, 1 deselected (the device test), 0 skipped, 0 failed): real Appium 3.9.0 server and client 6.1.1 on loopback with no Android SDK and no device; drives no app. Head commit `938eb486b508`, completed 2026-11-01.
-* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399045](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399045) (appium adapters (offline; 69 passed, 0 skipped, 0 failed): the adapter against a fake device, capabilities and server policy; no Appium installed. Head commit `938eb486b508`, completed 2026-11-01.
+* [CI run 41261799543](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543) (whole run green), [job 124716399045](https://github.com/redevops-io/redevops-qa/actions/runs/41261799543/job/124716399045) (appium adapters (offline); 69 passed, 0 skipped, 0 failed): the adapter against a fake device, capabilities and server policy; no Appium installed. Head commit `938eb486b508`, completed 2026-11-01.
 * [.github/workflows/appium-android.yml](../.github/workflows/appium-android.yml): the manual device workflow (Run workflow, naming a worker with an emulator or device); it has no run in Actions.
 
 Limitations:

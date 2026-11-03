@@ -461,7 +461,7 @@ jobs:
       - name: Run the bundle and workflow tests in a scrubbed environment
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
-            python -m pytest -q tests/test_bundle_builder.py tests/test_bundle_install.py tests/test_bundle_pinned.py tests/test_bundle_workflow.py tests/test_demo_outcome.py tests/test_workflow.py \
+            python -m pytest -q tests/test_bundle_builder.py tests/test_bundle_install.py tests/test_bundle_pinned.py tests/test_bundle_workflow.py tests/test_demo_outcome.py tests/test_readme_layout.py tests/test_workflow.py \
               --junitxml="$RUNNER_TEMP/junit-bundle-tests.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-bundle-tests.xml"
@@ -523,6 +523,10 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           for d in build-1 build-previous; do python -I "$GITHUB_WORKSPACE/tools/check_bundle.py" "$RUNNER_TEMP/$d"/redevops-qa-bundle-*-cp312-linux-x86_64; done
+      - name: Check the licence matrix against the wheels of the bundle just built (digests, licence files, the breakdown of the inlined notices)
+        run: |
+          python -m pip install "pyyaml>=6,<7"
+          python tools/check_adapter_licenses.py --wheelhouse "$(ls -d "$RUNNER_TEMP"/build-1/redevops-qa-bundle-*-cp312-linux-x86_64)/wheelhouse"
       - name: Print the digest of the archive (the value to compare a download with)
         run: |
           sha256sum "$RUNNER_TEMP"/build-1/*.tar
@@ -1226,6 +1230,39 @@ jobs:
         run: |
           python tools/run_install_profile.py --profile local-python-appium-android --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
             --checkout "$GITHUB_WORKSPACE/.profile-src" --phases uninstall
+
+  profile-local-python-qa:
+    name: install profile local-python-qa (the pinned bundle the bundle job built, with the verifier; linux-x86_64; experimental until a run on main is recorded; NOT a required check until proven)
+    # Runs every step of the profile exactly as the configurator prints it (tools/run_install_profile.py takes the commands out of qa-install-profiles.json): the archive digest check and the unpack, the
+    # install, the browser step, doctor, the demo, the verification of the evidence it wrote, and then, in its own step, the uninstall, after which the installation directory must be gone. Read-only, no secret.
+    runs-on: ubuntu-24.04
+    needs: bundle
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download the bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: qa-bundle-current
+          path: ${{ runner.temp }}/current
+      - name: Source, install, smoke and check (the profile's own steps, verbatim)
+        run: |
+          python tools/run_install_profile.py --profile local-python-qa --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
+            --phases source,install,smoke,check --param bundle_dir="$RUNNER_TEMP/current"
+      - name: Keep the evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-local-python-qa
+          path: ${{ runner.temp }}/profile-work/evidence
+          if-no-files-found: error
+      - name: Uninstall (the profile's uninstall phase; the installation directory must be gone)
+        run: |
+          python tools/run_install_profile.py --profile local-python-qa --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
+            --phases uninstall --param bundle_dir="$RUNNER_TEMP/current"
 
   install-profiles:
     name: "install profiles (data, steps, pins, status, generator vectors, generated document; offline; never skipped)"

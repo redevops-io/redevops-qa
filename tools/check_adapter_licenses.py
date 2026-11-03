@@ -8,6 +8,9 @@ Reads ``third_party/adapter-license-matrix.yaml`` and fails (exit 1) when:
 * a claim of ``redistributable`` is not supported by a verified licence text, an inspected bundle and recorded notices;
 * a commercial SDK or Apple toolchain is enabled by default;
 * a package that an adapter package or a workflow installs is not listed in the matrix, or is pinned differently;
+* (with --wheelhouse DIR) a recorded wheel, licence file or notice breakdown that the wheels of a built bundle do not bear out, or a licence-like file the matrix does not record;
+* a wheel of bundle/third-party.lock.json (what the pinned bundle ships) has no entry here with the same name, version, file name and sha256 under a shipping status
+  (``redistributable`` or ``staged_unmodified``), a shipped wheel is recorded under any other status, or the matrix lists a shipped wheel the lock does not hold;
 * an adapter framework is installed without an exact pin.
 
 This is technical triage, not legal advice. ``--verify-upstream`` re-fetches each licence file at its pinned tag and compares
@@ -38,8 +41,9 @@ SCHEMA = "redevops-qa/adapter-license-matrix"
 KINDS = {"framework", "library", "driver", "dependency_group", "ci_tool", "commercial_toolchain"}
 PINNED_KINDS = {"framework", "library", "driver"}
 GROUP_KINDS = {"dependency_group", "ci_tool"}
-REDISTRIBUTION = {"redistributable", "optional_extra", "excluded_by_default", "unverified"}
-VERIFICATION = {"verified", "registry-metadata", "unverified"}
+REDISTRIBUTION = {"redistributable", "optional_extra", "staged_unmodified", "excluded_by_default", "unverified"}
+SHIPPING = {"redistributable", "staged_unmodified"}        # statuses under which a wheel may be inside the bundle
+VERIFICATION = {"verified", "wheel-inspected", "registry-metadata", "unverified"}
 TRADEMARK = {"verified", "unverified"}
 BUNDLE_CHECK = {"inspected", "not_inspected"}
 ALLOWED, REVIEW, UNVERIFIED, BLOCKED = 0, 1, 2, 3
@@ -296,6 +300,39 @@ def _check_component(cid: str, comp: dict, policy: dict, by_id: Dict[str, dict])
     if red.get("default_enabled") is True:
         if status not in ("redistributable", "optional_extra") or rank > REVIEW:
             out.append(Finding("ENABLED_BY_DEFAULT_NOT_APPROVED", cid, "only an entry whose licences are allowed or under review and that is not excluded may be on by default"))
+    # --- wheels shipped in the pinned bundle
+    shipped = comp.get("shipped_wheels")
+    if shipped is not None:
+        if not isinstance(shipped, list) or not shipped:
+            out.append(Finding("MISSING_FIELD", cid, "shipped_wheels must be a non-empty list when present"))
+            shipped = []
+        if status not in SHIPPING:
+            out.append(Finding("SHIPPED_NOT_STAGED", cid, f"shipped_wheels are recorded but the status is {status}: a wheel inside the bundle needs a shipping status"))
+        for wheel in shipped:
+            at = f"shipped wheel {wheel.get('name') if isinstance(wheel, dict) else wheel!r}"
+            if not (isinstance(wheel, dict) and _need(out, cid, wheel, ["name", "version", "file", "sha256", "license_declared", "license_files"], f"{at}: ")):
+                continue
+            if not _SHA256.match(str(wheel["sha256"])):
+                out.append(Finding("MATRIX_SCHEMA", cid, f"{at}: sha256 is not 64 hex digits"))
+            for lf in wheel["license_files"]:
+                if not (isinstance(lf, dict) and lf.get("path") and _SHA256.match(str(lf.get("sha256", "")))):
+                    out.append(Finding("MATRIX_SCHEMA", cid, f"{at}: every licence file needs a path inside the wheel and a sha256"))
+    if status == "staged_unmodified":
+        if red.get("public_distribution") != "owner_decision_required":
+            out.append(Finding("STAGED_PUBLIC_CLAIM", cid, "a staged_unmodified entry says public_distribution: owner_decision_required (clearing it is a decision, and needs status redistributable with a verified licence text)"))
+        reason = str(red.get("reason", ""))
+        if "private staging only" not in reason.lower() or "owner decision" not in reason.lower():
+            out.append(Finding("STAGED_PUBLIC_CLAIM", cid, "the reason of a staged_unmodified entry must say 'private staging only' and that public distribution requires an owner decision"))
+        if not shipped:
+            out.append(Finding("MISSING_FIELD", cid, "staged_unmodified needs shipped_wheels"))
+        if not comp.get("notices"):
+            out.append(Finding("MISSING_NOTICES", cid, "staged_unmodified needs the notice and licence files that travel with the wheel recorded"))
+        if verified not in ("verified", "wheel-inspected"):
+            out.append(Finding("UNVERIFIED_STAGING", cid, "a wheel is shipped only after its licence metadata and files were read (verification.status verified or wheel-inspected)"))
+        if kind in PINNED_KINDS and comp.get("bundled_deps_check") != "inspected":
+            out.append(Finding("UNVERIFIED_STAGING", cid, "a framework or library is shipped only after the content of the wheel was inspected (bundled_deps_check: inspected)"))
+        if red.get("default_enabled") is not False:
+            out.append(Finding("ENABLED_BY_DEFAULT_NOT_APPROVED", cid, "a staged entry is not enabled by default"))
     # --- requires
     for req in comp.get("requires") or []:
         other = by_id.get(req)
@@ -402,6 +439,116 @@ def check_installs(matrix: dict, installs: List[Tuple[str, str, str]]) -> List[F
     return out
 
 
+# --------------------------------------------------------------------------------------------- what the bundle ships
+def check_bundle_lock(matrix: dict, lock: dict) -> List[Finding]:
+    """Every wheel of the bundle's third-party lock must be recorded in the matrix under a shipping status, with the same name, version, file name, sha256 and declared licence; and the
+    matrix must not record a shipped wheel that the lock does not hold. Without this the two drift silently (they did)."""
+    out: List[Finding] = []
+    recorded: Dict[Tuple[str, str], Tuple[str, dict, str]] = {}
+    for comp in matrix.get("components", []):
+        for wheel in comp.get("shipped_wheels") or []:
+            if isinstance(wheel, dict):
+                recorded[(_norm(wheel.get("name", "")), str(wheel.get("version", "")))] = (comp["id"], wheel, comp.get("redistribution", {}).get("status", ""))
+    locked = set()
+    for w in lock.get("wheels", []):
+        key = (_norm(w["name"]), str(w["version"]))
+        locked.add(key)
+        hit = recorded.get(key)
+        if hit is None:
+            out.append(Finding("UNLISTED_SHIPPED_WHEEL", w["name"], f"{w['filename']} is in bundle/third-party.lock.json but no matrix entry records it as a shipped wheel"))
+            continue
+        cid, wheel, status = hit
+        if status not in SHIPPING:
+            out.append(Finding("SHIPPED_NOT_STAGED", cid, f"{w['filename']} is shipped in the bundle but its entry is {status}"))
+        if wheel.get("file") != w["filename"] or wheel.get("sha256") != w["sha256"]:
+            out.append(Finding("SHIPPED_WHEEL_MISMATCH", cid, f"the matrix records {wheel.get('file')} {str(wheel.get('sha256'))[:12]}, the lock holds {w['filename']} {w['sha256'][:12]}"))
+        if wheel.get("license_declared") != w.get("license"):
+            out.append(Finding("SHIPPED_LICENSE_DRIFT", cid, f"the matrix records the declared licence {wheel.get('license_declared')!r}, the lock {w.get('license')!r}"))
+    for key, (cid, wheel, _status) in sorted(recorded.items()):
+        if key not in locked:
+            out.append(Finding("STALE_SHIPPED_WHEEL", cid, f"{wheel.get('file')} is recorded as shipped but is not in bundle/third-party.lock.json"))
+    return out
+
+
+# --------------------------------------------------------------------------------------------- the wheels themselves
+_SECTION = re.compile(r"^%% (\S+) NOTICES AND INFORMATION BEGIN HERE\n", re.M)
+_LICENCE_FILE_NAME = re.compile(r"(^|/)(LICEN[SC]E|NOTICE|COPYING|AUTHORS|ThirdPartyNotices)[^/]*$|\.LICENSE$", re.I)
+
+
+def classify_notice(text: str) -> str:
+    """The licence a notice section states, from its own words (a deterministic reading of the file, not a legal classification)."""
+    t = text.lower()
+    if "no license text found" in t:
+        return "none-declared"
+    if "blue oak model license" in t:
+        return "BlueOak-1.0.0"
+    if "redistribution and use in source and binary forms" in t:
+        return "BSD-3-Clause" if "endorse" in t else "BSD-2-Clause"
+    if "permission to use, copy, modify, and/or distribute" in t or "permission to use, copy, modify, and distribute" in t:
+        return "ISC"
+    if "permission is hereby granted, free of charge" in t:
+        return "MIT"
+    if "apache license" in t:
+        return "Apache-2.0"
+    return "other"
+
+
+def notice_breakdown(text: str) -> Tuple[int, Dict[str, int]]:
+    """(number of sections, {licence: count}) of a sidecar notice file made of '%% name@version NOTICES AND INFORMATION BEGIN HERE' sections."""
+    parts = _SECTION.split(text)
+    counts: Dict[str, int] = {}
+    for i in range(1, len(parts), 2):
+        kind = classify_notice(parts[i + 1].split("END OF ", 1)[0])
+        counts[kind] = counts.get(kind, 0) + 1
+    return len(parts) // 2, dict(sorted(counts.items()))
+
+
+def check_wheelhouse(matrix: dict, wheelhouse: Path) -> List[Finding]:
+    """What the matrix says about the shipped wheels against the wheels themselves (the built bundle's wheelhouse): the file and its sha256, every recorded licence file by path and sha256,
+    no licence-like file the matrix does not record, every member recorded under recorded_members (by path, size in BYTES, as stored in the wheel, and sha256), and, where the matrix records a breakdown of an inlined notice file, the breakdown recomputed from the file."""
+    import zipfile
+    out: List[Finding] = []
+    for comp in matrix.get("components", []):
+        for rec in comp.get("shipped_wheels") or []:
+            at = f"{comp['id']}/{rec.get('name')}"
+            path = Path(wheelhouse) / str(rec.get("file"))
+            if not path.is_file():
+                out.append(Finding("WHEEL_MISSING", at, f"{rec.get('file')} is not in {wheelhouse}"))
+                continue
+            if hashlib.sha256(path.read_bytes()).hexdigest() != rec.get("sha256"):
+                out.append(Finding("WHEEL_DIGEST", at, f"{rec.get('file')} does not have the recorded sha256"))
+                continue
+            with zipfile.ZipFile(path) as zf:
+                names = set(zf.namelist())
+                recorded = {lf["path"]: lf["sha256"] for lf in rec.get("license_files") or []}
+                for member, digest in recorded.items():
+                    if member not in names:
+                        out.append(Finding("LICENCE_FILE_MISSING", at, f"{member} is not in the wheel"))
+                    elif hashlib.sha256(zf.read(member)).hexdigest() != digest:
+                        out.append(Finding("LICENCE_FILE_DIGEST", at, f"{member} does not have the recorded sha256"))
+                for member in sorted(n for n in names if _LICENCE_FILE_NAME.search(n) and not n.endswith("/") and n not in recorded):
+                    out.append(Finding("UNRECORDED_LICENCE_FILE", at, f"{member} is in the wheel but not recorded in license_files"))
+                for item in rec.get("recorded_members") or []:
+                    member = item.get("path")
+                    if member not in names:
+                        out.append(Finding("MEMBER_MISSING", at, f"{member} is not in the wheel"))
+                        continue
+                    data = zf.read(member)
+                    if len(data) != item.get("size") or zf.getinfo(member).file_size != item.get("size"):
+                        out.append(Finding("MEMBER_SIZE_MISMATCH", at, f"{member} is {zf.getinfo(member).file_size} bytes in the wheel, the matrix records {item.get('size')}"))
+                    if hashlib.sha256(data).hexdigest() != item.get("sha256"):
+                        out.append(Finding("MEMBER_DIGEST_MISMATCH", at, f"{member} does not have the recorded sha256"))
+                for notice in rec.get("inlined_notices") or []:
+                    member = notice.get("path")
+                    if member not in names:
+                        out.append(Finding("LICENCE_FILE_MISSING", at, f"{member} is not in the wheel"))
+                        continue
+                    sections, counts = notice_breakdown(zf.read(member).decode("utf-8", "replace"))
+                    if sections != notice.get("sections") or counts != notice.get("breakdown"):
+                        out.append(Finding("NOTICE_BREAKDOWN_MISMATCH", at, f"{member}: the file has {sections} sections {counts}, the matrix records {notice.get('sections')} {notice.get('breakdown')}"))
+    return out
+
+
 # --------------------------------------------------------------------------------------------- optional upstream check
 Fetcher = Callable[[str], bytes]
 
@@ -451,6 +598,12 @@ def run(matrix_path: Path = DEFAULT_MATRIX, root: Path = ROOT, upstream: bool = 
     if any(f.code == "MATRIX_SCHEMA" and f.component in ("matrix", "policy") for f in findings):
         return findings
     findings += check_installs(matrix, gather_installs(root))
+    lock_path = root / "bundle" / "third-party.lock.json"
+    if lock_path.is_file():
+        try:
+            findings += check_bundle_lock(matrix, json.loads(lock_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, KeyError) as exc:
+            findings.append(Finding("BUNDLE_LOCK_UNREADABLE", str(lock_path), f"{type(exc).__name__}: {exc}"))
     if upstream:
         findings += verify_upstream(matrix, fetch)
     return findings
@@ -460,9 +613,12 @@ def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--matrix", type=Path, default=DEFAULT_MATRIX)
     ap.add_argument("--root", type=Path, default=ROOT)
+    ap.add_argument("--wheelhouse", type=Path, help="a built bundle's wheelhouse: check the recorded wheels, licence files and notice breakdowns against the wheels themselves")
     ap.add_argument("--verify-upstream", action="store_true", help="re-fetch each licence file at its pinned tag and compare hashes (network)")
     args = ap.parse_args(argv[1:])
     findings = run(args.matrix, args.root, args.verify_upstream)
+    if args.wheelhouse:
+        findings += check_wheelhouse(load_matrix(args.matrix), args.wheelhouse)
     for finding in findings:
         print(finding)
     if findings:

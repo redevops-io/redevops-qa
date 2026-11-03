@@ -12,6 +12,15 @@ workflow installs without a matrix entry, and on a pin that differs from the mat
 at its tag and compares hashes (network; not part of the offline test run). Commercial SDKs and Apple toolchains are listed as
 `excluded_by_default` and are never bundled or downloaded.
 
-The pinned bundle (`bundle/`, built by `tools/build_bundle.py`) carries unmodified wheels of Playwright, Robot Framework and their dependencies (named with their digests in
-`bundle/third-party.lock.json`), each with the licence files it ships. This matrix still records Playwright, Robot Framework and the direct dependencies of Playwright as
-`optional_extra` (not shipped by ReDevOps): a decision to publish a bundle that contains them is the owner's and is not made by the build, which only produces a workflow artifact.
+The pinned bundle (`bundle/`, built by `tools/build_bundle.py`) carries unmodified wheels of Playwright, Robot Framework, PyYAML, greenlet, pyee and typing_extensions, named with
+their digests in `bundle/third-party.lock.json`. Every one of them is recorded in the matrix under `shipped_wheels` with the licence and notice files the wheel itself carries, and the
+status `staged_unmodified`: **private staging only; public distribution requires an owner decision.** `tools/check_adapter_licenses.py` fails when a wheel of the lock has no such entry
+(same name, version, file name and sha256), when a recorded wheel is not in the lock, or when a shipped wheel sits under any other status.
+
+What the two large wheels contain, from unpacking them: the Playwright wheel holds a Node.js runtime binary (`playwright/driver/node`, licence file `playwright/driver/LICENSE`), the
+Playwright driver with 79 npm packages inlined into `lib/utilsBundle.js` and 2 into `lib/serverRegistry.js` (sidecar `.LICENSE` files) and libwebp (`lib/webp_codec.LICENSE`). Read from the
+sidecar file, the 79 are 65 MIT, 7 ISC, 4 a BSD licence with an endorsement clause, 1 (dotenv) a BSD licence without one, 1 (minimatch) the Blue Oak Model License 1.0.0 and 1
+(proxy-agent-negotiate) a section with no licence text ("declared licenses: MIT"); the last two are recorded as unverified, as are the components of the Node.js binary. The Robot Framework
+wheel holds five report assets in `robot/htmldata/lib` and an inlined JavaScript bundle in `robot/htmldata/libdoc/libdoc.html`; the licence of `jquery.min.js`, `jquery.tablesorter.min.js` and
+that bundle (it contains the Handlebars runtime) could not be established from the wheel and is recorded as unverified. `python tools/check_adapter_licenses.py --wheelhouse DIR` re-checks the
+recorded digests, licence files and the notice breakdown against the wheels of a built bundle (the `bundle` CI job does). Nothing here is a clearance.

@@ -224,12 +224,63 @@ def semantic_problems(manifest: Dict[str, Any], root: Path) -> List[str]:
             out.append(f"{at}: docs_url {entry['docs_url']} does not exist")
         if entry["example_id"] is not None and entry["example_id"] not in manifest["examples"]:
             out.append(f"{at}: example_id {entry['example_id']} is not in examples")
+    for row in manifest.get("product_capabilities", []):
+        out += product_capability_problems(row, root, repo, set(), run_shas)        # a job may back two capabilities, but not twice the same one
+    ids = [row["id"] for row in manifest.get("product_capabilities", [])]
+    if len(set(ids)) != len(ids):
+        out.append("product_capabilities: duplicate id")
     for ex_id, ex in manifest["examples"].items():
         if not (root / ex["path"]).is_file():
             out.append(f"example {ex_id}: path {ex['path']} does not exist")
     text = json.dumps(manifest)
     if re.search(r"(?<!not )open[ -]source", text, re.IGNORECASE):
         out.append("wording: the licence is 'source-available under the family licence'; never 'open source' (except in 'not open source')")
+    return out
+
+
+def product_capability_problems(row: Dict[str, Any], root: Path, repo: str, seen_jobs: set, run_shas: Dict[int, str]) -> List[str]:
+    """A product capability (a feature of the ``redevops-qa`` command, not an engine adapter): its evidence must resolve and must be of the kind its level needs."""
+    out: List[str] = []
+    at = f"product capability {row['id']}"
+    evidence: Dict[str, Dict[str, Any]] = {}
+    for ev in row["evidence"]:
+        if ev["id"] in evidence:
+            out.append(f"{at}: duplicate evidence id {ev['id']}")
+        evidence[ev["id"]] = ev
+        ref = f"{at}: evidence {ev['id']}"
+        if ev["kind"] == "repo-path":
+            if not (root / ev["path"]).exists():
+                out.append(f"{ref}: path {ev['path']} does not exist")
+        elif ev["kind"] == "local-run":
+            out.append(f"{ref}: a product capability is backed by CI jobs and repository paths, not by a local run")
+        else:
+            job = _workflow_jobs(root, ev["workflow"]).get(ev["job_key"])
+            if job is None:
+                out.append(f"{ref}: workflow {ev['workflow']} has no job {ev['job_key']!r}")
+            elif not str(job.get("name", "")).startswith(ev["job_name"]):
+                out.append(f"{ref}: job {ev['job_key']!r} is not named {ev['job_name']!r}")
+            if ev["url"] != f"https://github.com/{repo}/actions/runs/{ev['run_id']}/job/{ev['job_id']}" or ev["run_url"] != f"https://github.com/{repo}/actions/runs/{ev['run_id']}":
+                out.append(f"{ref}: run_url and url must be built from the run and job ids")
+            if run_shas.setdefault(ev["run_id"], ev["head_sha"]) != ev["head_sha"]:
+                out.append(f"{ref}: run {ev['run_id']} is cited with two different head commits")
+            if ev["job_id"] in seen_jobs:
+                out.append(f"{ref}: job id {ev['job_id']} is cited twice")
+            seen_jobs.add(ev["job_id"])
+    ci_jobs = [e for e in row["evidence"] if e["kind"] == "ci-job"]
+    level = row["test_level"]
+    if level == "offline-fake" and not ci_jobs:
+        out.append(f"{at}: offline-fake needs a CI job as evidence")
+    elif level == "engine-backed-ci":
+        backed = [e for e in ci_jobs if e["workflow"] == "tests.yml" and all(lit in _job_text(_workflow_jobs(root, e["workflow"]).get(e["job_key"], {}))
+                                                                           for lit in ("playwright==", "robotframework=="))]
+        if not backed:
+            out.append(f"{at}: engine-backed-ci needs a CI job of tests.yml that installs the pinned Playwright and Robot Framework")
+    elif level in ("device-backed-local", "device-backed-ci"):
+        out.append(f"{at}: a product capability cannot be at a device level")
+    if level != "none" and not ci_jobs:
+        out.append(f"{at}: level {level} needs a CI job as evidence")
+    if not (root / row["docs_url"]).is_file():
+        out.append(f"{at}: docs_url {row['docs_url']} does not exist")
     return out
 
 
@@ -332,6 +383,15 @@ def freshness_problems(manifest: Dict[str, Any], root: Path, main_ref: Optional[
                 out.append(f"freshness: engine {entry['engine']} {what} {sha[:12]} is not a commit of this repository (is the history complete?)")
             elif _git(root, "merge-base", "--is-ancestor", sha, ref)[0] != 0:
                 out.append(f"freshness: engine {entry['engine']} {what} {sha[:12]} is not an ancestor of {ref}")
+    for row in manifest.get("product_capabilities", []):
+        for ev in row["evidence"]:
+            sha = ev.get("head_sha")
+            if sha is None:
+                continue
+            if _git(root, "cat-file", "-e", f"{sha}^{{commit}}")[0] != 0:
+                out.append(f"freshness: product capability {row['id']} evidence {ev['id']} {sha[:12]} is not a commit of this repository (is the history complete?)")
+            elif _git(root, "merge-base", "--is-ancestor", sha, ref)[0] != 0:
+                out.append(f"freshness: product capability {row['id']} evidence {ev['id']} {sha[:12]} is not an ancestor of {ref}")
     return out
 
 
@@ -346,7 +406,9 @@ def _code(text: Any) -> str:
 
 def evidence_link(ev: Dict[str, Any]) -> str:
     if ev["kind"] == "ci-job":
-        return f"[CI run {ev['run_id']}]({ev['run_url']}) (whole run green), [job {ev['job_id']}]({ev['url']}) ({_cell(ev['job_name'])}; {_cell(ev['tests'])})"
+        name = _cell(ev['job_name'])
+        name += ")" * max(0, name.count("(") - name.count(")"))          # a job name is a prefix of the real name and may stop inside a parenthesis
+        return f"[CI run {ev['run_id']}]({ev['run_url']}) (whole run green), [job {ev['job_id']}]({ev['url']}) ({name}; {_cell(ev['tests'])})"
     return f"[{_cell(ev['path'])}]({_relative_from_docs(ev['path'])})"
 
 
@@ -383,6 +445,20 @@ def render_docs(manifest: Dict[str, Any]) -> str:
                      f"{_cell(', '.join(e['execution_modes']))} | {_code(e['test_level'])} | {_cell(verified)} | {when} |")
     lines += ["", "Each `Last verified` commit is an ancestor of the main branch; for a local run it is the commit that records the run, because the tested tree "
               "is not recorded.", ""]
+    rows = manifest.get("product_capabilities", [])
+    if rows:
+        lines += ["## Product capabilities (the `redevops-qa` command)", "",
+                  "The engines above are adapters. These rows are features of the command that drives them. A row is added only when a CI job on the main branch backs it; the pinned bundle's "
+                  "install, the public CI demo and the install profile `local-python-qa` are run by CI jobs that were added after the evidence below and get their rows once a run on the "
+                  "main branch exists.", "", "| Capability | Test level | Scope |", "|---|---|---|"]
+        for r in rows:
+            lines.append(f"| {_cell(r['title'])} | {_code(r['test_level'])} | {_cell(r['test_level_scope'])} |")
+        for r in rows:
+            lines += ["", f"### {r['title']}", "", r["summary"], "", f"Documentation: [{r['docs_url']}]({_relative_from_docs(r['docs_url'])}).", "", "Evidence:", ""]
+            for ev in r["evidence"]:
+                lines.append(f"* {evidence_link(ev)}: {_cell(ev['claim'])}." + (f" Head commit `{ev['head_sha'][:12]}`, completed {ev['completed_on']}." if ev["kind"] == "ci-job" else ""))
+            lines += ["", "Limitations:", ""] + [f"* {x}" for x in r["limitations"]]
+        lines += [""]
     lines += ["## Appium caveats", ""]
     lines += ["### Android", ""] + [f"* {c}" for c in manifest["caveats"]["appium_android"]]
     lines += ["", "### iOS", ""] + [f"* {c}" for c in manifest["caveats"]["appium_ios"]]
@@ -449,11 +525,12 @@ def verify_ci_problems(manifest: Dict[str, Any], fetch: Callable[[str], Any] = _
     out: List[str] = []
     repo = manifest["repository"]
     cache: Dict[int, Any] = {}
-    for entry in manifest["engines"]:
-        for ev in entry["evidence"]:
+    owners = [(f"engine {e['engine']}", e["evidence"]) for e in manifest["engines"]] + [(f"product capability {r['id']}", r["evidence"]) for r in manifest.get("product_capabilities", [])]
+    for owner, evidence_list in owners:
+        for ev in evidence_list:
             if ev["kind"] != "ci-job":
                 continue
-            at = f"engine {entry['engine']} evidence {ev['id']}"
+            at = f"{owner} evidence {ev['id']}"
             try:
                 if ev["run_id"] not in cache:
                     run = fetch(f"https://api.github.com/repos/{repo}/actions/runs/{ev['run_id']}")

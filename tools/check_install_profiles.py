@@ -45,6 +45,9 @@ CODE_ASSERT = ("import importlib,os,sys; root=os.path.realpath(sys.argv[1]); "
 CODE_REMOVE = ("import os,shutil,sys; p=sys.argv[1]; ok=os.path.isfile(os.path.join(p,'pyvenv.cfg')); "
                "ok or sys.exit('refusing to remove a directory that is not a virtual environment: '+p); shutil.rmtree(p)")
 CLONE_URL = "https://github.com/redevops-io/redevops-qa.git"
+# The one code string a bundle profile's first step may pass to ``python -I -c``: the archive must have the digest its .tar.sha256 file holds. Paths come in as arguments.
+CODE_ARCHIVE_DIGEST = ("import hashlib,sys; a,b=sys.argv[1:3]; want=open(b,encoding='utf-8').read().split()[0]; got=hashlib.sha256(open(a,'rb').read()).hexdigest(); "
+                       "sys.exit(0 if got==want else 'the archive does not have the digest in '+b)")
 MARKERS = {"robot_real", "browser", "appium_android"}
 ENV_NAMES = {"QA_CHROME_BINARY", "QA_CHROMEDRIVER_PATH", "QA_APPIUM_URL"}
 LOOPBACK_URL = "http://127.0.0.1:4723"
@@ -121,6 +124,98 @@ def junit_of(step: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+# ------------------------------------------------------------------------------------------------ bundle profiles
+def bundle_name(root: Path) -> str:
+    """The name of the archive the repository's builder writes (version of the runner, the one Python tag and platform of the bundle)."""
+    sys.path.insert(0, str(HERE))
+    try:
+        import build_bundle as bb  # noqa: PLC0415
+    finally:
+        sys.path.pop(0)
+    return f"redevops-qa-bundle-{bb.runner_version(root)}-{bb.TARGET['python_tag']}-{bb.TARGET['platform']}"
+
+
+def expected_bundle_steps(name: str, python: str) -> Dict[str, List[List[str]]]:
+    """Every step of a bundle profile, exactly. A bundle profile has no free-form commands: what a user is told to run is what CI runs, and it is this."""
+    q = "{install_dir}/bin/redevops-qa"
+    return {
+        "source": [[python, "-I", "-c", CODE_ARCHIVE_DIGEST, "{bundle_dir}/" + name + ".tar", "{bundle_dir}/" + name + ".tar.sha256"], ["tar", "xf", "{bundle_dir}/" + name + ".tar"]],
+        "install": [[name + "/install.sh", "--prefix", "{install_dir}", "--python", python], [name + "/install-browser.sh", "--prefix", "{install_dir}", "--with-deps"]],
+        "smoke": [[q, "doctor"], [q, "demo", "--out", "{evidence_dir}", "--run-id", "profile-demo"]],
+        "check": [[q, "verify", "{evidence_dir}/profile-demo"]],
+        "uninstall": [[name + "/uninstall.sh", "--prefix", "{install_dir}"]],
+    }
+
+
+def bundle_problems(profile: Dict[str, Any], root: Path, workflow: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    at = f"profile {profile['id']}"
+    sys.path.insert(0, str(HERE))
+    try:
+        import build_bundle as bb  # noqa: PLC0415
+    finally:
+        sys.path.pop(0)
+    if profile["python"]["version"] != bb.TARGET["python"]:
+        out.append(f"{at}: the bundle is for Python {bb.TARGET['python']}, the profile says {profile['python']['version']}")
+    if sorted(profile["engines"]) != ["playwright", "robotframework"]:
+        out.append(f"{at}: a bundle profile covers exactly the engines of the bundle (playwright, robotframework)")
+    if profile.get("verifier") is not True:
+        out.append(f"{at}: a bundle profile installs and runs the verifier (verifier: true)")
+    if profile["pip_pins"] or profile["packages"]:
+        out.append(f"{at}: a bundle profile pins nothing itself: the pins are the bundle's lock (pip_pins and packages are empty)")
+    if profile["evidence"]["files"] or profile["evidence"]["manual_files"]:
+        out.append(f"{at}: a bundle profile's evidence is the evidence bundle of the demo, not JUnit files")
+    want_params = {"bundle_dir": ("abs-path", True), "install_dir": ("abs-path", True), "evidence_dir": ("dir-path", False)}
+    got_params = {n: (s["kind"], s["required"]) for n, s in profile["params"].items()}
+    if got_params != want_params:
+        out.append(f"{at}: the parameters must be exactly {want_params}")
+    name = bundle_name(root)
+    want = expected_bundle_steps(name, profile["python"]["executable"])
+    for phase in gen.PHASES:
+        got = [s["argv"] for s in profile["steps"][phase]]
+        if got != want[phase]:
+            out.append(f"{at}: the {phase} steps must be exactly {[gen.display(a)[:80] for a in want[phase]]}")
+        for s in profile["steps"][phase]:
+            if s.get("env") or s.get("manual"):
+                out.append(f"{at} {phase} step {s['id']}: no environment and no manual step in a bundle profile")
+    for h in profile["hosts"]:
+        if h["os_arch"] != "linux-x86_64" and h["status"] != "planned":
+            out.append(f"{at} host {h['os_arch']}: the bundle is for linux-x86_64 only; another host can only be planned")
+    if not any(h["os_arch"] == "linux-x86_64" for h in profile["hosts"]):
+        out.append(f"{at}: the profile needs a linux-x86_64 host")
+    # CI runs every step, verbatim, from the bundle a job of the same workflow built
+    for h in profile["hosts"]:
+        if h["status"] == "planned":
+            continue
+        hat = f"{at} host {h['os_arch']}"
+        job = workflow["jobs"].get(f"profile-{profile['id']}")
+        if job is None:
+            out.append(f"{hat}: the workflow has no job profile-{profile['id']} that runs the profile")
+            continue
+        text = caps._job_text(job)
+        if "tools/run_install_profile.py" not in text or f"--profile {profile['id']}" not in text or f"--host {h['os_arch']}" not in text:
+            out.append(f"{hat}: the job does not run tools/run_install_profile.py --profile {profile['id']} --host {h['os_arch']}")
+        channel = "stable" if h["status"] == "verified" else "experimental"
+        if f"--channel {channel}" not in text:
+            out.append(f"{hat}: a {h['status']} host is run on --channel {channel}")
+        for phase in ("source", "install", "smoke", "check", "uninstall"):
+            if phase not in text:
+                out.append(f"{hat}: the job does not run the {phase} phase")
+        if "source,install,smoke,check" not in text or "--phases uninstall" not in text:
+            out.append(f"{hat}: the job must run the phases source,install,smoke,check and then, in its own step, uninstall")
+        if job.get("runs-on") != "ubuntu-24.04" or RUNNERS.get(job.get("runs-on")) != h["os_arch"]:
+            out.append(f"{hat}: the job runs on {job.get('runs-on')}")
+        if job.get("needs") != "bundle" or not any(str(s.get("with", {}).get("name")) == "qa-bundle-current" for s in job["steps"]):
+            out.append(f"{hat}: the job must start from the bundle the bundle job kept (needs: bundle, artifact qa-bundle-current)")
+        if {"if", "continue-on-error", "strategy"} & set(job) or [s for s in job["steps"] if "if" in s or "continue-on-error" in s]:
+            out.append(f"{hat}: the job must have no condition, no continue-on-error and no matrix")
+        if not any(str(s.get("with", {}).get("python-version")) == profile["python"]["version"] for s in job["steps"]):
+            out.append(f"{hat}: the job does not set up Python {profile['python']['version']}")
+        if JOB_MARK not in str(job.get("name", "")):
+            out.append(f"{hat}: the job name must say it is {JOB_MARK}")
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ the profiles
 def _pins_toml_tags(root: Path) -> Dict[str, List[str]]:
     import tomllib
@@ -150,9 +245,13 @@ def semantic_problems(profiles: Dict[str, Any], capabilities: Dict[str, Any], ro
                     and ".pinned" not in p.relative_to(root).parts and PLANNED_TARGET_FILES[tname].match(p.name)]
             if hits:
                 out.append(f"target {tname} is planned but the repository now has {hits[:3]}; test it, then offer it")
+    if profiles["verifier"]["supported"] != any(p.get("verifier") and p["status"] != "planned" for p in profiles["profiles"]):
+        out.append("verifier: supported must be true exactly when a profile that is not planned has verifier: true")
     ids, sets = set(), {}
     for p in profiles["profiles"]:
         at = f"profile {p['id']}"
+        if p.get("verifier") and p.get("kind") != "bundle":
+            out.append(f"{at}: only a bundle profile installs the verifier")
         if p["id"] in ids:
             out.append(f"{at}: duplicate id")
         ids.add(p["id"])
@@ -185,6 +284,19 @@ def semantic_problems(profiles: Dict[str, Any], capabilities: Dict[str, Any], ro
                     out.append(f"{at}: verified, but engine {e} has test level {cap.get(e, {}).get('test_level')} in the capability manifest")
         if p["python"]["executable"] != "python" + p["python"]["version"]:
             out.append(f"{at}: python executable must be python{p['python']['version']}")
+        if p.get("kind") == "bundle":
+            for name, spec in p["params"].items():
+                if name not in gen.PARAM_FIELDS:
+                    out.append(f"{at}: parameter {name} is not a generator field")
+                if spec["default"] is not None and not gen.valid_path(spec["default"], spec["kind"]):
+                    out.append(f"{at}: default of {name} is not a valid {spec['kind']}")
+                if spec["required"] == (spec["default"] is not None):
+                    out.append(f"{at}: parameter {name} is required exactly when it has no default")
+            out += bundle_problems(p, root, workflow)
+            for h in p["hosts"]:
+                if h["status"] == "verified":
+                    out.append(f"{at} host {h['os_arch']}: a bundle profile is verified only once a run on main is recorded and this checker learns to check it; not supported yet")
+            continue
         # pins against the capability manifest and the package metadata
         pinned = {x["name"].lower(): x["version"] for x in p["pip_pins"]}
         for e in p["engines"]:
@@ -311,14 +423,17 @@ def render_docs(profiles: Dict[str, Any]) -> str:
     L: List[str] = [GENERATED_NOTICE, "", "# ReDevOps QA: install profiles", ""]
     src = profiles["source"]
     L += ["This page is generated from [`qa-install-profiles.json`](../qa-install-profiles.json), the data the installer configurator is built from. "
-          f"Every profile installs from a clone of {src['url'].removesuffix('.git')} at the pinned commit `{src['pinned_commit']}`; {src['note']}", "",
+          f"Every profile but `local-python-qa` installs from a clone of {src['url'].removesuffix('.git')} at the pinned commit `{src['pinned_commit']}`; {src['note']} "
+          "The profile `local-python-qa` installs from a bundle archive instead (see its section).", "",
           "A profile is **verified** only when a CI job runs that exact profile, step by step, on the host named; **experimental** means the steps are written and "
           "partly or not at all run for that host; **planned** means nothing is offered yet and the reason is given.", "",
           "## Targets", "", "| Target | Status | Reason |", "|---|---|---|"]
     for name in gen.TARGETS:
         t = profiles["targets"][name]
         L.append(f"| {name} | {t['status']} | {caps._cell(t['disabled_reason'] or '')} |")
-    L += ["", f"Independent verifier: not offered. {profiles['verifier']['reason']}", "", "## Profiles", "",
+    v = profiles["verifier"]
+    L += ["", ("Re-verification in a separate process: offered by " + ", ".join(f"`{p['id']}`" for p in profiles["profiles"] if p.get("verifier") and p["status"] != "planned") + " only. " if v["supported"]
+               else "Re-verification in a separate process: not offered. ") + v["reason"], "", "## Profiles", "",
           "| Profile | Engines | Status | Hosts |", "|---|---|---|---|"]
     for p in profiles["profiles"]:
         hosts = "; ".join(f"{h['os_arch']} ({h['status']})" for h in p["hosts"]) or "none"
@@ -328,7 +443,7 @@ def render_docs(profiles: Dict[str, Any]) -> str:
         if p["status"] == "planned":
             L += ["", f"Not offered: {p['disabled_reason']}"]
             continue
-        L += ["", f"Python {p['python']['version']} (`{p['python']['executable']}`); pinned pip packages: " + ", ".join(f"`{x['name']}=={x['version']}`" for x in p["pip_pins"]) + ".",
+        L += ["", f"Python {p['python']['version']} (`{p['python']['executable']}`); pinned pip packages: " + (", ".join(f"`{x['name']}=={x['version']}`" for x in p["pip_pins"]) if p["pip_pins"] else "none of its own (every wheel is pinned by hash in the bundle's requirements.lock)") + ".",
               "", "Prerequisites:", ""] + [f"* {x}" for x in p["prerequisites"]]
         L += ["", "Hosts:", "", "| Host | Status | Prerequisites | Verified by |", "|---|---|---|---|"]
         for h in p["hosts"]:
@@ -343,7 +458,7 @@ def render_docs(profiles: Dict[str, Any]) -> str:
                 L.append(f"# {s['title']}" + (" (manual: not run by CI)" if s.get("manual") else ""))
                 L.append(gen.display(_fill(s["argv"], p, src["pinned_commit"]), {k: v for k, v in s.get("env", {}).items()}))
             L.append("```")
-        L += ["", f"Evidence: {p['evidence']['description']} Files: " + ", ".join(f"`{f}`" for f in p["evidence"]["files"] + p["evidence"]["manual_files"]) + ".",
+        L += ["", f"Evidence: {p['evidence']['description']}" + (" Files: " + ", ".join(f"`{f}`" for f in p["evidence"]["files"] + p["evidence"]["manual_files"]) + "." if p["evidence"]["files"] + p["evidence"]["manual_files"] else ""),
               "", f"Uninstall: {p['uninstall_note']}", "", "Limitations:", ""] + [f"* {x}" for x in p["limitations"]]
     return "\n".join(L).rstrip("\n") + "\n"
 
