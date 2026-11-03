@@ -141,6 +141,24 @@ def test_the_selenium_offline_job_installs_no_selenium_and_the_browser_job_never
     assert not any("repository" in s.get("with", {}) for s in steps)
 
 
+def test_the_selenium_jobs_keep_their_evidence_when_they_fail_and_warm_chrome_before_the_first_test_start():
+    lane = WF["jobs"]["selenium-browser"]["steps"]
+    run = "\n".join(str(s.get("run", "")) for s in lane)
+    assert "-q -ra --durations=0 -m browser packages/qa-selenium/tests/browser" in run and "QA_SELENIUM_LOG_DIR=" in run
+    uploads = {s["with"]["name"]: s for s in lane if str(s.get("uses", "")).startswith("actions/upload-artifact@")}
+    assert uploads["junit-selenium-browser"]["if"] == "always()" and uploads["selenium-browser-logs"]["if"] == "failure()"
+    assert all(u["with"]["retention-days"] == 14 for u in uploads.values())
+    assert "chrome processes still running" in run and any(s.get("if") == "always()" and "chrome processes" in str(s.get("run", "")) for s in lane)
+    profile = WF["jobs"]["profile-local-python-selenium"]["steps"]
+    for steps, test_step in ((lane, "Run the browser lane"), (profile, "Run the profile")):
+        names = [str(s.get("name", "")) for s in steps]
+        warm = next(i for i, n in enumerate(names) if n.startswith("Pre-warm Chrome"))
+        assert warm < next(i for i, n in enumerate(names) if n.startswith(test_step))
+        text = str(steps[warm]["run"])
+        assert "timeout 300" in text and "--dump-dom about:blank" in text and "if" not in steps[warm]       # time limited, informational, never conditional
+    assert WF["permissions"] == {"contents": "read"} and "secrets." not in TEXT.replace("secrets.GITHUB_TOKEN", "")
+
+
 def test_the_robot_offline_job_installs_no_robot_and_the_real_job_never_skips():
     offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["robot-offline"]["steps"])
     assert "robotframework==" not in offline and "packages/qa-robot/tests" in offline and "tools/check_junit.py" in offline
