@@ -348,6 +348,8 @@ for _ in range(2000):
 
 def a_detached_rewriter():
     """A process in a session of its own that waits for the lane child to write its outcome and then rewrites it: a pass, no refusals, a log with no refusal in it."""
+    if not W.get("rewriter"):
+        return {"reached": False, "skipped": "not run without the layers: nothing there to protect the record, and the rewriting would only corrupt the control's own files"}
     subprocess.Popen([sys.executable, "-I", "-c", REWRITER, W["out_dir"]], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {"reached": False}
 

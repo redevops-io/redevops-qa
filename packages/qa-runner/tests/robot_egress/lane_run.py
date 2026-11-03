@@ -50,7 +50,7 @@ def run_hostile(tmp: Path, world: World, *, profile: str, layers: str = "-", rac
         shutil.copy(HERE / "hostile_suite" / name, suite / name)
     results_path = tmp / "results.json"
     (suite / "world.json").write_text(json.dumps({"ports": world.ports, "allowed_port": world.allowed_port, "unix_stream_path": world.unix_stream_path, "unix_dgram_path": world.unix_dgram_path, "unix_dgram_pair_path": world.unix_dgram_pair_path,
-                                                  "results_path": str(results_path), "race_attempts": race_attempts, "out_dir": str(tmp / "work" / "lanes" / "robot" / "out")}), encoding="utf-8")
+                                                  "results_path": str(results_path), "race_attempts": race_attempts, "out_dir": str(tmp / "work" / "lanes" / "robot" / "out"), "rewriter": profile == "origin-only"}), encoding="utf-8")
     digests = {n: "sha256:" + hashlib.sha256((suite / n).read_bytes()).hexdigest() for n in (*FILES, "world.json")}
     origin = f"http://127.0.0.1:{world.allowed_port}"
     work = tmp / "work"
