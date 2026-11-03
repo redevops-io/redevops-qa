@@ -329,3 +329,8 @@ def test_a_manifest_that_drops_the_staging_caveat_or_the_node_note_is_found(copy
     resum(copy)
     found = [f for f in cb.check_bundle(copy, allow_test_target=True) if f.code == "LICENCES"]
     assert any("Node.js runtime" in f.message for f in found)
+
+def test_the_readme_says_what_uninstall_needs_and_what_it_refuses():
+    text = (ROOT / "bundle" / "README.md").read_text(encoding="utf-8")
+    assert "needs a Python (`python3.12` or `python3`) on `PATH`" in text
+    assert "moved, or is reached through another mount path, is refused" in text and "remove such a directory by hand" in text

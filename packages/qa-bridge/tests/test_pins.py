@@ -345,6 +345,7 @@ def test_an_installed_bridge_finds_the_pins_file_under_its_prefix(tmp_path, monk
     _checkout, prefix, installed_module, _ = _layout(tmp_path)
     monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
     monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(pins_mod, "_purelib", lambda: (Path(prefix) / "lib" / "python3.12" / "site-packages").resolve())
     assert pins_mod.find_pins_file(installed_module).read_text() == "installed"
 
 
@@ -359,6 +360,7 @@ def test_an_installed_bridge_prefers_its_own_pins_file_to_a_checkout_that_lies_a
     module.write_text("")
     monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
     monkeypatch.setattr(sys, "prefix", str(venv))
+    monkeypatch.setattr(pins_mod, "_purelib", lambda: (Path(venv) / "lib" / "python3.12" / "site-packages").resolve())
     assert pins_mod.find_pins_file(module).read_text() == "installed"
 
 
@@ -367,6 +369,7 @@ def test_a_checkout_still_finds_its_own_pins_file_even_when_the_interpreter_has_
     _checkout, prefix, _, checkout_module = _layout(tmp_path)
     monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
     monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(pins_mod, "_purelib", lambda: (Path(prefix) / "lib" / "python3.12" / "site-packages").resolve())
     assert pins_mod.find_pins_file(checkout_module).read_text() == "checkout"
 
 
@@ -375,6 +378,7 @@ def test_without_an_installed_file_the_search_walks_up_as_before_and_the_environ
     checkout, _prefix, _, checkout_module = _layout(tmp_path)
     monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "empty-prefix"))
+    monkeypatch.setattr(pins_mod, "_purelib", lambda: (Path(tmp_path / "empty-prefix") / "lib" / "python3.12" / "site-packages").resolve())
     assert pins_mod.installed_pins_file() is None and pins_mod.find_pins_file(checkout_module).read_text() == "checkout"
     other = tmp_path / "other.toml"
     monkeypatch.setenv(pins_mod.PINS_FILE_ENV, str(other))
@@ -391,7 +395,34 @@ def test_an_installed_bridge_whose_pins_file_is_missing_fails_closed_and_does_no
     (venv / "pins.toml").write_text("a stray file in the prefix directory")
     monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
     monkeypatch.setattr(sys, "prefix", str(venv))
+    monkeypatch.setattr(pins_mod, "_purelib", lambda: (Path(venv) / "lib" / "python3.12" / "site-packages").resolve())
     with pytest.raises(PinsInvalid, match="share/redevops-qa/pins.toml is missing"):
         pins_mod.find_pins_file(module)
     monkeypatch.setenv(pins_mod.PINS_FILE_ENV, str(tmp_path / "chosen.toml"))
     assert pins_mod.find_pins_file(module) == tmp_path / "chosen.toml"                  # an explicit choice is still an explicit choice
+
+
+def test_a_checkout_below_the_prefix_of_a_system_python_is_not_an_installation(tmp_path, monkeypatch):
+    """Debian-style system Python: sys.prefix is /usr, packages are installed in /usr/lib/python3/dist-packages, and a checkout in /usr/src is just a checkout."""
+    import sys
+    prefix = tmp_path / "usr"
+    checkout = prefix / "src" / "rq"
+    (checkout / "packages" / "x").mkdir(parents=True)
+    (checkout / "pins.toml").write_text("checkout")
+    module = checkout / "packages" / "x" / "pins.py"
+    module.write_text("")
+    monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(pins_mod, "_purelib", lambda: (prefix / "lib" / "python3" / "dist-packages").resolve())
+    assert pins_mod.find_pins_file(module).read_text() == "checkout"
+    # the same interpreter, a bridge installed in its own package directory with no installed pins.toml: still a failure, not a walk up to the checkout's file
+    installed = prefix / "lib" / "python3" / "dist-packages" / "redevops_qa_bridge" / "pins.py"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("")
+    with pytest.raises(PinsInvalid, match="is missing"):
+        pins_mod.find_pins_file(installed)
+
+
+def test_purelib_is_the_interpreters_own_package_directory():
+    import sysconfig
+    assert pins_mod._purelib() == Path(sysconfig.get_path("purelib")).resolve()
