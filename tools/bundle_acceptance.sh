@@ -87,8 +87,9 @@ tamper_case() { # tamper_case NAME EXPECTED_CODE EXPECTED_PATH_FRAGMENT APPLY_CO
 tamper_case "one byte changed (same size)" CHANGED "chrome-linux64/ABOUT" 'python3 -I -c "import sys; f=open(sys.argv[1],\"r+b\"); b=f.read(1); f.seek(0); f.write(bytes([b[0]^1])); f.close()" "$victim"' 'cp -p "$WORK/victim.orig" "$victim"'
 tamper_case "a byte appended (size changed)" SIZE "chrome-linux64/ABOUT" 'printf x >> "$victim"' 'cp -p "$WORK/victim.orig" "$victim"'
 tamper_case "a changed file mode" MODE "chrome-linux64/chrome" 'chmod 0777 "$exe"' 'chmod 0755 "$exe"'
-tamper_case "an extra file" EXTRA "chrome-linux64/extra.so" 'printf x > "$(dirname "$exe")/extra.so"' 'rm -f "$(dirname "$exe")/extra.so"'
-tamper_case "a missing file" MISSING "chrome-linux64/ABOUT" 'rm -f "$victim"' 'cp -p "$WORK/victim.orig" "$victim"'
+extra="$(dirname "$exe")/extra.so"
+tamper_case "an extra file" EXTRA "chrome-linux64/extra.so" 'printf x > "$extra"' 'mv -f "$extra" "$WORK/extra.removed"'
+tamper_case "a missing file" MISSING "chrome-linux64/ABOUT" 'mv -f "$victim" "$WORK/victim.moved"' 'mv -f "$WORK/victim.moved" "$victim"'
 need '[ "$(cat "$victim")" = "$(cat "$WORK/victim.orig")" ]' "the tampered file was not restored"
 rm -rf "$WORK"/robot-evidence-*
 

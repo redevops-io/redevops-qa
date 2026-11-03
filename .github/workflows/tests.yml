@@ -461,7 +461,7 @@ jobs:
       - name: Run the bundle and workflow tests in a scrubbed environment
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
-            python -m pytest -q tests/test_bundle_builder.py tests/test_bundle_install.py tests/test_bundle_pinned.py tests/test_bundle_workflow.py tests/test_demo_outcome.py tests/test_readme_layout.py tests/test_workflow.py \
+            python -m pytest -q tests/test_bundle_builder.py tests/test_bundle_install.py tests/test_bundle_pinned.py tests/test_bundle_browser.py tests/test_bundle_browser_lock.py tests/test_bundle_workflow.py tests/test_demo_outcome.py tests/test_readme_layout.py tests/test_workflow.py \
               --junitxml="$RUNNER_TEMP/junit-bundle-tests.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-bundle-tests.xml"
@@ -551,9 +551,11 @@ jobs:
           retention-days: 14
 
   bundle-install:
-    name: bundle install on a clean runner (the README commands unchanged, doctor, demo, rollback, uninstall, directory clean; a tampered wheel, a wrong lock, another Python and another platform are refused)
+    name: bundle install on a clean runner (the README commands unchanged, the real Chromium checked against its pin, doctor, demo, a tampered browser refused, rollback, uninstall, directory clean; a tampered wheel, a wrong lock, another Python and another platform are refused)
     # A fresh ubuntu-24.04 machine that has not built anything: it downloads the archives the bundle job kept and runs tools/bundle_acceptance.sh, which takes the commands from the bundle's own README
-    # and runs them as written. The browser step downloads Chromium (not part of the bundle). Read-only, no secret.
+    # and runs them as written. The browser step downloads Chromium (not part of the bundle) and checks the archives and the unpacked tree against bundle/browser.lock.json: the log of this job holds the observed sha256 of each archive
+    # and the doctor line that says the installed tree is the pinned one; the script then tampers with the installed browser (a byte, a size, a mode, an extra file, a missing file) and shows that doctor fails, that
+    # demo refuses to start the browser lane and that a plan with only a Robot lane still runs. Read-only, no secret.
     runs-on: ubuntu-24.04
     needs: bundle
     steps:
