@@ -377,3 +377,84 @@ def test_run_starts_a_browser_only_plan_whatever_the_robot_paths_are_and_refuses
     for engines in ({K.ENGINE_ROBOT}, {K.ENGINE_PLAYWRIGHT, K.ENGINE_ROBOT}):
         reached, code, _out, err = reaches_run_plan(monkeypatch, tmp_path, "run", str(plan_file(tmp_path, engines)), "--out", str(tmp_path / ("evidence" + "-".join(sorted(engines)))))
         assert reached == [] and code == 3 and "Nothing was started" in err and f"the temporary working directory of a run (from TMPDIR) is {refused_tmp}/redevops-qa-<random> (a path component named .config" in err, engines
+
+
+# ------------------------------------------------------------------------------------------------------------------- the third-party licence and notice texts
+def add_notices(prefix: Path, files=None, record_digest=True):
+    """THIRD_PARTY_NOTICES under the prefix's share directory with an INDEX.json, and (like install.sh) an INSTALL.json beside the prefix that records the index digest."""
+    tree = prefix / "share" / "redevops-qa" / "THIRD_PARTY_NOTICES"
+    files = files or {"README.md": b"notices\n", "wheels/lib-1/lib-1.dist-info/licenses/LICENSE": b"MIT text\n"}
+    for rel, data in files.items():
+        (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tree / rel).write_bytes(data)
+    index = json.dumps({"schema": "redevops-qa/third-party-notices-index", "version": 1, "files": [{"path": k, "sha256": hashlib.sha256(v).hexdigest(), "size": len(v)} for k, v in sorted(files.items())]}).encode()
+    (tree / "INDEX.json").write_bytes(index)
+    if record_digest:
+        (prefix.parent / "INSTALL.json").write_text(json.dumps({"third_party_notices_index_sha256": hashlib.sha256(index).hexdigest()}))
+    return tree
+
+
+def test_the_notices_check_is_part_of_doctor_and_says_a_checkout_is_not_a_bundle_install(tmp_path):
+    assert doctor.check_third_party_notices in [c for c in (doctor.check_python, doctor.check_pinned_files, doctor.check_third_party_notices)]
+    c = doctor.check_third_party_notices(str(tmp_path))
+    assert c.status == "OK" and "not a bundle install" in c.detail
+    import inspect
+    assert "check_third_party_notices" in inspect.getsource(doctor.run_doctor)
+
+
+def test_installed_notices_that_are_the_shipped_ones_pass_and_the_detail_says_what_is_covered(tmp_path):
+    prefix = make_prefix(tmp_path)
+    add_notices(prefix)
+    c = doctor.check_third_party_notices(str(prefix))
+    assert c.status == "OK" and "2 licence and notice files" in c.detail and "matches the digest recorded at install time" in c.detail
+
+
+def test_a_bundle_install_without_the_notices_tree_fails(tmp_path):
+    c = doctor.check_third_party_notices(str(make_prefix(tmp_path)))
+    assert c.status == "FAIL" and "has no INDEX.json" in c.detail and "are not installed" in c.detail and "reinstall" in c.remedy
+
+
+def test_an_edited_removed_or_added_notice_file_fails_by_name(tmp_path):
+    prefix = make_prefix(tmp_path)
+    tree = add_notices(prefix)
+    (tree / "README.md").write_bytes(b"edited\n")
+    c = doctor.check_third_party_notices(str(prefix))
+    assert c.status == "FAIL" and "changed ['README.md']" in c.detail
+    (tree / "README.md").write_bytes(b"notices\n")
+    (tree / "wheels/lib-1/lib-1.dist-info/licenses/LICENSE").unlink()
+    assert "missing ['wheels/lib-1/lib-1.dist-info/licenses/LICENSE']" in doctor.check_third_party_notices(str(prefix)).detail
+    (tree / "wheels/lib-1/lib-1.dist-info/licenses/LICENSE").write_bytes(b"MIT text\n")
+    (tree / "extra.txt").write_bytes(b"x")
+    assert "added ['extra.txt']" in doctor.check_third_party_notices(str(prefix)).detail
+
+
+def test_an_index_that_is_not_the_one_recorded_at_install_time_fails_and_an_unreadable_one_fails(tmp_path):
+    prefix = make_prefix(tmp_path)
+    tree = add_notices(prefix)
+    files = {"README.md": b"notices\n"}                                       # an index rewritten together with the tree: the install-time digest no longer matches
+    (tree / "INDEX.json").write_text(json.dumps({"files": [{"path": "README.md", "sha256": hashlib.sha256(b"notices\n").hexdigest(), "size": 8}]}))
+    (tree / "wheels/lib-1/lib-1.dist-info/licenses/LICENSE").unlink()
+    c = doctor.check_third_party_notices(str(prefix))
+    assert c.status == "FAIL" and "not the one recorded when the bundle was installed" in c.detail
+    (tree / "INDEX.json").write_text("{")
+    assert doctor.check_third_party_notices(str(prefix)).status == "FAIL"
+
+
+def test_an_install_whose_install_json_lacks_the_notices_index_digest_fails_whatever_the_files_say(tmp_path):
+    prefix = make_prefix(tmp_path)
+    add_notices(prefix, record_digest=False)                                   # the notices are consistent with their INDEX.json, only the install-time digest is missing
+    c = doctor.check_third_party_notices(str(prefix))
+    assert c.status == "FAIL" and "does not record the digest" in c.detail and "reinstall" in c.remedy
+    (prefix.parent / "INSTALL.json").write_text(json.dumps({"third_party_notices_index_sha256": ""}))
+    assert doctor.check_third_party_notices(str(prefix)).status == "FAIL"        # a field that is present and empty does not count
+    (prefix.parent / "INSTALL.json").write_text("{")
+    assert doctor.check_third_party_notices(str(prefix)).status == "FAIL"        # nor does an unreadable file
+    add_notices(prefix)
+    assert doctor.check_third_party_notices(str(prefix)).status == "OK"
+
+
+def test_doctor_runs_both_the_browser_build_check_and_the_notices_check_in_a_bundle_install():
+    import inspect
+    src = inspect.getsource(doctor.run_doctor)
+    assert "check_third_party_notices" in src and "check_browser_pin" in src
+    assert doctor.check_third_party_notices(None).name == "third-party notices"

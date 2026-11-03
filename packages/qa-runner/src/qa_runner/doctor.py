@@ -199,6 +199,50 @@ def check_pinned_files(prefix: Optional[str] = None) -> Check:
     return Check("pinned files", "OK", f"{len(actual)} files of the pinned trees are the ones the bundle shipped (LICENSE and pyproject.toml included); bytecode and files outside the pinned trees are not covered")
 
 
+NOTICES_DIR = "THIRD_PARTY_NOTICES"          # beside pins.toml in a bundle install: the licence and notice texts of the third-party software, with an INDEX.json that lists each file's sha256
+
+
+def check_third_party_notices(prefix: Optional[str] = None) -> Check:
+    """In a bundle install the licence and notice texts of the shipped third-party software are present and are the ones the bundle shipped: INDEX.json lists every file with its sha256, every
+    listed file is there and unchanged, nothing was added, and INDEX.json is the one whose digest BUNDLE.json gave at install time, recorded in INSTALL.json (an installation that ships notices but whose INSTALL.json lacks the digest FAILS). Outside a bundle
+    install there is nothing to compare with. Not covered: a change that also rewrites INSTALL.json, and anything outside the tree."""
+    share = _share(prefix)
+    if not (share / "pins.toml").is_file():
+        return Check("third-party notices", "OK", "not a bundle install (no share/redevops-qa/pins.toml under this Python's prefix): there is no installed copy of THIRD_PARTY_NOTICES to compare")
+    tree = share / NOTICES_DIR
+    remedy = "reinstall the bundle into a new directory"
+    index_path = tree / "INDEX.json"
+    if not index_path.is_file():
+        return Check("third-party notices", "FAIL", f"{tree} has no INDEX.json: the licence and notice texts of the third-party software are not installed", remedy)
+    try:
+        listed = {e["path"]: e["sha256"] for e in json.loads(index_path.read_text(encoding="utf-8"))["files"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return Check("third-party notices", "FAIL", "THIRD_PARTY_NOTICES/INDEX.json cannot be read", remedy)
+    install_json = Path(prefix or sys.prefix).parent / "INSTALL.json"        # <installation>/INSTALL.json, beside the virtual environment <installation>/venv
+    pinned = ""
+    if install_json.is_file():
+        try:
+            pinned = str(json.loads(install_json.read_text(encoding="utf-8")).get("third_party_notices_index_sha256", ""))
+        except (OSError, ValueError):
+            pinned = ""
+    problems = []
+    if not pinned:
+        problems.append("INSTALL.json does not record the digest of THIRD_PARTY_NOTICES/INDEX.json (an installation made by this bundle's install.sh does), so a consistent forgery of the notices and of INDEX.json cannot be told from the shipped ones")
+    elif hashlib.sha256(index_path.read_bytes()).hexdigest() != pinned:
+        problems.append("INDEX.json is not the one recorded when the bundle was installed")
+    actual = {p.relative_to(tree).as_posix(): p for p in tree.rglob("*") if p.is_file() and p.relative_to(tree).as_posix() != "INDEX.json"}
+    changed = sorted(k for k in set(listed) & set(actual) if hashlib.sha256(actual[k].read_bytes()).hexdigest() != listed[k])       # the sha256 decides; a size comparison would add nothing to it (INDEX.json carries sizes for readers, check_bundle compares them)
+    added, missing = sorted(set(actual) - set(listed)), sorted(set(listed) - set(actual))
+    if not listed:
+        problems.append("INDEX.json lists no file")
+    for label, names in (("changed", changed), ("added", added), ("missing", missing)):
+        if names:
+            problems.append(f"{label} {names[:3]}")
+    if problems:
+        return Check("third-party notices", "FAIL", "the licence and notice texts differ from what the bundle shipped: " + "; ".join(problems), remedy)
+    return Check("third-party notices", "OK", f"{len(listed)} licence and notice files are the ones the bundle shipped; INDEX.json matches the digest recorded at install time (a change that also rewrites INSTALL.json is not covered)")
+
+
 def _version(dist: str) -> Optional[str]:
     try:
         return importlib.metadata.version(dist)
@@ -372,7 +416,7 @@ def check_workdir() -> Check:
 
 
 def run_doctor(engines: Sequence[str] = (K.ENGINE_PLAYWRIGHT,), *, include: Optional[Sequence[Callable[[], Check]]] = None) -> List[Check]:
-    checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, lambda: check_path_policy(robot=K.ENGINE_ROBOT in engines), check_first_party_modules, check_pins, check_pinned_files]
+    checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, lambda: check_path_policy(robot=K.ENGINE_ROBOT in engines), check_first_party_modules, check_pins, check_pinned_files, check_third_party_notices]
     if K.ENGINE_PLAYWRIGHT in engines:
         # The browser is checked against the pin first and is only launched if that check did not fail: launching a tree that differs from the pin would run the changed files.
         verdict: Dict[str, Check] = {}

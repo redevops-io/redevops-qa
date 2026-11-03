@@ -11,7 +11,9 @@ Checked: the file set against SHA256SUMS (every file listed once, nothing unlist
 wheels with digests, the browser record, the licence statements); requirements.lock (every wheel exactly once, ``name==version`` as in its file name, a ``--hash`` that is
 the file's sha256, no other requirement); the wheels themselves (a METADATA whose name and version are the file name's; no wheel outside the manifest); the pinned-upstreams
 wheel (pins.toml byte for byte, the pinned trees under .pinned next to it, a copy of browser.lock.json); browser.lock.json (well formed, the BUNDLE.json record made from it, the lock of
-the Playwright wheel in the bundle: version, browsers.json digest, Chromium revision); the text of README.md and BUNDLE.json against a list of claims this release does not make.
+the Playwright wheel in the bundle: version, browsers.json digest, Chromium revision); the THIRD_PARTY_NOTICES tree (an INDEX.json that lists exactly the files of the tree with their sha256 and size, the digest of
+the INDEX recorded in BUNDLE.json, a notices wheel that holds the same files byte for byte, and every file that says it comes from a shipped wheel equal to that wheel's member); the text of README.md and
+BUNDLE.json against a list of claims this release does not make.
 """
 from __future__ import annotations
 
@@ -25,12 +27,14 @@ from typing import Dict, List, NamedTuple, Optional, Sequence
 
 REQUIRED_FILES = ("BUNDLE.json", "README.md", "SHA256SUMS", "requirements.lock", "install.sh", "install-browser.sh", "uninstall.sh", "browser.lock.json")
 PINNED_DIST = "redevops_qa_pinned_upstreams"
+NOTICES_DIR = "THIRD_PARTY_NOTICES"
+NOTICES_DIST = "redevops_qa_third_party_notices"
 FAMILY_LICENCE_FILES = ("LICENSE.md", "LICENSE", "LICENSE-COMMONS-CLAUSE")
 #: text a bundle must never carry (case-insensitive): a command that names the other project on the package index, and claims that are not made
 FORBIDDEN = ("pip install agent-harness", "pip install agent_harness", "tamper-proof", "tamper proof", "tamperproof", "reproducible build", "bit-for-bit", "soc 2", "soc2", "cis benchmark",
-             "audited", "qa demo site")
+             "audited", "qa demo site", "is cleared", "are cleared", "licence cleared", "license cleared", "approved for distribution", "approved for public")
 #: phrases that must be there
-REQUIRED_TEXT = ("AGPL-3.0-or-later with the Commons Clause", "not open source", "plain AGPL-3.0-or-later", "downloaded", "browser.lock.json", "Not covered", "Node.js", "private staging only")
+REQUIRED_TEXT = ("AGPL-3.0-or-later with the Commons Clause", "not open source", "plain AGPL-3.0-or-later", "downloaded", "browser.lock.json", "Not covered", "Node.js", "private staging only", "THIRD_PARTY_NOTICES", "owner decision")
 
 
 class Finding(NamedTuple):
@@ -114,6 +118,8 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
         out.append(Finding("LICENCES", "BUNDLE.json", "the licence record says the third-party wheels are private staging only and that public distribution requires an owner decision"))
     if any(w.get("name") == "playwright" for w in manifest.get("wheels") or []):
         note = str((lic.get("third_party_notes") or {}).get("playwright", ""))
+        if "proxy-agent-negotiate" not in note or "no licence text" not in note:
+            out.append(Finding("LICENCES", "BUNDLE.json", "the licence record names the package without a licence text (proxy-agent-negotiate: no licence text), as the owner's condition requires"))
         if "Node.js" not in note or "npm" not in note:
             out.append(Finding("LICENCES", "BUNDLE.json", "the Playwright wheel contains a Node.js runtime and inlined npm packages; the licence record must say so"))
     # --- wheels and the lock
@@ -175,8 +181,8 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
         out.append(Finding("LOCK_EXTRA", "requirements.lock", f"{key} has no wheel in the manifest"))
     if not allow_test_target:
         kinds = {w.get("kind") for w in entries}
-        if not {"first-party", "pinned-upstreams", "third-party"} <= kinds:
-            out.append(Finding("WHEEL_KINDS", "BUNDLE.json", "a release bundle holds first-party, pinned-upstreams and third-party wheels"))
+        if not {"first-party", "pinned-upstreams", "third-party", "notices"} <= kinds:
+            out.append(Finding("WHEEL_KINDS", "BUNDLE.json", "a release bundle holds first-party, pinned-upstreams, third-party and notices wheels"))
         pinned = [w for w in entries if w.get("kind") == "pinned-upstreams"]
         pins = manifest.get("pins") or {}
         if len(pinned) != 1 or not pins:
@@ -185,6 +191,10 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
             out += _check_pinned_wheel(root / "wheelhouse" / pinned[0]["filename"], pins, (root / "browser.lock.json").read_bytes())
     if not allow_test_target and not any(_wheel_nv(w.get("filename", "")) and _wheel_nv(w["filename"])[0] == "redevops-qa-adapter-kit" for w in entries):
         out.append(Finding("PATH_POLICY_SOURCE", "BUNDLE.json", "install.sh reads the adapter path policy from the adapter kit wheel of the bundle; a release bundle holds it"))
+    # --- the licence and notice texts
+    notices_wheels = [w for w in entries if w.get("kind") == "notices"]
+    if not allow_test_target or manifest.get("third_party_notices") or (root / NOTICES_DIR).exists() or notices_wheels:
+        out += _check_notices(root, manifest, entries, notices_wheels)
     # --- text
     text_files = {f: (root / f).read_text(encoding="utf-8", errors="replace") for f in ("README.md", "BUNDLE.json")}
     for f, text in text_files.items():
@@ -198,6 +208,78 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
     for phrase in REQUIRED_TEXT:
         if phrase not in readme:
             out.append(Finding("README_MISSING_TEXT", "README.md", f"must say {phrase!r}"))
+    return out
+
+
+def _check_notices(root: Path, manifest: dict, entries: List[dict], notices_wheels: List[dict]) -> List[Finding]:
+    """The THIRD_PARTY_NOTICES tree of the bundle: present, listed by its INDEX.json file for file (sha256 and size), the INDEX recorded in BUNDLE.json by digest, the notices wheel (the installed copy)
+    holding the same files byte for byte, and each file that claims a shipped wheel as its origin equal to that wheel's member."""
+    out: List[Finding] = []
+    tree = root / NOTICES_DIR
+    rec = manifest.get("third_party_notices")
+    if not isinstance(rec, dict) or rec.get("directory") != NOTICES_DIR:
+        out.append(Finding("NOTICES", "BUNDLE.json", f"third_party_notices must record the directory {NOTICES_DIR}, the digest of its INDEX.json and its file count"))
+        rec = {}
+    if not tree.is_dir() or not (tree / "INDEX.json").is_file():
+        return out + [Finding("NOTICES", NOTICES_DIR, "the bundle has no THIRD_PARTY_NOTICES directory with an INDEX.json")]
+    try:
+        index = json.loads((tree / "INDEX.json").read_text(encoding="utf-8"))
+        listed = {e["path"]: e for e in index["files"]}
+    except (ValueError, KeyError, TypeError):
+        return out + [Finding("NOTICES", f"{NOTICES_DIR}/INDEX.json", "not an index: {'files': [{'path', 'sha256', 'size', ...}]}")]
+    files = {p.relative_to(tree).as_posix(): p for p in tree.rglob("*") if p.is_file()}
+    if rec.get("index_sha256") != _sha256(tree / "INDEX.json"):
+        out.append(Finding("NOTICES", "BUNDLE.json", "third_party_notices.index_sha256 is not the digest of THIRD_PARTY_NOTICES/INDEX.json"))
+    if rec.get("files") != len(files):
+        out.append(Finding("NOTICES", "BUNDLE.json", f"third_party_notices.files is {rec.get('files')}, the tree holds {len(files)} files"))
+    if index.get("schema") != "redevops-qa/third-party-notices-index":
+        out.append(Finding("NOTICES", f"{NOTICES_DIR}/INDEX.json", "schema must be redevops-qa/third-party-notices-index"))
+    for rel in sorted(set(files) - set(listed) - {"INDEX.json"}):
+        out.append(Finding("NOTICES", f"{NOTICES_DIR}/{rel}", "a file of the tree that INDEX.json does not list"))
+    for rel in sorted(set(listed) - set(files)):
+        out.append(Finding("NOTICES", f"{NOTICES_DIR}/{rel}", "listed in INDEX.json but not in the tree"))
+    for rel in sorted(set(listed) & set(files)):
+        if _sha256(files[rel]) != listed[rel].get("sha256") or files[rel].stat().st_size != listed[rel].get("size"):
+            out.append(Finding("NOTICES", f"{NOTICES_DIR}/{rel}", "the file does not have the sha256 and size INDEX.json lists"))
+        if files[rel].stat().st_size == 0:
+            out.append(Finding("NOTICES", f"{NOTICES_DIR}/{rel}", "an empty notice file"))
+    # the installed copy
+    if len(notices_wheels) != 1:
+        out.append(Finding("NOTICES", "BUNDLE.json", f"exactly one wheel of kind 'notices' is expected (it installs share/redevops-qa/{NOTICES_DIR}); found {len(notices_wheels)}"))
+    else:
+        path = root / "wheelhouse" / notices_wheels[0].get("filename", "")
+        try:
+            with zipfile.ZipFile(path) as zf:
+                prefix = [n for n in zf.namelist() if f".data/data/share/redevops-qa/{NOTICES_DIR}/" in n]
+                base = prefix[0][: prefix[0].index(f"{NOTICES_DIR}/") + len(NOTICES_DIR) + 1] if prefix else ""
+                inside = {n[len(base):]: zf.read(n) for n in prefix}
+                if set(inside) != set(files):
+                    out.append(Finding("NOTICES", path.name, f"the installed copy and the tree differ in their files: {sorted(set(inside) ^ set(files))[:3]}"))
+                for rel in sorted(set(inside) & set(files)):
+                    if inside[rel] != files[rel].read_bytes():
+                        out.append(Finding("NOTICES", path.name, f"{rel} of the installed copy is not the file of the tree"))
+        except (zipfile.BadZipFile, OSError):
+            out.append(Finding("WHEEL_BAD", path.name, "not a readable wheel"))
+    # each file that comes from a shipped wheel is that wheel's member
+    wheels_by_key = {}
+    for w in entries:
+        nv = _wheel_nv(w.get("filename", ""))
+        if nv and w.get("kind") == "third-party":
+            wheels_by_key[nv] = root / "wheelhouse" / w["filename"]
+    for rel, entry in sorted(listed.items()):
+        origin = entry.get("origin") or {}
+        if origin.get("kind") != "wheel" or rel not in files:
+            continue
+        wheel = wheels_by_key.get((_canon(str(origin.get("wheel", ""))), str(origin.get("version", ""))))
+        if wheel is None or not wheel.is_file():
+            out.append(Finding("NOTICES", f"{NOTICES_DIR}/{rel}", f"its origin is the wheel {origin.get('wheel')} {origin.get('version')}, which is not a third-party wheel of this bundle"))
+            continue
+        try:
+            with zipfile.ZipFile(wheel) as zf:
+                if origin.get("member") not in zf.namelist() or zf.read(origin["member"]) != files[rel].read_bytes():
+                    out.append(Finding("NOTICES", f"{NOTICES_DIR}/{rel}", f"is not byte for byte {origin.get('member')} of {wheel.name}"))
+        except zipfile.BadZipFile:
+            pass                                    # reported as WHEEL_BAD above
     return out
 
 
