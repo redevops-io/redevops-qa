@@ -781,6 +781,158 @@ def test_re_checking_the_recorded_runs():
     assert "cannot read run" in joined(chk.verify_ci_problems(m, repo_name, Api(m, error=True)))
 
 
+# ------------------------------------------------------------------------------------------------ the log of a recorded run (opt in)
+def log_for(vb, *, sha=None, counts=None, checkout=True):
+    """A job log shaped like the real one: the checkout line (printed by the install step and again by the uninstall step) and one pytest summary per suite."""
+    sha = sha or vb["source_commit"]
+    counts = counts if counts is not None else [int(x) for x in chk.SUMMARY_COUNTS.search(vb["summary"]).group(1).split(" + ")]
+    lines = ["2026-11-03T20:22:50.0000000Z ##[group]Run python tools/run_install_profile.py"]
+    if checkout:
+        lines.append(f"2026-11-03T20:22:54.9296431Z checkout verified: HEAD is the pinned commit {sha}, clean tree")
+    lines += [f"2026-11-03T20:23:1{i}.8464763Z {n} passed in 8.86s" for i, n in enumerate(counts)]
+    if checkout:
+        lines.append(f"2026-11-03T20:23:46.6420489Z checkout verified: HEAD is the pinned commit {sha}, clean tree")
+    return "\n".join(lines) + "\n"
+
+
+class Logs:
+    def __init__(self, m, **kw):
+        self.by_job = {vb["job_id"]: log_for(vb, **kw) for p in m["profiles"] for h in p["hosts"] for vb in [h["verified_by"]] if vb}
+        self.error = False
+
+    def __call__(self, url):
+        if self.error:
+            raise OSError("expired")
+        return self.by_job[int(url.split("/jobs/")[1].split("/")[0])]
+
+
+def recorded_runs():
+    m = fresh()
+    assert [vb for p in m["profiles"] for h in p["hosts"] for vb in [h["verified_by"]] if vb], "the repository records at least one run"
+    return m
+
+
+def test_a_recorded_run_whose_log_confirms_the_commit_and_the_counts_is_accepted_and_reported_as_confirmed():
+    m = recorded_runs()
+    problems, confirmed = chk.verify_ci_report(m, "o/r", Api(m), Logs(m), head_on_main=lambda sha: False)
+    assert problems == [] and confirmed == {(p["id"], h["os_arch"]) for p in m["profiles"] for h in p["hosts"] if h["verified_by"]}
+
+
+def test_a_log_that_shows_another_installed_commit_is_refused():
+    m = recorded_runs()
+    problems, confirmed = chk.verify_ci_report(m, "o/r", Api(m), Logs(m, sha="5e9c8da6248f9c4e170b77ab4ff202b519c970a8"), head_on_main=lambda sha: False)
+    assert problems and confirmed == set()                              # a refused log never opens the freshness exception
+    assert "installed " + "5e9c8da" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, sha="5e9c8da6248f9c4e170b77ab4ff202b519c970a8")))
+
+
+def test_the_old_record_that_names_the_new_pin_for_the_old_runs_numbers_is_refused():
+    m = recorded_runs()
+    for p in m["profiles"]:
+        for h in p["hosts"]:
+            if h["verified_by"]:
+                h["verified_by"]["summary"] = h["verified_by"]["summary"].replace("369 + 154 + 12", "359 + 135 + 11").replace("369 + 188 + 13", "359 + 133 + 10")
+    old_logs = Logs(m, sha="5e9c8da6248f9c4e170b77ab4ff202b519c970a8")      # what the run of 2026-11-01 printed
+    found = joined(chk.verify_ci_problems(m, "o/r", Api(m), old_logs))
+    assert "installed 5e9c8da6248f9c4e170b77ab4ff202b519c970a8, the record says " + m["source"]["pinned_commit"] in found
+
+
+def test_logged_counts_that_differ_from_the_recorded_ones_are_refused():
+    m = recorded_runs()
+    assert "passed tests, the record says" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, counts=[1, 2, 3])))
+    assert "shows no passed tests" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, counts=[])))
+
+
+def test_a_log_without_the_checkout_line_is_refused():
+    m = recorded_runs()
+    assert "cannot be confirmed" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, checkout=False)))
+
+
+def test_a_summary_without_counts_is_refused():
+    m = recorded_runs()
+    for p in m["profiles"]:
+        for h in p["hosts"]:
+            if h["verified_by"]:
+                h["verified_by"]["summary"] = "it passed"
+    logs = Logs(recorded_runs())
+    assert "does not state the passed counts" in joined(chk.verify_ci_problems(m, "o/r", Api(m), logs))
+
+
+def test_an_unreadable_log_fails_closed_for_a_head_that_is_not_on_main_and_is_tolerated_for_one_that_is():
+    m = recorded_runs()
+    logs = Logs(m)
+    logs.error = True
+    assert "failing closed" in joined(chk.verify_ci_problems(m, "o/r", Api(m), logs, head_on_main=lambda sha: False))
+    assert chk.verify_ci_problems(m, "o/r", Api(m), logs, head_on_main=lambda sha: True) == []
+    assert "failing closed" in joined(chk.verify_ci_problems(m, "o/r", Api(m), None, head_on_main=lambda sha: False))
+    problems, confirmed = chk.verify_ci_report(m, "o/r", Api(m), logs, head_on_main=lambda sha: True)
+    assert confirmed == set()                                           # tolerated is not confirmed: it never opens the exception for a head that is off main
+
+
+def test_a_log_that_disagrees_is_refused_even_when_the_head_is_on_main():
+    m = recorded_runs()
+    assert joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, counts=[1]), head_on_main=lambda sha: True))
+
+
+def test_a_head_that_is_only_an_ancestor_of_the_commit_under_test_is_fresh_only_when_its_log_confirmed_it(repo):
+    root, on_main, off = repo
+    git(root, "checkout", "-q", "side")                                   # HEAD is on a branch that is not main; off is HEAD, an ancestor of itself
+    m = with_commits(on_main, off)
+    key = ("local-python-robot", profile(m, "local-python-robot")["hosts"][0]["os_arch"])
+    assert "not an ancestor of main" in joined(chk.freshness_problems(m, root, main_ref="main"))
+    assert "--verify-ci" in joined(chk.freshness_problems(m, root, main_ref="main"))
+    assert chk.freshness_problems(m, root, main_ref="main", head_ok=frozenset({key})) == []
+    assert "not an ancestor of main" in joined(chk.freshness_problems(m, root, main_ref="main", head_ok=frozenset({("other", "linux-x86_64")})))
+
+
+def test_a_head_that_is_in_neither_history_stays_refused_even_when_confirmed(repo):
+    root, on_main, off = repo                                             # HEAD is main (on_main); off is on the side branch only
+    m = with_commits(on_main, off)
+    key = ("local-python-robot", profile(m, "local-python-robot")["hosts"][0]["os_arch"])
+    found = joined(chk.freshness_problems(m, root, main_ref="main", head_ok=frozenset({key})))
+    assert "not an ancestor of main" in found and "--verify-ci" not in found
+
+
+def test_the_pinned_commit_never_gets_the_exception(repo):
+    root, on_main, off = repo
+    git(root, "checkout", "-q", "side")
+    m = with_commits(off)                                                  # the pin is only on the side branch
+    everything = frozenset((p["id"], h["os_arch"]) for p in m["profiles"] for h in p["hosts"])
+    assert "source pinned_commit" in joined(chk.freshness_problems(m, root, main_ref="main", head_ok=everything))
+
+
+def test_the_log_is_read_through_the_redirect_without_sending_the_credential(monkeypatch):
+    import http.server
+    import threading
+    seen = {}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            seen[self.path] = self.headers.get("Authorization")
+            if self.path == "/api/logs":
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{self.server.server_address[1]}/blob")
+                self.end_headers()
+                return
+            body = b"log text"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+    server = http.server.HTTPServer(("127.0.0.1", 0), H)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    monkeypatch.setenv("GH_TOKEN", "x" * 8)
+    try:
+        assert chk.api_get_log(f"http://127.0.0.1:{server.server_address[1]}/api/logs") == "log text"
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert seen["/api/logs"] == "Bearer " + "x" * 8 and seen["/blob"] is None
+
+
 # ------------------------------------------------------------------------------------------------ the runner
 def make_checkout(tmp_path):
     co = tmp_path / "co"

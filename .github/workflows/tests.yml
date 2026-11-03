@@ -1326,10 +1326,15 @@ jobs:
             --phases uninstall --param bundle_dir="$RUNNER_TEMP/current"
 
   install-profiles:
-    name: "install profiles (data, steps, pins, status, generator vectors, generated document; offline; never skipped)"
-    # Runs on every push and pull request, with no path filter, no condition and no dependency on another job. Offline, read-only, no secret. It needs the
-    # full history (every pinned or recorded commit must be an ancestor of main). The full jsonschema package only cross-checks the strict validator.
+    name: "install profiles (data, steps, pins, status, generator vectors, generated document, recorded runs and their logs; never skipped)"
+    # Runs on every push and pull request, with no path filter, no condition and no dependency on another job. Read-only, no secret of ours: the workflow's own
+    # built-in credential, with the read permission for workflow runs, lets the check read the recorded runs and the logs of their jobs (what a run installed and
+    # how many tests passed). It needs the full history (every pinned or recorded commit must be an ancestor of main, or of this commit while a run of this branch is recorded).
+    # The full jsonschema package only cross-checks the strict validator.
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1340,8 +1345,10 @@ jobs:
           python-version: "3.12"
       - name: Install test tools and the cross-check validator
         run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "jsonschema==4.26.0"
-      - name: Check the profiles (schema, steps, pins, status, document, freshness against main) and cross-check the validator
-        run: env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 python tools/check_install_profiles.py --cross-check
+      - name: Check the profiles (schema, steps, pins, status, document, freshness against main, recorded runs and their logs) and cross-check the validator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 GH_TOKEN="$GH_TOKEN" python tools/check_install_profiles.py --cross-check --verify-ci
       - name: Run the profile, generator and vector tests in a scrubbed environment
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
