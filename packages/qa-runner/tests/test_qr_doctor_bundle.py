@@ -411,7 +411,7 @@ def test_installed_notices_that_are_the_shipped_ones_pass_and_the_detail_says_wh
 
 def test_a_bundle_install_without_the_notices_tree_fails(tmp_path):
     c = doctor.check_third_party_notices(str(make_prefix(tmp_path)))
-    assert c.status == "FAIL" and "INDEX.json" in c.detail and "reinstall" in c.remedy
+    assert c.status == "FAIL" and "has no INDEX.json" in c.detail and "are not installed" in c.detail and "reinstall" in c.remedy
 
 
 def test_an_edited_removed_or_added_notice_file_fails_by_name(tmp_path):
