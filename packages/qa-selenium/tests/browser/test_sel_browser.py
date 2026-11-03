@@ -49,10 +49,10 @@ def real_driver(chrome_paths, name="driver"):
                                 extra_args=("--enable-logging=stderr",))
 
 
-def session(tmp_path, chrome_paths, site, **cfg):
+def session(tmp_path, chrome_paths, site, wait_s=3, **cfg):
     out = tmp_path / "out"
     out.mkdir(exist_ok=True)
-    adapter = SeleniumInteractiveAdapter(lambda: real_driver(chrome_paths, "session"), config=AdapterConfig(allowed_hosts=frozenset({site}), wait_s=3, **cfg),
+    adapter = SeleniumInteractiveAdapter(lambda: real_driver(chrome_paths, "session"), config=AdapterConfig(allowed_hosts=frozenset({site}), wait_s=wait_s, **cfg),
                                          manifest=interactive_manifest(limits=Limits(deadline_s=90, max_steps=20, max_retries=1)))
     return InteractiveSession(adapter, output_dir=out), adapter
 
@@ -96,14 +96,16 @@ def test_open_type_click_read_and_check_against_a_real_page(tmp_path, chrome_pat
         s.close()
 
 
-def test_the_real_browser_starts_under_its_own_launch_budget_and_the_first_action_keeps_a_short_timeout(tmp_path, chrome_paths, site):
-    s, adapter = session(tmp_path, chrome_paths, site)
+def test_the_real_browser_starts_under_its_own_launch_budget_and_the_first_action_then_runs(tmp_path, chrome_paths, site):
+    # Whether a short action timeout is enough once the browser runs is proven offline (test_sel_launch.py). Here the page load gets the generous
+    # waits, so that a start that took tens of seconds on a very slow runner cannot make this test fail on a page load that is slow for the same reason.
+    s, adapter = session(tmp_path, chrome_paths, site, wait_s=20)
     try:
         began = time.monotonic()
         adapter.start()                                                  # the cold start: its own budget (launch_timeout_s), no action timer
         started_in = time.monotonic() - began
         assert started_in < adapter.config.launch_timeout_s and adapter._driver is not None
-        r = s.perform(act(0, "open", f"http://{site}/", timeout_s=5))    # a short action timeout is enough once the browser is running
+        r = s.perform(act(0, "open", f"http://{site}/"))
         assert r.status is Status.PASS, (facts(r), started_in)
     finally:
         s.close()

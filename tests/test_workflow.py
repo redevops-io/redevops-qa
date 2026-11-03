@@ -147,6 +147,7 @@ def test_the_selenium_jobs_keep_their_evidence_when_they_fail_and_warm_chrome_be
     assert "-q -ra --durations=0 -m browser packages/qa-selenium/tests/browser" in run and "QA_SELENIUM_LOG_DIR=" in run
     uploads = {s["with"]["name"]: s for s in lane if str(s.get("uses", "")).startswith("actions/upload-artifact@")}
     assert uploads["junit-selenium-browser"]["if"] == "always()" and uploads["selenium-browser-logs"]["if"] == "failure()"
+    assert all(u["with"]["retention-days"] == 14 for u in uploads.values())
     assert "chrome processes still running" in run and any(s.get("if") == "always()" and "chrome processes" in str(s.get("run", "")) for s in lane)
     profile = WF["jobs"]["profile-local-python-selenium"]["steps"]
     for steps, test_step in ((lane, "Run the browser lane"), (profile, "Run the profile")):

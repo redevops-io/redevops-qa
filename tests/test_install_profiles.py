@@ -545,6 +545,47 @@ def test_a_job_with_the_experimental_channel_a_condition_or_no_required_check_wa
     assert "no condition" in joined(job_problems(workflow_mutation=tolerant_upload))
 
 
+@pytest.mark.parametrize("condition", ["always() && false", "failure()", "${{ always() }}", "always() || true", "success()", "ALWAYS()", "", True, None])
+def test_only_the_exact_text_always_qualifies_an_evidence_upload(condition):
+    step = {"uses": "actions/upload-artifact@v4", "with": {"name": "x", "path": "y"}}
+    if condition is not None:
+        step["if"] = condition
+    assert chk.keeps_evidence(step) is False
+
+
+@pytest.mark.parametrize("step", [
+    {"uses": "actions/checkout@v4", "if": "always()"},
+    {"uses": "evil/actions/upload-artifact@v4", "if": "always()"},
+    {"run": "echo hi", "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "run": "echo hi", "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "shell": "bash", "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "continue-on-error": True, "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "continue-on-error": False, "if": "always()"},
+])
+def test_a_step_that_is_not_a_plain_upload_never_qualifies_even_with_always(step):
+    assert chk.keeps_evidence(step) is False
+
+
+def test_a_plain_upload_with_always_qualifies():
+    assert chk.keeps_evidence({"uses": "actions/upload-artifact@v4", "if": "always()", "with": {"name": "x"}}) is True
+
+
+def test_the_job_check_refuses_the_look_alike_conditions_on_an_evidence_upload():
+    for condition in ("always() && false", "failure()", "${{ always() }}"):
+        def look_alike(job, wf, condition=condition):
+            next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = condition
+        assert "no condition" in joined(job_problems(workflow_mutation=look_alike)), condition
+
+    def non_upload(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-python"))["if"] = "always()"
+    assert "no condition" in joined(job_problems(workflow_mutation=non_upload))
+
+
+def test_the_selenium_profile_evidence_upload_still_fails_when_its_path_is_missing_and_expires():
+    uploads = [s for s in WORKFLOW["jobs"]["profile-local-python-selenium"]["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact")]
+    assert len(uploads) == 1 and uploads[0]["with"]["if-no-files-found"] == "error" and uploads[0]["with"]["retention-days"] == 14
+
+
 def test_the_evidence_upload_of_a_profile_job_may_run_always_so_that_a_failed_run_keeps_its_evidence():
     def upload_always(job, wf):
         next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = "always()"

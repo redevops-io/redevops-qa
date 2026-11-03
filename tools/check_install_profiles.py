@@ -149,7 +149,11 @@ def expected_bundle_steps(name: str, python: str) -> Dict[str, List[List[str]]]:
 
 def keeps_evidence(step: Dict[str, Any]) -> bool:
     """The one condition a profile job may carry: an artifact upload that runs ``always()``, so the evidence of a failed run is kept.
-    A profile step (anything that runs the profile) is never conditional, and an upload does not change whether the job fails."""
+    A profile step (anything that runs the profile) is never conditional, and an upload does not change whether the job fails.
+    Exactly the text ``always()`` qualifies (no ``&&``, no ``${{ }}``, no other status function), and a step that runs anything or tolerates its own
+    failure never does."""
+    if step.get("continue-on-error") is not None or "run" in step or "shell" in step:
+        return False
     return str(step.get("uses", "")).startswith("actions/upload-artifact@") and str(step.get("if", "")).strip() == "always()"
 
 

@@ -79,6 +79,7 @@ class _Launch:
         self.done = threading.Event()
         self.exc: Optional[BaseException] = None
         self.cancelled = False
+        self.stored = False               # the adapter took ownership of the browser this launch produced
 
 
 def _quit(drv: BrowserDriver) -> None:
@@ -98,7 +99,14 @@ class SeleniumInteractiveAdapter:
     per-action ``timeout_s`` (default 10 s) still bounds it: give that action a ``timeout_s`` of at least the time a start needs.
     ``close()`` and ``abort()`` cancel a start that has not finished: the browser is quit the moment the launch returns, so a start
     that an action timeout abandoned does not leave a browser behind. (The start itself cannot be interrupted from outside; it is
-    bounded by the driver's own start-up limits.) There is no retry of a start that timed out."""
+    bounded by the driver's own start-up limits.) There is no retry of a start that timed out.
+
+    After a start has timed out the adapter is terminal until ``close()``: the late browser is quit when its launch returns, every
+    further ``start()`` or action raises a ``TIMEOUT`` fault without starting a second browser, and ``close()`` (which a session
+    calls when an action times out, and which the owner of the adapter calls otherwise) makes it usable again. A start that returns
+    in the very instant the budget runs out counts as a success, and its browser is kept. An exception that is not an ``Exception``
+    (``KeyboardInterrupt``, ``SystemExit``) raised by the factory propagates unchanged to the caller, as it did when the factory ran
+    on the caller's own thread."""
 
     def __init__(self, driver_factory: Callable[[], BrowserDriver], *, config: Optional[AdapterConfig] = None,
                  manifest: Optional[AdapterManifest] = None):
@@ -107,6 +115,7 @@ class SeleniumInteractiveAdapter:
         self._factory = driver_factory
         self._driver: Optional[BrowserDriver] = None
         self._launch: Optional[_Launch] = None
+        self._timed_out = False
         self._lock = threading.Lock()
 
     def start(self) -> None:
@@ -130,6 +139,7 @@ class SeleniumInteractiveAdapter:
             keep = not launch.cancelled
             if keep:
                 self._driver = drv
+                launch.stored = True
         if not keep:
             _quit(drv)                    # abandoned while it was starting: nobody owns this browser, so it is not left running
         launch.done.set()
@@ -138,13 +148,23 @@ class SeleniumInteractiveAdapter:
         with self._lock:
             if self._driver is not None:
                 return self._driver
+            if self._timed_out:
+                raise AdapterFault("an earlier start of the browser timed out; close() the adapter before starting it again", retryable=False,
+                                   code=ErrorCode.TIMEOUT)
             launch = self._launch
             if launch is None:
                 launch = self._launch = _Launch()
                 threading.Thread(target=self._run_launch, args=(launch,), daemon=True, name="qa-selenium-launch").start()
         if not launch.done.wait(self.config.launch_timeout_s):
-            self._cancel(launch)
-            raise AdapterFault("the browser did not start within the launch budget", retryable=False, code=ErrorCode.TIMEOUT)
+            with self._lock:
+                finished = launch.stored or launch.exc is not None      # the launch returned in the instant the budget ran out: its result stands
+                if not finished:
+                    launch.cancelled = True
+                    if self._launch is launch:
+                        self._launch = None
+                    self._timed_out = True
+            if not finished:
+                raise AdapterFault("the browser did not start within the launch budget", retryable=False, code=ErrorCode.TIMEOUT)
         with self._lock:
             if self._launch is launch:
                 self._launch = None
@@ -153,15 +173,9 @@ class SeleniumInteractiveAdapter:
             exc = launch.exc
         if exc is None:
             raise AdapterFault("the adapter was closed while the browser was starting", retryable=False, code=ErrorCode.INVALID_REQUEST)
-        if isinstance(exc, AdapterUnavailable):
+        if isinstance(exc, AdapterUnavailable) or not isinstance(exc, Exception):
             raise exc
         raise _fault(exc) from None
-
-    def _cancel(self, launch: _Launch) -> None:
-        with self._lock:
-            launch.cancelled = True
-            if self._launch is launch:
-                self._launch = None
 
     def perform(self, request: InteractiveActionRequest, layout: InteractiveLayout) -> ActionOutcome:
         wait = min(request.timeout_s, self.config.wait_s)
@@ -242,6 +256,7 @@ class SeleniumInteractiveAdapter:
         with self._lock:
             drv, self._driver = self._driver, None
             launch, self._launch = self._launch, None
+            self._timed_out = False
             if launch is not None:
                 launch.cancelled = True       # a start that has not finished quits its browser when it does
         if drv is not None:

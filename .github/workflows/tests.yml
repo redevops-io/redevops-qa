@@ -988,8 +988,9 @@ jobs:
         run: test -z "$(git status --porcelain)"
       - name: Pre-warm Chrome (one throwaway headless start, so the first start inside a test is not a cold one; never fails the job)
         run: |
-          # Measured on this runner image: without it the first Chrome start of a job took a median of about 7.5 s and often more than 10 s; with it, about 1.6 s.
-          # It reads Chrome's files into the page cache. It has a time limit and its outcome is only printed: a Chrome that cannot start fails the tests, not this step.
+          # Measured in CI on this runner image: the median first Chrome start of a job was 7.5 to 7.6 s without this step and 1.5 s with it (60 jobs each); why is not established.
+          # It runs under the runner's own HOME, while the tests run under a fresh one, so only what lives outside HOME can be shared.
+          # It has a time limit and its outcome is only printed: a Chrome that cannot start fails the tests, not this step.
           started=$SECONDS
           timeout 300 "$QA_CHROME_BINARY" --headless=new --no-first-run --disable-gpu --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null 2>&1 \
             && echo "pre-warm: done in $((SECONDS - started)) s" || echo "pre-warm: did not finish cleanly after $((SECONDS - started)) s (exit $?)"
@@ -1007,6 +1008,7 @@ jobs:
           name: junit-selenium-browser
           path: ${{ runner.temp }}/junit-selenium-browser.xml
           if-no-files-found: warn
+          retention-days: 14
       - name: Keep the ChromeDriver and Chrome logs of a failed run
         if: failure()
         uses: actions/upload-artifact@v4
@@ -1014,6 +1016,7 @@ jobs:
           name: selenium-browser-logs
           path: ${{ runner.temp }}/selenium-logs
           if-no-files-found: ignore
+          retention-days: 14
       - name: Show the runner state and any Chrome process still running (diagnostic; never fails the job)
         if: always()
         run: |
@@ -1207,8 +1210,9 @@ jobs:
           echo "QA_CHROMEDRIVER_PATH=$driver" >> "$GITHUB_ENV"
       - name: Pre-warm Chrome (one throwaway headless start, so the first start inside a test is not a cold one; never fails the job)
         run: |
-          # Measured on this runner image: without it the first Chrome start of a job took a median of about 7.5 s and often more than 10 s; with it, about 1.6 s.
-          # It reads Chrome's files into the page cache. It has a time limit and its outcome is only printed: a Chrome that cannot start fails the tests, not this step.
+          # Measured in CI on this runner image: the median first Chrome start of a job was 7.5 to 7.6 s without this step and 1.5 s with it (60 jobs each); why is not established.
+          # It runs under the runner's own HOME, while the tests run under a fresh one, so only what lives outside HOME can be shared.
+          # It has a time limit and its outcome is only printed: a Chrome that cannot start fails the tests, not this step.
           started=$SECONDS
           timeout 300 "$QA_CHROME_BINARY" --headless=new --no-first-run --disable-gpu --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null 2>&1 \
             && echo "pre-warm: done in $((SECONDS - started)) s" || echo "pre-warm: did not finish cleanly after $((SECONDS - started)) s (exit $?)"
@@ -1223,7 +1227,8 @@ jobs:
         with:
           name: evidence-local-python-selenium
           path: ${{ runner.temp }}/profile-work/evidence
-          if-no-files-found: warn
+          if-no-files-found: error
+          retention-days: 14
       - name: Uninstall (the profile's uninstall phase; the virtual environment must be gone)
         run: |
           python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
