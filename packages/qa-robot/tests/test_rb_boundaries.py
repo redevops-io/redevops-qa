@@ -72,11 +72,12 @@ def test_the_licence_check_accepts_the_repository_with_this_package():
     assert chk.run(ROOT / "third_party" / "adapter-license-matrix.yaml", ROOT) == []
 
 
-def test_the_matrix_records_robot_as_shipped_unmodified_for_private_staging_only_with_unverified_bundled_assets():
+def test_the_matrix_records_robot_as_shipped_unmodified_for_private_staging_only_with_the_assets_without_a_licence_text_unverified():
     assert ROBOT["redistribution"]["status"] == "staged_unmodified" and ROBOT["redistribution"]["public_distribution"] == "owner_decision_required"
     assert "PRIVATE STAGING ONLY" in ROBOT["redistribution"]["reason"]
     unverified = [d for d in ROBOT["bundled_deps"] if d["spdx"] == "unverified"]
-    assert len(unverified) == 3 and all("robot/htmldata/" in d["name"] for d in unverified)
+    assert len(unverified) == 7 and all("robot/" in d["name"] for d in unverified) and any("tablesorter" in d["name"] for d in unverified)       # the other assets are identified, with their licence text shipped
+    assert ROBOT["redistribution"]["public_distribution_blockers"] == ["rf-asserts-unittest", "rf-highlighting-burgaud", "rf-htmldog-tabs", "rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
 
 
 def test_the_default_allowlist_matches_the_documented_one():

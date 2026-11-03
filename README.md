@@ -24,7 +24,7 @@ verdict. Details per package are in the READMEs below; vulnerability reporting i
 From a pinned bundle (CPython 3.12 on Linux x86_64 only; nothing is published, so you build it from a checkout or take the archive of a workflow run): the steps, the checks the install makes
 and what it does not check are in [bundle/README.md](bundle/README.md); `python tools/build_bundle.py build --out DIR` builds it. The installer profile `local-python-qa`
 ([docs/QA_INSTALL_PROFILES.md](docs/QA_INSTALL_PROFILES.md)) lists the same steps as data and is run by CI. A real run, with its output, is in [docs/QA_DEMO.md](docs/QA_DEMO.md).
-Chromium is downloaded by the bundle's separate browser step; the bundle records the build it expects and does not hash it. macOS and Windows are not claimed.
+Chromium is downloaded by the bundle's separate browser step and checked against `bundle/browser.lock.json`: the sha256 of the three archives before they are unpacked, then every file and mode of the unpacked tree (in a bundle installation `doctor` and `run` repeat the tree check; a source checkout has no pin and no check); the operating system libraries and the availability of the download host are outside that check. macOS and Windows are not claimed.
 
 ## Layout
 Packages (under `packages/`): `qa-runner`, `qa-playwright`, `qa-evidence`, `qa-bridge`, `qa-egress`, `qa-adapter-kit`, `qa-selenium`, `qa-robot`, `qa-appium`, `qa-checks`, `qa-fixture-app`.

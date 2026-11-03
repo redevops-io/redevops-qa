@@ -151,11 +151,11 @@
                   "redevops-qa",
                   "checkout",
                   "--detach",
-                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                  "55c746e35412a92a287ebbbc239a69de0fbebf10"
                 ],
                 "env": {},
                 "manual": false,
-                "display": "git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                "display": "git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10"
               }
             ],
             "install": [
@@ -374,7 +374,7 @@
             },
             "source": {
               "repository": "redevops-io/redevops-qa",
-              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              "commit": "55c746e35412a92a287ebbbc239a69de0fbebf10"
             },
             "engines": [
               {
@@ -398,7 +398,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:cbf2b37badbb035ab7b5e8883d4b6ba9bdf88f9d84f56b7123ea2d80730ba027"
+          "manifest_digest": "sha256:e90308d13a2eaea532e6bb50a1c44b2695f27f073ef6277f2da3356560685b27"
         }
       }
     },
@@ -462,11 +462,11 @@
                   "src.redevops-qa",
                   "checkout",
                   "--detach",
-                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                  "55c746e35412a92a287ebbbc239a69de0fbebf10"
                 ],
                 "env": {},
                 "manual": false,
-                "display": "git -C src.redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                "display": "git -C src.redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10"
               }
             ],
             "install": [
@@ -685,7 +685,7 @@
             },
             "source": {
               "repository": "redevops-io/redevops-qa",
-              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              "commit": "55c746e35412a92a287ebbbc239a69de0fbebf10"
             },
             "engines": [
               {
@@ -709,7 +709,7 @@
               "venv_dir": "/work/qa-venv"
             }
           },
-          "manifest_digest": "sha256:c84eaa707562e82949862a6d67d8a0fd4a797a8fea2c9bbc4923b467554a401d"
+          "manifest_digest": "sha256:76a85f41e206ef5b8eceab721c082aff6d90531b32be65abddb1faa0d87bf159"
         }
       }
     },
@@ -774,11 +774,11 @@
                   "redevops-qa",
                   "checkout",
                   "--detach",
-                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                  "55c746e35412a92a287ebbbc239a69de0fbebf10"
                 ],
                 "env": {},
                 "manual": false,
-                "display": "git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                "display": "git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10"
               }
             ],
             "install": [
@@ -1000,7 +1000,7 @@
             },
             "source": {
               "repository": "redevops-io/redevops-qa",
-              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              "commit": "55c746e35412a92a287ebbbc239a69de0fbebf10"
             },
             "engines": [
               {
@@ -1026,7 +1026,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:5d3fe05f42a89c73d110d8ee1950c47e11c781f74f39ac591d4b08b4d64973d7"
+          "manifest_digest": "sha256:5f5bbe2fc12ca25928090b9fe96f8a9d9b7e748230024d7e13313f32ed00c017"
         }
       }
     },
@@ -1089,11 +1089,11 @@
                   "redevops-qa",
                   "checkout",
                   "--detach",
-                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                  "55c746e35412a92a287ebbbc239a69de0fbebf10"
                 ],
                 "env": {},
                 "manual": false,
-                "display": "git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                "display": "git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10"
               }
             ],
             "install": [
@@ -1312,7 +1312,7 @@
             },
             "source": {
               "repository": "redevops-io/redevops-qa",
-              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              "commit": "55c746e35412a92a287ebbbc239a69de0fbebf10"
             },
             "engines": [
               {
@@ -1336,7 +1336,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:0c048eab9b67548c69baef36ecbbd3ea5cc0027fd20c18d12248e1e99d9ff8bf"
+          "manifest_digest": "sha256:260e33c7907fd3e2aaf5f56f9490811ded601dc3424cfbb4f599ecb53719c836"
         }
       }
     },
@@ -1399,11 +1399,11 @@
                   "redevops-qa",
                   "checkout",
                   "--detach",
-                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                  "55c746e35412a92a287ebbbc239a69de0fbebf10"
                 ],
                 "env": {},
                 "manual": false,
-                "display": "git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                "display": "git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10"
               }
             ],
             "install": [
@@ -1622,7 +1622,7 @@
             },
             "source": {
               "repository": "redevops-io/redevops-qa",
-              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              "commit": "55c746e35412a92a287ebbbc239a69de0fbebf10"
             },
             "engines": [
               {
@@ -1646,7 +1646,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:66a3edf615d9727c8a2df839e3091f2d69edaf8489d9b7d3bbda2bc7078d96c2"
+          "manifest_digest": "sha256:d9fbe94812f24ef92f46312cadb6af24a40fc321b3997279e50d19967ae49b06"
         }
       }
     },
@@ -1711,11 +1711,11 @@
                   "redevops-qa",
                   "checkout",
                   "--detach",
-                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                  "55c746e35412a92a287ebbbc239a69de0fbebf10"
                 ],
                 "env": {},
                 "manual": false,
-                "display": "git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                "display": "git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10"
               }
             ],
             "install": [
@@ -1939,7 +1939,7 @@
             },
             "source": {
               "repository": "redevops-io/redevops-qa",
-              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              "commit": "55c746e35412a92a287ebbbc239a69de0fbebf10"
             },
             "engines": [
               {
@@ -1964,7 +1964,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:663cba52a2e5362b0483dcb50383b9dedb29d6e3fb76194528a2013326536df4"
+          "manifest_digest": "sha256:307338dc8559b8765164f7b4001f659136ccc9392ecef79f781e3c106aa15771"
         }
       }
     },
@@ -2028,11 +2028,11 @@
                   "redevops-qa",
                   "checkout",
                   "--detach",
-                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                  "55c746e35412a92a287ebbbc239a69de0fbebf10"
                 ],
                 "env": {},
                 "manual": false,
-                "display": "git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                "display": "git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10"
               }
             ],
             "install": [
@@ -2256,7 +2256,7 @@
             },
             "source": {
               "repository": "redevops-io/redevops-qa",
-              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              "commit": "55c746e35412a92a287ebbbc239a69de0fbebf10"
             },
             "engines": [
               {
@@ -2281,7 +2281,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:c9a10cbdce6ca85f7c05a71a956351ad5c23d7216b12088997abda9b8caeb286"
+          "manifest_digest": "sha256:3d1a3a0cfccfc14af3f61240956a789b4449e4fc0a4f37d6c82aacda11a7faad"
         }
       }
     },
@@ -2347,11 +2347,11 @@
                   "redevops-qa",
                   "checkout",
                   "--detach",
-                  "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                  "55c746e35412a92a287ebbbc239a69de0fbebf10"
                 ],
                 "env": {},
                 "manual": false,
-                "display": "git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+                "display": "git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10"
               }
             ],
             "install": [
@@ -2573,7 +2573,7 @@
             },
             "source": {
               "repository": "redevops-io/redevops-qa",
-              "commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8"
+              "commit": "55c746e35412a92a287ebbbc239a69de0fbebf10"
             },
             "engines": [
               {
@@ -2599,7 +2599,7 @@
               "venv_dir": ".venv-qa"
             }
           },
-          "manifest_digest": "sha256:d54ffa83ea78999409d9f5eee83434b53e2f253c7735c2c4d955e3c050d86baa"
+          "manifest_digest": "sha256:7f50f4d180e63c5e420beaf7020c4b7cf5ee6fd8f1f29960e3beee4f7249ccdc"
         }
       }
     },
@@ -3632,7 +3632,7 @@
             "Python 3.12 available as `python3.12` with the `venv` module (Debian and Ubuntu: the `python3.12-venv` package). The bundle is built for CPython 3.12 and install.sh refuses any other minor.",
             "The bundle archive and its `.tar.sha256` file in one directory (`bundle_dir`): built from a checkout of https://github.com/redevops-io/redevops-qa with `python tools/build_bundle.py build --out DIR`, or taken from a workflow run. No bundle is published. Compare the sha256 of the archive with a value you obtained from somewhere its producer does not control.",
             "bash, tar, and root or sudo for the browser step's `--with-deps` (it installs the operating system libraries Chromium needs with apt).",
-            "Network access to the Playwright download host for Chromium (the browser is not in the bundle and is not hashed by it). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.",
+            "Network access to the Playwright download host for Chromium (the browser is not in the bundle; its archives are checked against sha256 values pinned in the bundle before they are unpacked). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.",
             "All commands are run from one working directory, using a POSIX shell.",
             "Linux x86_64 with a POSIX shell; the CI job runs these steps on a GitHub-hosted ubuntu-24.04 runner."
           ],
@@ -3683,7 +3683,7 @@
               },
               {
                 "id": "browser",
-                "title": "The separate browser step: downloads Chromium (not part of the bundle, not hashed by it) and the operating system libraries it needs",
+                "title": "The separate browser step: downloads Chromium (not part of the bundle; the archives and the unpacked tree are checked against the bundle's pin) and the operating system libraries it needs (not covered by the pin)",
                 "argv": [
                   "redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install-browser.sh",
                   "--prefix",
@@ -3761,9 +3761,9 @@
           "limitations": [
             "CPython 3.12 on Linux x86_64 only. Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.",
             "No bundle is published and no release exists: the archive comes from a build of the repository or from a workflow run, and its digest is only as trustworthy as the place you obtained it from.",
-            "Chromium is downloaded when the browser step runs; the bundle records the build the pinned Playwright expects and does not hash or ship the browser.",
+            "Chromium is downloaded when the browser step runs and is not shipped in the bundle; the bundle pins the sha256 of the archives and the mode, size and sha256 of every file of the unpacked tree, the step refuses an archive that does not match, and doctor checks the installed tree. Not covered: the operating system libraries of --with-deps, and the availability of the download host.",
             "The runner in this release runs plans against the bundled fixture app only; a Robot lane that asks for the kernel layers (`origin-only`) is limited by them and does not start where they are unavailable (`doctor` measures them), and a Robot lane that says `not-enforced` is limited by nothing (see the egress matrix in the runner's README).",
-            "`verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite shows that a bundle is the one it was taken from. A verified run does not show that the application under test is correct.",
+            "`verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite, or a signature of it by a key the producer does not hold (optional), shows that a bundle is the one it was taken from or signed. A verified run does not show that the application under test is correct.",
             "The agent-harness and runtime-contracts trees are installed from the bundle at the commits pins.toml names; the name `agent-harness` on the public package index belongs to an unrelated project and is never installed."
           ],
           "manifest": {

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from bundle_helpers import ROOT, bb, cb, host_target, make_mini_bundle, make_wheel, resum
+from bundle_helpers import ROOT, bb, cb, host_target, make_mini_bundle, make_notices, make_third_party_wheel, make_wheel, resum
 
 LOCK = json.loads((ROOT / "bundle" / "third-party.lock.json").read_text(encoding="utf-8"))
 
@@ -88,7 +88,7 @@ def test_the_requirements_lock_pins_every_wheel_by_name_version_and_hash():
 
 def test_the_readme_template_renders_with_every_placeholder_and_refuses_an_unknown_one():
     template = (ROOT / "bundle" / "README.md").read_text(encoding="utf-8")
-    assert set(re.findall(r"\{\{([a-z_]+)\}\}", template)) <= {"bundle_name", "bundle_version", "python", "platform", "python_tag", "wheel_count", "commit"}
+    assert set(re.findall(r"\{\{([a-z_]+)\}\}", template)) <= {"bundle_name", "bundle_version", "python", "platform", "python_tag", "wheel_count", "commit", "playwright_version", "chromium_revision", "chromium_version", "browser_files"}
     with pytest.raises(bb.BuildError, match="no value"):
         bb.render_readme("{{nothing}}", {})
 
@@ -222,7 +222,7 @@ def test_calling_the_bundle_open_source_is_found_but_not_open_source_is_fine(cop
     assert "FORBIDDEN_TEXT" in codes(copy)
 
 
-@pytest.mark.parametrize("phrase", ["AGPL-3.0-or-later with the Commons Clause", "plain AGPL-3.0-or-later", "not hashed", "not open source"])
+@pytest.mark.parametrize("phrase", ["AGPL-3.0-or-later with the Commons Clause", "plain AGPL-3.0-or-later", "browser.lock.json", "Not covered", "not open source"])
 def test_the_readme_must_state_the_licences_and_the_browser_limit(copy, phrase):
     readme = copy / "README.md"
     readme.write_text(readme.read_text(encoding="utf-8").replace(phrase, "REDACTED"), encoding="utf-8")
@@ -230,10 +230,13 @@ def test_the_readme_must_state_the_licences_and_the_browser_limit(copy, phrase):
     assert "README_MISSING_TEXT" in codes(copy)
 
 
-def test_a_manifest_that_claims_a_hashed_browser_is_found(copy):
+@pytest.mark.parametrize("edit", [lambda b: b.update({"shipped_in_bundle": True}), lambda b: b.update({"pinned_by_this_bundle": False}), lambda b: b.update({"fetched_at_install": False}),
+                                 lambda b: b.update({"lock_sha256": "0" * 64}), lambda b: b.update({"revision": "1"}), lambda b: b.update({"archives": []}), lambda b: b.update({"tree_sha256": "0" * 64})],
+                         ids=["shipped", "not pinned", "not fetched", "lock digest", "revision", "archives", "tree digest"])
+def test_a_manifest_whose_browser_record_is_not_what_the_lock_says_is_found(copy, edit):
     path = copy / "BUNDLE.json"
     doc = json.loads(path.read_text(encoding="utf-8"))
-    doc["browser"]["hashed_by_this_bundle"] = True
+    edit(doc["browser"])
     path.write_text(json.dumps(doc), encoding="utf-8")
     resum(copy)
     assert "BROWSER_RECORD" in codes(copy)
@@ -246,7 +249,7 @@ def test_the_manifest_states_the_mixed_licence_and_the_scope(mini):
     assert "AGPL-3.0-or-later with the Commons Clause" in lic["runtime_contracts"] and "not open source" in lic["runtime_contracts"]
     assert lic["agent_harness"].startswith("AGPL-3.0-or-later (plain") and "Commons Clause" in lic["agent_harness"] and "without" in lic["agent_harness"]
     assert "No other Python minor or platform is claimed" in doc["scope"]
-    assert doc["browser"]["fetched_at_install"] is True and doc["browser"]["hashed_by_this_bundle"] is False
+    assert doc["browser"]["fetched_at_install"] is True and doc["browser"]["shipped_in_bundle"] is False and doc["browser"]["pinned_by_this_bundle"] is True
     assert "not a replaced bundle" in doc["integrity"]
 
 
@@ -347,3 +350,152 @@ def test_the_readme_tells_root_to_use_a_prefix_outside_root_and_says_what_doctor
     assert "`TMPDIR`" in text and "`HOME` and the evidence directory (`--out`) may be anywhere" in text and "read from the adapter kit inside the bundle" in text
     assert "`run` and `demo` make the same check and do not start otherwise" in text and "is not relaxed" in text
     assert "so a virtual environment made from a Python kept under `/root`" in text and "only a plan with a Robot lane is checked" in text
+
+
+# ----------------------------------------------------------------------------------------------------------------- the licence and notice texts that ship (THIRD_PARTY_NOTICES)
+@pytest.fixture(scope="module")
+def noticed(tmp_path_factory):
+    return make_mini_bundle(tmp_path_factory.mktemp("noticed"), with_kit=False, with_notices=True)
+
+
+@pytest.fixture()
+def ncopy(noticed, tmp_path):
+    dst = tmp_path / noticed.name
+    shutil.copytree(noticed, dst)
+    return dst
+
+
+def test_the_notices_are_built_from_files_checked_by_hash_and_do_not_depend_on_the_build(tmp_path):
+    wheel = make_third_party_wheel(tmp_path)
+    lock, root, notices = make_notices(tmp_path / "a", wheel)
+    _l, _r, again = make_notices(tmp_path / "b", wheel)
+    assert notices == again and sorted(notices) == ["INDEX.json", "README.md", "upstream/x-1/LICENSE", "wheels/thirdlib-2.0/thirdlib-2.0.dist-info/licenses/LICENSE"]
+    index = json.loads(notices["INDEX.json"])
+    assert {e["path"]: e["sha256"] for e in index["files"]} == {f["dest"]: f["sha256"] for f in lock["files"]}
+    assert all(e["size"] == len(notices[e["path"]]) for e in index["files"])
+    assert bb.build_notices_wheel(notices, "1.0", 1_700_000_000, tmp_path).read_bytes() == bb.build_notices_wheel(notices, "1.0", 1_700_000_000, tmp_path / ".").read_bytes()
+
+
+def test_a_notice_that_is_not_the_reviewed_file_stops_the_build(tmp_path):
+    wheel = make_third_party_wheel(tmp_path)
+    lock, root, _ = make_notices(tmp_path / "a", wheel)
+    (root / "third_party" / "notices" / "upstream" / "x-1" / "LICENSE").write_bytes(b"edited\n")                     # an edited upstream text
+    with pytest.raises(bb.BuildError, match="sha256 the notices lock records"):
+        bb.build_notices(lock, {"thirdlib==2.0": wheel}, root)
+    lock2, root2, _ = make_notices(tmp_path / "b", wheel)
+    (tmp_path / "c").mkdir()
+    other = make_third_party_wheel(tmp_path / "c", licence_text=b"another licence text\n")
+    with pytest.raises(bb.BuildError, match="sha256 the notices lock records"):                                          # a wheel whose licence file changed
+        bb.build_notices(lock2, {"thirdlib==2.0": other}, root2)
+    with pytest.raises(bb.BuildError, match="does not ship"):                                                              # a wheel that is not in the bundle
+        bb.build_notices(lock2, {}, root2)
+    lock2["files"][0]["dest"] = "../escape"
+    (root2 / "x.json").write_text(json.dumps(lock2))
+    with pytest.raises(bb.BuildError, match="not a unique relative path"):
+        bb.read_notices_lock(root2 / "x.json")
+
+
+def test_the_committed_notices_lock_is_well_formed_and_every_repository_file_in_it_has_its_digest():
+    lock = bb.read_notices_lock()
+    for f in lock["files"]:
+        if f["origin"]["kind"] != "wheel":
+            assert bb.sha256_file(ROOT / f["origin"]["path"]) == f["sha256"], f["dest"]
+    assert {f["origin"]["wheel"] for f in lock["files"] if f["origin"]["kind"] == "wheel"} == {w["name"] for w in LOCK["wheels"]}
+
+
+def test_a_bundle_with_notices_passes_and_records_them_in_the_manifest_the_tree_and_the_notices_wheel(noticed):
+    assert cb.check_bundle(noticed, allow_test_target=True) == []
+    rec = json.loads((noticed / "BUNDLE.json").read_text(encoding="utf-8"))["third_party_notices"]
+    assert rec["directory"] == "THIRD_PARTY_NOTICES" and rec["index_sha256"] == hashlib.sha256((noticed / "THIRD_PARTY_NOTICES" / "INDEX.json").read_bytes()).hexdigest() and rec["files"] == 4
+    with zipfile.ZipFile(next((noticed / "wheelhouse").glob("redevops_qa_third_party_notices-*.whl"))) as zf:
+        assert any(n.endswith(".data/data/share/redevops-qa/THIRD_PARTY_NOTICES/INDEX.json") for n in zf.namelist())
+
+
+def test_an_edited_notice_file_is_found_even_when_the_sums_are_rewritten(ncopy):
+    target = ncopy / "THIRD_PARTY_NOTICES" / "upstream" / "x-1" / "LICENSE"
+    target.write_bytes(b"edited\n")
+    assert "SUMS_MISMATCH" in codes(ncopy)
+    resum(ncopy)
+    found = [f for f in cb.check_bundle(ncopy, allow_test_target=True) if f.code == "NOTICES"]
+    assert any("sha256 and size INDEX.json lists" in f.message for f in found) and any("installed copy" in f.message for f in found)
+
+
+def test_an_added_or_removed_notice_file_or_a_dropped_index_entry_is_found(ncopy):
+    (ncopy / "THIRD_PARTY_NOTICES" / "extra.txt").write_text("x")
+    resum(ncopy)
+    assert any("does not list" in f.message for f in cb.check_bundle(ncopy, allow_test_target=True) if f.code == "NOTICES")
+    (ncopy / "THIRD_PARTY_NOTICES" / "extra.txt").unlink()
+    (ncopy / "THIRD_PARTY_NOTICES" / "README.md").unlink()
+    resum(ncopy)
+    assert any("listed in INDEX.json but not in the tree" in f.message for f in cb.check_bundle(ncopy, allow_test_target=True) if f.code == "NOTICES")
+
+
+def test_an_index_that_does_not_match_the_manifest_digest_is_found(ncopy):
+    path = ncopy / "THIRD_PARTY_NOTICES" / "INDEX.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["files"] = doc["files"][1:]                                    # a component dropped from the index
+    path.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+    resum(ncopy)
+    messages = " | ".join(f.message for f in cb.check_bundle(ncopy, allow_test_target=True) if f.code == "NOTICES")
+    assert "index_sha256" in messages and "does not list" in messages
+
+
+def test_a_notice_that_says_it_comes_from_a_wheel_must_be_that_wheels_member(ncopy):
+    wheel = next((ncopy / "wheelhouse").glob("thirdlib-*.whl"))
+    with zipfile.ZipFile(wheel) as zf:
+        files = {n: zf.read(n) for n in zf.namelist()}
+    files["thirdlib-2.0.dist-info/licenses/LICENSE"] = b"a different licence text\n"          # the wheel changed after the notices were made
+    bb.write_wheel(wheel, files, 1_700_000_000)
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    manifest = json.loads((ncopy / "BUNDLE.json").read_text(encoding="utf-8"))
+    for w in manifest["wheels"]:
+        if w["name"] == "thirdlib":
+            w["sha256"] = digest
+    (ncopy / "BUNDLE.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    lock = (ncopy / "requirements.lock").read_text()
+    (ncopy / "requirements.lock").write_text(re.sub(r"(thirdlib==2.0 \\\n    --hash=sha256:)[0-9a-f]{64}", r"\g<1>" + digest, lock))
+    resum(ncopy)
+    assert any("is not byte for byte" in f.message for f in cb.check_bundle(ncopy, allow_test_target=True) if f.code == "NOTICES")
+
+
+def test_a_release_bundle_without_the_notices_tree_or_the_notices_wheel_is_found(mini):
+    found = [f for f in cb.check_bundle(mini) if f.code in ("NOTICES", "WHEEL_KINDS")]
+    assert any(f.code == "NOTICES" and "no THIRD_PARTY_NOTICES directory" in f.message for f in found) and any(f.code == "WHEEL_KINDS" and "notices" in f.message for f in found)
+
+
+def test_a_second_notices_wheel_or_none_is_found(ncopy):
+    manifest = json.loads((ncopy / "BUNDLE.json").read_text(encoding="utf-8"))
+    manifest["wheels"] = [w for w in manifest["wheels"] if w["kind"] != "notices"]
+    (ncopy / "BUNDLE.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    resum(ncopy)
+    assert any("exactly one wheel of kind 'notices'" in f.message for f in cb.check_bundle(ncopy, allow_test_target=True) if f.code == "NOTICES")
+
+
+def test_the_readme_states_what_is_verified_what_is_open_and_that_acceptability_is_the_owners_decision():
+    text = (ROOT / "bundle" / "README.md").read_text(encoding="utf-8")
+    for phrase in ("THIRD_PARTY_NOTICES", "Node.js 24.22.1", "byte for byte the executable of the official nodejs.org release", "79 distinct npm packages", "proxy-agent-negotiate", "tablesorter 2.30.5",
+                   "Handlebars 4.7.9", "mark.js 8.11.1", "source-map 0.6.1", "is an owner decision", "None of this settles distribution", "`none yet`", "jQuery Templates", "JSXCompressor", "codicon icon font", "browser logo SVGs",
+                   "accepted provisionally", "conditionally accepted"):
+        assert phrase in text, phrase
+    assert not re.search(r"\b(cleared|approved|clearance)\b", text, re.I)
+    assert "81 npm packages inlined" not in text and "not classified one by one" not in text
+
+
+def test_the_manifest_never_says_a_component_is_cleared_or_approved(noticed):
+    for rel in ("BUNDLE.json", "THIRD_PARTY_NOTICES/INDEX.json"):
+        assert not re.search(r"\b(cleared|approved|clearance)\b", (noticed / rel).read_text(encoding="utf-8"), re.I), rel
+    assert any(f.code == "FORBIDDEN_TEXT" for f in cb.check_bundle(noticed, allow_test_target=True)) is False
+
+
+def test_the_manifest_must_name_the_package_without_a_licence_text_as_the_owners_condition_requires(copy):
+    path = copy / "BUNDLE.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["wheels"].append({"filename": "playwright-1-py3-none-any.whl", "name": "playwright", "version": "1", "sha256": "0" * 64, "kind": "third-party", "license": "Apache-2.0"})
+    doc["licences"]["third_party_notes"] = {"playwright": "A Node.js runtime and inlined npm packages."}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    resum(copy)
+    assert any("proxy-agent-negotiate" in f.message for f in cb.check_bundle(copy, allow_test_target=True) if f.code == "LICENCES")
+    doc["licences"]["third_party_notes"] = {"playwright": "A Node.js runtime and inlined npm packages; proxy-agent-negotiate has no licence text."}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    resum(copy)
+    assert not [f for f in cb.check_bundle(copy, allow_test_target=True) if f.code == "LICENCES"]

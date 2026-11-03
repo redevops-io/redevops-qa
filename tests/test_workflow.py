@@ -49,7 +49,20 @@ def test_the_bridge_job_fails_on_zero_tests_or_skips():
 
 @pytest.mark.parametrize("word", ["secrets.", "token", "qa_pins_read_token", "pat:", "password"])
 def test_the_workflow_uses_no_secret_and_no_token(word):
-    assert word not in TEXT.lower().replace("no token input", "").replace("no secret and no token", "")
+    allowed = TEXT.lower().replace("no token input", "").replace("no secret and no token", "")
+    if word == "token":
+        # The one use: the workflow's own built-in credential, handed to the install-profiles check so that it can read the logs of the runs it records.
+        allowed = allowed.replace("gh_token: ${{ github.token }}", "").replace('gh_token="$gh_token"', "")
+    assert word not in allowed
+
+
+def test_the_only_credential_is_the_built_in_one_with_read_access_to_runs_and_only_in_the_install_profiles_check():
+    job = WF["jobs"]["install-profiles"]
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    users = [(name, s) for name, j in WF["jobs"].items() for s in j["steps"] if "github.token" in str(s) or "GH_TOKEN" in str(s)]
+    assert [(n, s["env"]) for n, s in users] == [("install-profiles", {"GH_TOKEN": "${{ github.token }}"})]
+    assert "--verify-ci" in users[0][1]["run"] and "python tools/check_install_profiles.py" in users[0][1]["run"]
+    assert [n for n, j in WF["jobs"].items() if "actions" in j.get("permissions", {})] == ["install-profiles"]
 
 
 def test_the_pinned_trees_are_fetched_at_the_commit_named_in_pins_toml():
@@ -139,6 +152,24 @@ def test_the_selenium_offline_job_installs_no_selenium_and_the_browser_job_never
     assert "continue-on-error" not in TEXT and "needs" not in WF["jobs"]["selenium-browser"]
     assert "NOT a required check until proven" in WF["jobs"]["selenium-browser"]["name"]
     assert not any("repository" in s.get("with", {}) for s in steps)
+
+
+def test_the_selenium_jobs_keep_their_evidence_when_they_fail_and_warm_chrome_before_the_first_test_start():
+    lane = WF["jobs"]["selenium-browser"]["steps"]
+    run = "\n".join(str(s.get("run", "")) for s in lane)
+    assert "-q -ra --durations=0 -m browser packages/qa-selenium/tests/browser" in run and "QA_SELENIUM_LOG_DIR=" in run
+    uploads = {s["with"]["name"]: s for s in lane if str(s.get("uses", "")).startswith("actions/upload-artifact@")}
+    assert uploads["junit-selenium-browser"]["if"] == "always()" and uploads["selenium-browser-logs"]["if"] == "failure()"
+    assert all(u["with"]["retention-days"] == 14 for u in uploads.values())
+    assert "chrome processes still running" in run and any(s.get("if") == "always()" and "chrome processes" in str(s.get("run", "")) for s in lane)
+    profile = WF["jobs"]["profile-local-python-selenium"]["steps"]
+    for steps, test_step in ((lane, "Run the browser lane"), (profile, "Run the profile")):
+        names = [str(s.get("name", "")) for s in steps]
+        warm = next(i for i, n in enumerate(names) if n.startswith("Pre-warm Chrome"))
+        assert warm < next(i for i, n in enumerate(names) if n.startswith(test_step))
+        text = str(steps[warm]["run"])
+        assert "timeout 300" in text and "--dump-dom about:blank" in text and "if" not in steps[warm]       # time limited, informational, never conditional
+    assert WF["permissions"] == {"contents": "read"} and "secrets." not in TEXT.replace("secrets.GITHUB_TOKEN", "")
 
 
 def test_the_robot_offline_job_installs_no_robot_and_the_real_job_never_skips():

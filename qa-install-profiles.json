@@ -5,7 +5,7 @@
     "repository": "redevops-io/redevops-qa",
     "url": "https://github.com/redevops-io/redevops-qa.git",
     "install_method": "checkout-at-commit",
-    "pinned_commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8",
+    "pinned_commit": "55c746e35412a92a287ebbbc239a69de0fbebf10",
     "dependency_release_tags": {
       "runtime-contracts": [
         "v0.3.15",
@@ -105,15 +105,15 @@
             "workflow": "tests.yml",
             "job_key": "profile-local-python-robot",
             "job_name": "install profile local-python-robot",
-            "run_id": 41306373018,
-            "job_id": 124847489639,
-            "head_sha": "6ee02a75fc5a0dad686cdd104cfff13d3e5fdc9c",
+            "run_id": 41712009322,
+            "job_id": 126182197434,
+            "head_sha": "0368611445821e4d2dac34b7bef1d7bc25099c19",
             "run_conclusion": "success",
-            "source_commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8",
-            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41306373018",
-            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489639",
-            "completed_on": "2026-11-01",
-            "summary": "install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, installed from the pinned commit in a clean virtual environment; the whole run is green"
+            "source_commit": "55c746e35412a92a287ebbbc239a69de0fbebf10",
+            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41712009322",
+            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41712009322/job/126182197434",
+            "completed_on": "2026-11-03",
+            "summary": "install, smoke and check phases then uninstall: 369 + 188 + 13 tests passed, 0 skipped, 0 failed, installed from the pinned commit in a clean virtual environment; the whole run is green"
           },
           "disabled_reason": null,
           "note": ""
@@ -418,15 +418,15 @@
             "workflow": "tests.yml",
             "job_key": "profile-local-python-selenium",
             "job_name": "install profile local-python-selenium",
-            "run_id": 41306373018,
-            "job_id": 124847489672,
-            "head_sha": "6ee02a75fc5a0dad686cdd104cfff13d3e5fdc9c",
+            "run_id": 41712009322,
+            "job_id": 126182197472,
+            "head_sha": "0368611445821e4d2dac34b7bef1d7bc25099c19",
             "run_conclusion": "success",
-            "source_commit": "5e9c8da6248f9c4e170b77ab4ff202b519c970a8",
-            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41306373018",
-            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489672",
-            "completed_on": "2026-11-01",
-            "summary": "install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, installed from the pinned commit in a clean virtual environment; the whole run is green"
+            "source_commit": "55c746e35412a92a287ebbbc239a69de0fbebf10",
+            "run_url": "https://github.com/redevops-io/redevops-qa/actions/runs/41712009322",
+            "url": "https://github.com/redevops-io/redevops-qa/actions/runs/41712009322/job/126182197472",
+            "completed_on": "2026-11-03",
+            "summary": "install, smoke and check phases then uninstall: 369 + 154 + 12 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, installed from the pinned commit in a clean virtual environment; the whole run is green"
           },
           "disabled_reason": null,
           "note": ""
@@ -1030,7 +1030,7 @@
         "Python 3.12 available as `python3.12` with the `venv` module (Debian and Ubuntu: the `python3.12-venv` package). The bundle is built for CPython 3.12 and install.sh refuses any other minor.",
         "The bundle archive and its `.tar.sha256` file in one directory (`bundle_dir`): built from a checkout of https://github.com/redevops-io/redevops-qa with `python tools/build_bundle.py build --out DIR`, or taken from a workflow run. No bundle is published. Compare the sha256 of the archive with a value you obtained from somewhere its producer does not control.",
         "bash, tar, and root or sudo for the browser step's `--with-deps` (it installs the operating system libraries Chromium needs with apt).",
-        "Network access to the Playwright download host for Chromium (the browser is not in the bundle and is not hashed by it). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.",
+        "Network access to the Playwright download host for Chromium (the browser is not in the bundle; its archives are checked against sha256 values pinned in the bundle before they are unpacked). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.",
         "All commands are run from one working directory, using a POSIX shell."
       ],
       "params": {
@@ -1119,7 +1119,7 @@
           },
           {
             "id": "browser",
-            "title": "The separate browser step: downloads Chromium (not part of the bundle, not hashed by it) and the operating system libraries it needs",
+            "title": "The separate browser step: downloads Chromium (not part of the bundle; the archives and the unpacked tree are checked against the bundle's pin) and the operating system libraries it needs (not covered by the pin)",
             "argv": [
               "redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install-browser.sh",
               "--prefix",
@@ -1182,9 +1182,9 @@
       "limitations": [
         "CPython 3.12 on Linux x86_64 only. Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.",
         "No bundle is published and no release exists: the archive comes from a build of the repository or from a workflow run, and its digest is only as trustworthy as the place you obtained it from.",
-        "Chromium is downloaded when the browser step runs; the bundle records the build the pinned Playwright expects and does not hash or ship the browser.",
+        "Chromium is downloaded when the browser step runs and is not shipped in the bundle; the bundle pins the sha256 of the archives and the mode, size and sha256 of every file of the unpacked tree, the step refuses an archive that does not match, and doctor checks the installed tree. Not covered: the operating system libraries of --with-deps, and the availability of the download host.",
         "The runner in this release runs plans against the bundled fixture app only; a Robot lane that asks for the kernel layers (`origin-only`) is limited by them and does not start where they are unavailable (`doctor` measures them), and a Robot lane that says `not-enforced` is limited by nothing (see the egress matrix in the runner's README).",
-        "`verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite shows that a bundle is the one it was taken from. A verified run does not show that the application under test is correct.",
+        "`verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite, or a signature of it by a key the producer does not hold (optional), shows that a bundle is the one it was taken from or signed. A verified run does not show that the application under test is correct.",
         "The agent-harness and runtime-contracts trees are installed from the bundle at the commits pins.toml names; the name `agent-harness` on the public package index belongs to an unrelated project and is never installed."
       ]
     }

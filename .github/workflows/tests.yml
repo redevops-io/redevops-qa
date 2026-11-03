@@ -60,7 +60,7 @@ jobs:
       - name: Run the matrix tests (scrubbed environment)
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
-            python -m pytest -q tests/test_adapter_license_matrix.py --junitxml="$RUNNER_TEMP/junit-adapter-licences.xml"
+            python -m pytest -q tests/test_adapter_license_matrix.py tests/test_third_party_evidence.py --junitxml="$RUNNER_TEMP/junit-adapter-licences.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-adapter-licences.xml"
 
@@ -207,6 +207,10 @@ jobs:
         run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
       - name: Fail if the working tree is dirty
         run: test -z "$(git status --porcelain)"
+      - name: Show the OpenSSH client the signed-anchor tests use (ssh-keygen -Y needs OpenSSH 8.0 or later; the tests fail, never skip, if it is missing)
+        run: |
+          ssh -V
+          command -v ssh-keygen ssh-agent
       - name: Run the runner tests in a scrubbed environment (no browser is installed)
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
@@ -531,7 +535,7 @@ jobs:
       - name: Run the bundle and workflow tests in a scrubbed environment
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
-            python -m pytest -q tests/test_bundle_builder.py tests/test_bundle_install.py tests/test_bundle_pinned.py tests/test_bundle_workflow.py tests/test_demo_outcome.py tests/test_readme_layout.py tests/test_workflow.py \
+            python -m pytest -q tests/test_bundle_builder.py tests/test_bundle_install.py tests/test_bundle_pinned.py tests/test_bundle_browser.py tests/test_bundle_browser_lock.py tests/test_browser_mutations.py tests/test_bundle_workflow.py tests/test_demo_outcome.py tests/test_readme_layout.py tests/test_workflow.py \
               --junitxml="$RUNNER_TEMP/junit-bundle-tests.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-bundle-tests.xml"
@@ -593,10 +597,11 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           for d in build-1 build-previous; do python -I "$GITHUB_WORKSPACE/tools/check_bundle.py" "$RUNNER_TEMP/$d"/redevops-qa-bundle-*-cp312-linux-x86_64; done
-      - name: Check the licence matrix against the wheels of the bundle just built (digests, licence files, the breakdown of the inlined notices)
+      - name: Check the licence matrix against the wheels of the bundle just built (digests, licence files, the breakdown of the inlined notices, the evidence tables) and its THIRD_PARTY_NOTICES tree against the notices lock and the shipped wheels
         run: |
           python -m pip install "pyyaml>=6,<7"
-          python tools/check_adapter_licenses.py --wheelhouse "$(ls -d "$RUNNER_TEMP"/build-1/redevops-qa-bundle-*-cp312-linux-x86_64)/wheelhouse"
+          b="$(ls -d "$RUNNER_TEMP"/build-1/redevops-qa-bundle-*-cp312-linux-x86_64)"
+          python tools/check_adapter_licenses.py --wheelhouse "$b/wheelhouse" --notices "$b/THIRD_PARTY_NOTICES"
       - name: Print the digest of the archive (the value to compare a download with)
         run: |
           sha256sum "$RUNNER_TEMP"/build-1/*.tar
@@ -621,9 +626,11 @@ jobs:
           retention-days: 14
 
   bundle-install:
-    name: bundle install on a clean runner (the README commands unchanged, doctor, demo, rollback, uninstall, directory clean; a tampered wheel, a wrong lock, another Python and another platform are refused)
+    name: bundle install on a clean runner (the README commands unchanged, the real Chromium checked against its pin, doctor, demo, a tampered browser refused, rollback, uninstall, directory clean; a tampered wheel, a wrong lock, another Python and another platform are refused)
     # A fresh ubuntu-24.04 machine that has not built anything: it downloads the archives the bundle job kept and runs tools/bundle_acceptance.sh, which takes the commands from the bundle's own README
-    # and runs them as written. The browser step downloads Chromium (not part of the bundle). Read-only, no secret.
+    # and runs them as written. The browser step downloads Chromium (not part of the bundle) and checks the archives and the unpacked tree against bundle/browser.lock.json: the log of this job holds the observed sha256 of each archive
+    # and the doctor line that says the installed tree is the pinned one; the script then tampers with the installed browser (a byte, a size, a mode, an extra file, a missing file) and shows that doctor fails, that
+    # demo refuses to start the browser lane and that a plan with only a Robot lane still runs. Read-only, no secret.
     runs-on: ubuntu-24.04
     needs: bundle
     steps:
@@ -645,6 +652,8 @@ jobs:
           path: ${{ runner.temp }}/previous
       - name: Run the acceptance script
         run: bash tools/bundle_acceptance.sh --current "$RUNNER_TEMP/current" --previous "$RUNNER_TEMP/previous"
+      - name: Every fallback URL of the browser pin serves the pinned bytes (the other hosts are checked, not assumed; the first URL of each archive was just used by the acceptance script)
+        run: python -I packages/qa-runner/src/qa_runner/browser_pin.py urls --lock bundle/browser.lock.json --fallbacks-only
       - name: The same bundle as root with HOME=/root (a prefix under /root is refused, one under /opt works, a TMPDIR under /root is named by doctor)
         run: sudo env HOME=/root PATH="$PATH" bash tools/bundle_root_check.sh --current "$RUNNER_TEMP/current" --python "$(command -v python3.12)"
       - name: Fail if the run left anything in the working tree
@@ -811,6 +820,16 @@ jobs:
           test "$status" -eq 5
           grep -q "^  ANCHOR_MISMATCH anchor:" "$RUNNER_TEMP/wrong-anchor.out"
           grep -q "^  ANCHOR_REQUIRED anchor:" "$RUNNER_TEMP/wrong-anchor.out"
+      - name: An unsigned bundle is refused where a signature of the anchor is required (the demo is not signed; this is the downgrade guard, it authenticates nothing)
+        run: |
+          cd "$RUNNER_TEMP"
+          status=0
+          "$RUNNER_TEMP/verifier/bin/redevops-qa" verify "$(ls -d "$RUNNER_TEMP"/evidence/r0-*)" --require-signed-anchor > "$RUNNER_TEMP/unsigned.out" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/unsigned.out"
+          echo "verify exit status with --require-signed-anchor on the unsigned demo bundle: $status"
+          test "$status" -eq 5
+          grep -q "^  ANCHOR_SIGNATURE_REQUIRED anchor_signature:" "$RUNNER_TEMP/unsigned.out"
+          ! grep -q "signed anchor: VERIFIED" "$RUNNER_TEMP/unsigned.out"
 
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
@@ -1056,13 +1075,43 @@ jobs:
         run: python -c "import importlib.metadata as m, selenium; assert m.version('selenium') == '4.52.0', m.version('selenium')"
       - name: Fail if the working tree is dirty
         run: test -z "$(git status --porcelain)"
+      - name: Pre-warm Chrome (one throwaway headless start, so the first start inside a test is not a cold one; never fails the job)
+        run: |
+          # Measured in CI on this runner image: the median first Chrome start of a job was 7.5 to 7.6 s without this step and 1.5 s with it (60 jobs each); why is not established.
+          # It runs under the runner's own HOME, while the tests run under a fresh one, so only what lives outside HOME can be shared.
+          # It has a time limit and its outcome is only printed: a Chrome that cannot start fails the tests, not this step.
+          started=$SECONDS
+          timeout 300 "$QA_CHROME_BINARY" --headless=new --no-first-run --disable-gpu --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null 2>&1 \
+            && echo "pre-warm: done in $((SECONDS - started)) s" || echo "pre-warm: did not finish cleanly after $((SECONDS - started)) s (exit $?)"
       - name: Run the browser lane (scrubbed environment; only tests marked browser)
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
-            QA_CHROME_BINARY="$QA_CHROME_BINARY" QA_CHROMEDRIVER_PATH="$QA_CHROMEDRIVER_PATH" \
-            python -m pytest -q -m browser packages/qa-selenium/tests/browser --junitxml="$RUNNER_TEMP/junit-selenium-browser.xml"
+            QA_CHROME_BINARY="$QA_CHROME_BINARY" QA_CHROMEDRIVER_PATH="$QA_CHROMEDRIVER_PATH" QA_SELENIUM_LOG_DIR="$RUNNER_TEMP/selenium-logs" \
+            python -m pytest -q -ra --durations=0 -m browser packages/qa-selenium/tests/browser --junitxml="$RUNNER_TEMP/junit-selenium-browser.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-selenium-browser.xml"
+      - name: Keep the JUnit report (also when the lane failed)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-selenium-browser
+          path: ${{ runner.temp }}/junit-selenium-browser.xml
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Keep the ChromeDriver and Chrome logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selenium-browser-logs
+          path: ${{ runner.temp }}/selenium-logs
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Show the runner state and any Chrome process still running (diagnostic; never fails the job)
+        if: always()
+        run: |
+          echo "runner image: ${ImageVersion:-unknown}"; uptime; free -m
+          echo "chrome processes still running: $(ps -eo args | grep -ci '[c]hrome')"
+          ps -eo pid,etime,args | grep -i '[c]hrome' | cut -c1-160 || true
 
   robot-offline:
     name: "robot adapter (offline - recorded output.xml from real runs, allowlist, strict import; no Robot Framework installed)"
@@ -1248,17 +1297,27 @@ jobs:
           "$driver" --version
           echo "QA_CHROME_BINARY=$chrome" >> "$GITHUB_ENV"
           echo "QA_CHROMEDRIVER_PATH=$driver" >> "$GITHUB_ENV"
+      - name: Pre-warm Chrome (one throwaway headless start, so the first start inside a test is not a cold one; never fails the job)
+        run: |
+          # Measured in CI on this runner image: the median first Chrome start of a job was 7.5 to 7.6 s without this step and 1.5 s with it (60 jobs each); why is not established.
+          # It runs under the runner's own HOME, while the tests run under a fresh one, so only what lives outside HOME can be shared.
+          # It has a time limit and its outcome is only printed: a Chrome that cannot start fails the tests, not this step.
+          started=$SECONDS
+          timeout 300 "$QA_CHROME_BINARY" --headless=new --no-first-run --disable-gpu --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null 2>&1 \
+            && echo "pre-warm: done in $((SECONDS - started)) s" || echo "pre-warm: did not finish cleanly after $((SECONDS - started)) s (exit $?)"
       - name: Run the profile - install, smoke, check
         run: |
           python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
             --checkout "$GITHUB_WORKSPACE/.profile-src" --phases install,smoke,check \
             --param chrome_binary="$QA_CHROME_BINARY" --param chromedriver_path="$QA_CHROMEDRIVER_PATH"
-      - name: Keep the evidence
+      - name: Keep the evidence (also when a step above failed, so a failed run keeps its JUnit report)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: evidence-local-python-selenium
           path: ${{ runner.temp }}/profile-work/evidence
           if-no-files-found: error
+          retention-days: 14
       - name: Uninstall (the profile's uninstall phase; the virtual environment must be gone)
         run: |
           python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
@@ -1337,10 +1396,15 @@ jobs:
             --phases uninstall --param bundle_dir="$RUNNER_TEMP/current"
 
   install-profiles:
-    name: "install profiles (data, steps, pins, status, generator vectors, generated document; offline; never skipped)"
-    # Runs on every push and pull request, with no path filter, no condition and no dependency on another job. Offline, read-only, no secret. It needs the
-    # full history (every pinned or recorded commit must be an ancestor of main). The full jsonschema package only cross-checks the strict validator.
+    name: "install profiles (data, steps, pins, status, generator vectors, generated document, recorded runs and their logs; never skipped)"
+    # Runs on every push and pull request, with no path filter, no condition and no dependency on another job. Read-only, no secret of ours: the workflow's own
+    # built-in credential, with the read permission for workflow runs, lets the check read the recorded runs and the logs of their jobs (what a run installed and
+    # how many tests passed). It needs the full history (every pinned or recorded commit must be an ancestor of main, or of this commit while a run of this branch is recorded).
+    # The full jsonschema package only cross-checks the strict validator.
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1351,8 +1415,10 @@ jobs:
           python-version: "3.12"
       - name: Install test tools and the cross-check validator
         run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "jsonschema==4.26.0"
-      - name: Check the profiles (schema, steps, pins, status, document, freshness against main) and cross-check the validator
-        run: env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 python tools/check_install_profiles.py --cross-check
+      - name: Check the profiles (schema, steps, pins, status, document, freshness against main, recorded runs and their logs) and cross-check the validator
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 GH_TOKEN="$GH_TOKEN" python tools/check_install_profiles.py --cross-check --verify-ci
       - name: Run the profile, generator and vector tests in a scrubbed environment
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \

@@ -6,7 +6,7 @@ A plan holds a Playwright Chromium lane (`examples/golden-plan.json`), a Robot F
 (`examples/demo-plan.json`).
 
 Licence: the family licence of this repository (source-available, not open source; see `LICENSE.md`). Standard library and the repository's own packages
-only; the two pinned upstreams (`runtime-contracts`, `agent-harness`) are found through `pins.toml`, as the bridge does it, and are neither installed nor
+only (plus the OpenSSH client `ssh-keygen`, called only for the optional signed anchor); the two pinned upstreams (`runtime-contracts`, `agent-harness`) are found through `pins.toml`, as the bridge does it, and are neither installed nor
 copied.
 
 Scope of this release line: Linux x86_64, Playwright Chromium and Robot Framework. macOS runs are development evidence only (`doctor` says so). Selenium and
@@ -15,7 +15,7 @@ Appium are not part of this workflow. Nothing here has been run on any other pla
 Installing: from a checkout, as the tests and the CI jobs do (the `src` directories on `PYTHONPATH`, the pinned trees fetched into `.pinned`); or from the pinned bundle (`bundle/README.md`,
 built by `tools/build_bundle.py`): a wheelhouse with a hash for every wheel, installed with `pip install --no-index --find-links wheelhouse --require-hashes -r requirements.lock` into a new
 directory, for CPython 3.12 on Linux x86_64 only. A bundle install keeps `pins.toml` and the pinned trees under `<prefix>/share/redevops-qa/` and the pin check runs against those copies
-(`REDEVOPS_QA_PINS` still overrides; a checkout above the environment is not used instead). Chromium is downloaded by the bundle's separate browser step and is recorded, not hashed, by the bundle.
+(`REDEVOPS_QA_PINS` still overrides; a checkout above the environment is not used instead). Chromium is downloaded by the bundle's separate browser step and checked against `browser.lock.json` (`qa_runner.browser_pin`): in a bundle installation `doctor` and `run` compare the installed Chromium tree with the pin, and a browser lane is not started against a tree that differs or against an installation whose pin is missing. In a source checkout there is no pin: `doctor` says so (`WARN`) and no browser check is made.
 
 ## The public CI demo
 
@@ -34,9 +34,12 @@ redevops-qa doctor [--plan PLAN] [--json]
 redevops-qa freeze PLAN --out LOCK
 redevops-qa run PLAN_OR_LOCK --out DIR [--defect none|discount|settings] [--run-id ID] [--lane-deadline SECONDS]
 redevops-qa verify BUNDLE [--anchor sha256:HEX] [--plan-digest sha256:HEX] [--require-anchor] [--require-plan-digest] [--json]
+                          [--anchor-sig FILE --anchor-pub FILE] [--require-signed-anchor]
 redevops-qa demo [--out DIR] [--defect none|discount|settings] [--run-id ID] [--lane-deadline SECONDS]
-redevops-qa report BUNDLE [--format text|json|html] [-o FILE] [--anchor sha256:HEX] [--plan-digest sha256:HEX]
-redevops-qa inspect BUNDLE [--anchor sha256:HEX] [--plan-digest sha256:HEX]
+redevops-qa report BUNDLE [--format text|json|html] [-o FILE] [--anchor sha256:HEX] [--plan-digest sha256:HEX] [--anchor-sig FILE --anchor-pub FILE] [--require-signed-anchor]
+redevops-qa inspect BUNDLE [--anchor sha256:HEX] [--plan-digest sha256:HEX] [--anchor-sig FILE --anchor-pub FILE] [--require-signed-anchor]
+redevops-qa anchor statement BUNDLE
+redevops-qa anchor sign BUNDLE --key PATH [--agent] [--out FILE]
 ```
 
 On a host where the Robot lane's kernel layers cannot be provided (macOS, Windows, a kernel without Landlock network rules, an emulated `amd64` container) `demo` and any plan whose Robot lane says `origin-only` are refused before anything starts; `redevops-qa doctor` names the reason, and `examples/robot-plan-not-enforced.json` is the Robot plan for such hosts (no limit on that lane's traffic; the report says so). Nothing falls back to it by itself.
@@ -72,6 +75,37 @@ harness run record.
 the same table as `run` (0 VERIFIED, 1 FAILED, 3 a lane did not complete, 4 inconclusive); **5 when any finding rejects the evidence**; 2 when the bundle cannot be opened; 7 when the verifier itself cannot run here. `run` and
 `demo` end by calling `verify` in a separate interpreter (fresh environment, no state shared) and exit 5 if it does not accept what they just wrote. That second pass is a RE-verification in a fresh process by the SAME code the run uses (`judge_lane`, `finalize_results`, the `native_from_*` functions are shared): it catches what was written wrongly or changed on the way to disk, it is not an independent implementation of the verdicts. The word "independent" in this package means independent of the ENGINE's own status and, for the probes, of the engines' code (the reference check), nothing more.
 
+**`anchor`** and the signature options of `verify`, `report` and `inspect` are an OPTIONAL signed anchor. A run that is not signed behaves and reads exactly as before (the text of `verify` for an
+unsigned bundle is unchanged; the JSON gains one key, `anchor_signature`, with state `absent`). What the signed anchor is:
+
+* `anchor statement BUNDLE` verifies the bundle and prints the statement to be signed: canonical JSON of the run id, the manifest digest (the sha256 of `bundle-manifest.json`) and the plan digest, schema
+  `redevops-qa/anchor-statement` 1.0. It refuses (exit 5) a bundle that does not verify. The statement can be taken to another machine: `ssh-keygen -Y sign -n redevops-qa-anchor@v1 -f <private key> FILE`
+  writes `FILE.sig` (an OpenSSH SSHSIG signature in the namespace `redevops-qa-anchor@v1`).
+* `anchor sign BUNDLE --key PATH [--agent] [--out FILE]` does the same in one step by calling `ssh-keygen -Y sign` (with `--agent`, `--key` names the PUBLIC key file and the ssh-agent named by `SSH_AUTH_SOCK`
+  signs, and only the key named by `--key` signs). Without `--agent` no ssh-agent is used: `SSH_AUTH_SOCK` and `SSH_AGENT_PID` are removed from the environment of `ssh-keygen`. `anchor sign` keeps the operator's own environment otherwise, `SSH_ASKPASS` and the terminal included, so that a passphrase can be asked for; `verify` runs `ssh-keygen` with a fixed environment and ignores `SSH_ASKPASS`. The signature is written outside the bundle
+  (default `<bundle path>.anchor.sig`, never overwritten, created before `ssh-keygen` is started so that an unusable location fails before a passphrase or a touch is asked for, and removed again if signing fails) and printed. For a
+  bundle `DIR/r0-<id>` the default signature is a sibling `DIR/r0-<id>.anchor.sig` inside the evidence directory: a script that globs `DIR/r0-*` after signing would match it too (give `--out` to put it elsewhere). A signature by any key type but `ssh-ed25519` is refused and nothing is written.
+  **Keys are the operator's: this package never generates, stores or reads a private key.** The path is handed to `ssh-keygen` as an argument and nothing else (a test watches every `open` of the process and
+  signs with a key file that nothing but the agent can read). `run` and `demo` do not sign and take no key option; a host that runs lanes should not hold the signing key.
+* `verify BUNDLE --anchor-sig FILE --anchor-pub FILE [--require-signed-anchor]` rebuilds the statement from the bundle it has just read (the manifest digest it recomputed, the run id and the plan digest of its
+  report), writes a one-line `allowed_signers` file for ONE public key (a single `ssh-ed25519` line, no options, no certificate) that you supply and calls `ssh-keygen -Y verify` with the fixed namespace. A key
+  that travels with the bundle or beside the signature is never consulted; `--anchor-sig` without `--anchor-pub` is a usage error (exit 2). The state is in the `anchor_signature` block of the JSON:
+  `verified` (the assurance becomes `signed-anchor-verified`, the key fingerprint is printed), `invalid` (a signature file that was named and is missing, damaged, in another namespace, by another key type or
+  another key, or over another statement: finding `ANCHOR_SIGNATURE_INVALID`, exit 5, with or without `--require-signed-anchor`), `unavailable` (`ssh-keygen` is missing, older than OpenSSH 8.0 (no `-Y`), does
+  not answer within 20 seconds or does not answer as a verifier: finding `ANCHOR_SIGNATURE_UNAVAILABLE`, exit 7, never accepted) or `absent` (nothing was supplied; with `--require-signed-anchor` it is the finding
+  `ANCHOR_SIGNATURE_REQUIRED`, exit 5, so an unsigned or stripped run cannot be accepted where a signature is demanded). `--anchor` alone never gives `signed-anchor-verified`.
+  `ssh-keygen` runs with a fixed `PATH` (`/usr/bin:/bin`: a host that has it elsewhere gets exit 7), a temporary `HOME` and no ssh-agent; only its exit status and one expected line of its output count. The check trusts the OpenSSH client of the
+  host it runs on: a host whose `ssh-keygen` has been replaced can make it say anything, which is not detectable here. Needs OpenSSH 8.0 or later.
+
+When the state is `verified` the text says: "The manifest digest of this evidence bundle (run `<run id>`, plan digest `<plan digest>`) carries a valid OpenSSH Ed25519 signature made with the private key belonging
+to the public key with fingerprint `<fingerprint>`, which was supplied to this verification. A bundle rewritten after signing would not verify. This does not show who holds that key, that the key was not exposed, when
+the signature was made, that the run was executed on an uncompromised host, or that the application under test is correct." A signature is only as trustworthy as the channel through which you obtained the public key.
+The existing limits stay: the hash chain inside a bundle is unkeyed, a signature carries no time (an old signed bundle can be presented as the latest run), there is no revocation or key rotation (one public key per
+verification), and a bundle forged before it was signed carries a valid signature. FIDO (`sk-`) keys and other key types are not accepted by this release. The tests in `tests/test_qr_anchor_sig.py` rewrite and re-chain a
+whole bundle after it was signed (the dropped lane, the weakened assertion, the engine's files rewritten to say the rule held): plain `verify` accepts each of them, `--anchor` with the digest of the rewrite accepts it, and the
+signature check refuses it with exit 5; the signing keys of those tests are throwaway keys generated into the test's temporary directory. The public CI demo is not signed (no key is held there); its `demo-verify` job
+only checks that `--require-signed-anchor` refuses the unsigned demo bundle with `ANCHOR_SIGNATURE_REQUIRED`, which authenticates nothing.
+
 **`run`** freezes the plan (or reads a lock), starts the fixture app on loopback with the defect you name, runs each lane as a supervised child process, stops
 the app, and writes the bundle to `DIR/<run id>` (a directory that must not exist; it is reserved before anything runs and the bundle is renamed into place, so a reader sees no bundle or a whole one). It prints the outcome, what each engine reported, what the independent
 verdicts are, the plan digest (the value to give `verify --plan-digest`) and the manifest digest (the value an external anchor should hold).
@@ -85,7 +119,7 @@ verdicts are, the plan digest (the value to give `verify --plan-digest`) and the
 | 4 | inconclusive: every lane completed but not every assertion is verified, or an engine and the verifier disagree (`NATIVE_FAIL_VERIFIED_ASSERTIONS`) |
 | 5 | `verify` rejected the evidence (any finding), including the verification a run does of its own bundle |
 | 6 | an internal error of the runner (a crash is never reported as a product failure) |
-| 7 | `verify` only: the verifier itself cannot run here (a pinned dependency or git is missing); nothing was verified, which says nothing about the bundle (the JSON is still printed, with `assurance: not-verified`) |
+| 7 | `verify` only: the verifier itself cannot run here (a pinned dependency or git is missing, or, when a signature was supplied, the OpenSSH client `ssh-keygen`); nothing was verified, which says nothing about the bundle (the JSON is still printed, with `assurance: not-verified`) |
 
 ## The plan
 
@@ -380,8 +414,11 @@ What an accepted bundle means, and what it does not:
   that was rewritten consistently from start to finish by someone who can rewrite all of it: the product's own builder would produce the same bytes from forged inputs, and the tamper suite shows
   it (`tests/test_qr_tamper_suite.py`): the failing lane dropped, an assertion weakened, or the engine's own report rewritten to say the rule held, with every digest recomputed, is accepted as
   internally consistent and says so (the engine's report now has to be rewritten together with the engine's summary, the adapter result that names both by hash, the observation record and the
-  target's reference check: more work than before, not a different class of forgery). Only a manifest digest obtained from a place the forger cannot write (`--anchor`; the CI artifact attestation planned for the release job publishes it) rejects
-  those. `verify` never calls a match with a value you supplied proof that the value is trustworthy.
+  target's reference check: more work than before, not a different class of forgery). Only a manifest digest obtained from a place the forger cannot write (`--anchor`; the CI artifact attestation planned for the release job publishes it), or a valid signature of the manifest digest by a key the forger does not hold
+  (`--anchor-sig` with `--anchor-pub`, optional, see `anchor` above), rejects those. `verify` never calls a match with a value you supplied proof that the value is trustworthy.
+* **A signed anchor (optional) detects a rewrite made after signing, for the key you supplied.** `--anchor-sig` with `--anchor-pub` shows that the manifest digest of the bundle carries a valid signature by the supplied
+  Ed25519 key (see `anchor` above for the exact claim and what it does not show). Measured: three bundles rewritten and re-chained after signing are accepted by plain `verify` and refused by the signature check. Without a signature, or
+  without `--anchor`, the paragraph above applies unchanged.
 * **`--plan-digest` closes the gaps in the PLAN and no other.** The plan digest printed by `freeze` (record it outside the bundle) covers every assertion, its expected value and, bound into each
   assertion's digest, the whole definition of its lane: the spec with its steps, the egress profile, the deadline, the request expectations and probes, the reviewed Robot suite and the sha256 of its
   files, and the plan id and target. A bundle whose plan was changed in any of those fails with it. It cannot reject a forgery that left the plan alone.
@@ -413,9 +450,9 @@ with the reason `EVIDENCE_INCOMPLETE` whenever the report says `evidence_incompl
 exit 3, never VERIFIED; `verify` recomputes the same downgrade and accepts it. A name in the list must be a file a run of the plan can write (the expected set, or a blob of a browser lane); a fabricated
 name is `NOT_KEPT_MALFORMED`; a listed blob must also be one the lane's kept run record refers to (its digest appears in the record), so a made-up hex name does not count as something the lane lost.
 
-Limits of this tolerance, stated plainly (each needs a rewrite of the whole bundle; only `--anchor`, a manifest digest supplied from outside, rejects all of them; `--plan-digest` does NOT, because these forgeries leave the plan untouched and its digest matches):
+Limits of this tolerance, stated plainly (each needs a rewrite of the whole bundle; only `--anchor` (a manifest digest supplied from outside) or a valid signature of the manifest digest by a key the forger does not hold (`--anchor-sig` with `--anchor-pub`) rejects all of them; `--plan-digest` does NOT, because these forgeries leave the plan untouched and its digest matches):
 * A bundle that is rebuilt consistently by the product's own builder can declare a lane `evidence-over-cap` (or any non-complete status) with a matching list and thereby lower a FAILED or VERIFIED run to
-  INCONCLUSIVE, exit 3, without an anchor. The result can only be lower; the orchestrator's log is not used to corroborate it (the Robot lane's over-cap label can come from the parent's budget, which the
+  INCONCLUSIVE, exit 3, without an anchor or a signature. The result can only be lower; the orchestrator's log is not used to corroborate it (the Robot lane's over-cap label can come from the parent's budget, which the
   child's log lines do not carry), so it is documented rather than checked.
 * Files an over-cap lane's own run wrote and that are not in the required set can be deleted without being listed: the browser lane's `lane-result.json` and `run-record.json`, the stdout and stderr tails
   (`logs/<lane>.stdout.txt`, `.stderr.txt`) and `observations.json`. A missing `lane-result.json` or `run-record.json` makes the lane's assertions inconclusive anyway; the tails and the observations
@@ -424,7 +461,7 @@ Limits of this tolerance, stated plainly (each needs a rewrite of the whole bund
   a VERIFIED run to INCONCLUSIVE/3; a FAILED run stays FAILED.
 * `EVIDENCE_INCOMPLETE` was added to qa-evidence's closed list of INCONCLUSIVE reasons without a format version (as `TEST_DOUBLE` and `NATIVE_FAIL_VERIFIED_ASSERTIONS` were before): an older qa-evidence
   refuses a bundle that uses it. Note it when the format is frozen.
-The list is written by the same run as everything else: without an anchor it shows nothing a forger could not also write, but with it a forger gains no higher status.
+The list is written by the same run as everything else: without an anchor (or a signature) it shows nothing a forger could not also write, but with one a forger gains no higher status.
 
 ## Reading limits: tested and inferred (summary)
 
@@ -435,7 +472,7 @@ may outlive its SIGKILL (the parent does not wait for it past a short grace); a 
 ## What this does not show
 
 * The hash chain and the bundle manifest are unkeyed. They detect accidental changes and partial edits, not deliberate re-forging by anyone who can rewrite the
-  whole bundle; only a manifest digest published somewhere that party cannot write (an external anchor) changes that. This part prints the digests; it
+  whole bundle; only a manifest digest published somewhere that party cannot write (an external anchor), or a signature of that digest by a key that party does not hold (the optional signed anchor), changes that. This part prints the digests; it
   does not publish or attest them.
 * A verified verdict says the frozen assertions hold over the recorded observations. It does not say the application is correct.
 * The harness run record, the gateway log and the logs are not passed through the redactor (only browser artifacts are). Do not put a secret in a plan that

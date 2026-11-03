@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from bundle_helpers import bb, clean_env, host_target, make_mini_bundle, make_wheel, resum, run_script, synthetic_wheel, tree_listing
+from bundle_helpers import bb, clean_env, host_target, make_mini_bundle, make_wheel, resum, restore_default_signals, run_script, synthetic_wheel, tree_listing
 
 
 @pytest.fixture(scope="module")
@@ -255,7 +255,7 @@ def test_a_signal_during_the_install_leaves_nothing_behind(bundles, box):
     slow.write_text(f"#!/bin/sh\nif [ \"$1\" = \"-m\" ] && [ \"$2\" = \"venv\" ]; then sleep 30; fi\nexec '{sys.executable}' \"$@\"\n")
     slow.chmod(0o755)
     proc = subprocess.Popen(["bash", str(bundle / "install.sh"), "--prefix", str(box / "qa"), "--python", str(slow)], env=clean_env(box / "home"), cwd=str(box / "home"),
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True, preexec_fn=restore_default_signals)
     deadline = time.time() + 30
     while not (box / "qa").exists() and time.time() < deadline:
         time.sleep(0.1)
@@ -286,10 +286,10 @@ def test_install_browser_refuses_a_directory_that_is_not_an_installation(bundles
     assert run_script(bundles["v1"], "install-browser.sh", [], box / "home").returncode == 2
 
 
-def test_install_browser_downloads_into_the_prefix_through_the_pinned_playwright(bundles):
+def test_install_browser_puts_the_verified_archives_into_the_prefix_and_runs_playwright_only_for_the_system_libraries(bundles):
     text = (bundles["v1"] / "install-browser.sh").read_text(encoding="utf-8")
-    assert 'PLAYWRIGHT_BROWSERS_PATH="$prefix/browsers"' in text and '-m playwright install $deps chromium' in text
-    assert "not part of the bundle, not hashed by it" in text
+    assert 'browsers="$prefix/browsers"' in text and 'export PLAYWRIGHT_BROWSERS_PATH="$browsers"' in text and "-m playwright install-deps chromium" in text
+    assert "-m playwright install " not in text and "not hashed" not in text
 
 
 def test_the_scripts_are_executable_in_the_directory_and_in_the_archive(bundles, tmp_path):
@@ -531,3 +531,29 @@ def test_an_ordinary_prefix_still_installs_with_the_kit_present(policy_bundle, b
 def test_the_installer_documents_the_new_exit_status():
     text = (ROOT / "bundle" / "install.sh").read_text(encoding="utf-8")
     assert "2 usage, or a prefix under a path the adapter path policy refuses (for example /root)" in text
+
+
+# ------------------------------------------------------------------------------------------------ the licence and notice texts are installed with the bundle
+@pytest.fixture(scope="module")
+def noticed_bundle(tmp_path_factory):
+    return make_mini_bundle(tmp_path_factory.mktemp("noticed"), "1.0", with_notices=True)
+
+
+def test_install_puts_the_notices_tree_under_share_redevops_qa_and_records_the_index_digest(noticed_bundle, box):
+    prefix = box / "qa"
+    done = run_script(noticed_bundle, "install.sh", ["--prefix", str(prefix)], box / "home")
+    assert done.returncode == 0, done.stderr
+    installed = prefix / "venv" / "share" / "redevops-qa" / "THIRD_PARTY_NOTICES"
+    shipped = noticed_bundle / "THIRD_PARTY_NOTICES"
+    assert sorted(p.relative_to(installed).as_posix() for p in installed.rglob("*") if p.is_file()) == sorted(p.relative_to(shipped).as_posix() for p in shipped.rglob("*") if p.is_file())
+    for p in shipped.rglob("*"):
+        if p.is_file():
+            assert (installed / p.relative_to(shipped)).read_bytes() == p.read_bytes(), p
+    import hashlib
+    info = json.loads((prefix / "INSTALL.json").read_text())
+    assert info["third_party_notices_index_sha256"] == hashlib.sha256((shipped / "INDEX.json").read_bytes()).hexdigest()
+    assert json.loads((noticed_bundle / "BUNDLE.json").read_text())["third_party_notices"]["index_sha256"] == info["third_party_notices_index_sha256"]
+    assert info["browser_lock_sha256"] == hashlib.sha256((noticed_bundle / "browser.lock.json").read_bytes()).hexdigest()           # the browser pin and the notices are both recorded: neither replaced the other
+    assert info["schema_version"] == "1.0" and set(info) >= {"third_party_notices_index_sha256", "browser_lock_sha256", "bundle_json_sha256", "entries"}
+    gone = run_script(noticed_bundle, "uninstall.sh", ["--prefix", str(prefix)], box / "home")
+    assert gone.returncode == 0 and not prefix.exists(), gone.stderr                 # an extra key in INSTALL.json does not make uninstall refuse

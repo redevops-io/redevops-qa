@@ -532,6 +532,69 @@ def test_a_job_with_the_experimental_channel_a_condition_or_no_required_check_wa
         job["continue-on-error"] = True
     assert "no condition" in joined(job_problems(workflow_mutation=tolerant))
 
+    def run_step_conditional(job, wf):
+        next(s for s in job["steps"] if "tools/run_install_profile.py" in str(s.get("run", "")))["if"] = "always()"
+    assert "no condition" in joined(job_problems(workflow_mutation=run_step_conditional))
+
+    def upload_on_success_only(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = "success()"
+    assert "no condition" in joined(job_problems(workflow_mutation=upload_on_success_only))
+
+    def tolerant_upload(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["continue-on-error"] = True
+    assert "no condition" in joined(job_problems(workflow_mutation=tolerant_upload))
+
+
+@pytest.mark.parametrize("condition", ["always() && false", "failure()", "${{ always() }}", "always() || true", "success()", "ALWAYS()", "", True, None])
+def test_only_the_exact_text_always_qualifies_an_evidence_upload(condition):
+    step = {"uses": "actions/upload-artifact@v4", "with": {"name": "x", "path": "y"}}
+    if condition is not None:
+        step["if"] = condition
+    assert chk.keeps_evidence(step) is False
+
+
+@pytest.mark.parametrize("step", [
+    {"uses": "actions/checkout@v4", "if": "always()"},
+    {"uses": "evil/actions/upload-artifact@v4", "if": "always()"},
+    {"run": "echo hi", "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "run": "echo hi", "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "shell": "bash", "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "continue-on-error": True, "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "continue-on-error": False, "if": "always()"},
+])
+def test_a_step_that_is_not_a_plain_upload_never_qualifies_even_with_always(step):
+    assert chk.keeps_evidence(step) is False
+
+
+def test_a_plain_upload_with_always_qualifies():
+    assert chk.keeps_evidence({"uses": "actions/upload-artifact@v4", "if": "always()", "with": {"name": "x"}}) is True
+
+
+def test_the_job_check_refuses_the_look_alike_conditions_on_an_evidence_upload():
+    for condition in ("always() && false", "failure()", "${{ always() }}"):
+        def look_alike(job, wf, condition=condition):
+            next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = condition
+        assert "no condition" in joined(job_problems(workflow_mutation=look_alike)), condition
+
+    def non_upload(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-python"))["if"] = "always()"
+    assert "no condition" in joined(job_problems(workflow_mutation=non_upload))
+
+
+def test_the_selenium_profile_evidence_upload_still_fails_when_its_path_is_missing_and_expires():
+    uploads = [s for s in WORKFLOW["jobs"]["profile-local-python-selenium"]["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact")]
+    assert len(uploads) == 1 and uploads[0]["with"]["if-no-files-found"] == "error" and uploads[0]["with"]["retention-days"] == 14
+
+
+def test_the_evidence_upload_of_a_profile_job_may_run_always_so_that_a_failed_run_keeps_its_evidence():
+    def upload_always(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = "always()"
+    assert "no condition" not in joined(job_problems(workflow_mutation=upload_always))
+    sel = WORKFLOW["jobs"]["profile-local-python-selenium"]["steps"]
+    uploads = [s for s in sel if str(s.get("uses", "")).startswith("actions/upload-artifact")]
+    assert [u["if"] for u in uploads] == ["always()"] and uploads[0]["with"]["name"] == "evidence-local-python-selenium"
+    assert not [s for s in sel if "if" in s and s not in uploads]            # every other step, the profile's own included, is unconditional
+
     def unmarked(job, wf):
         job["name"] = "install profile local-python-robot (clean venv)"
     assert "NOT a required check until proven" in joined(job_problems(workflow_mutation=unmarked))
@@ -564,7 +627,7 @@ def test_the_workflow_has_one_job_per_offered_profile_and_never_makes_them_a_dep
             assert job["needs"] == "bundle" and "--phases source,install,smoke,check" in text and "--phases uninstall" in text and "required check" in job["name"]
             assert not {"if", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "if" in s or "continue-on-error" in s]
             continue
-        assert not {"if", "needs", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "if" in s or "continue-on-error" in s]
+        assert not {"if", "needs", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "continue-on-error" in s or ("if" in s and not chk.keeps_evidence(s))]
         assert "required check" in job["name"] and "--phases install,smoke,check" in text and "--phases uninstall" in text
         assert job["runs-on"] == "ubuntu-24.04"
     other = WORKFLOW["jobs"]["install-profiles"]
@@ -716,6 +779,395 @@ def test_re_checking_the_recorded_runs():
     assert "has no job" in joined(chk.verify_ci_problems(m, repo_name, Api(m, job_id=1)))
     assert "completed on" in joined(chk.verify_ci_problems(m, repo_name, Api(m, completed="2025-01-01")))
     assert "cannot read run" in joined(chk.verify_ci_problems(m, repo_name, Api(m, error=True)))
+
+
+# ------------------------------------------------------------------------------------------------ the log of a recorded run (opt in)
+def log_for(vb, *, sha=None, counts=None, checkout=True, ok_lines=True):
+    """A job log shaped like the real one: the checkout line (printed by the install step and again by the uninstall step) and one pytest summary per suite."""
+    sha = sha or vb["source_commit"]
+    counts = counts if counts is not None else [int(x) for x in chk.SUMMARY_COUNTS.search(vb["summary"]).group(1).split(" + ")]
+    lines = ["2026-11-03T20:22:50.0000000Z ##[group]Run python tools/run_install_profile.py"]
+    if checkout:
+        lines.append(f"2026-11-03T20:22:54.9296431Z checkout verified: HEAD is the pinned commit {sha}, clean tree")
+    lines += [f"2026-11-03T20:23:1{i}.8464763Z {n} passed in 8.86s" for i, n in enumerate(counts)]
+    lines += [f"2026-11-03T20:23:4{i}.9021048Z OK {n} tests, 0 skipped, 0 failed" for i, n in enumerate(counts)] if ok_lines else []
+    if checkout:
+        lines.append(f"2026-11-03T20:23:46.6420489Z checkout verified: HEAD is the pinned commit {sha}, clean tree")
+    return "\n".join(lines) + "\n"
+
+
+class Logs:
+    def __init__(self, m, **kw):
+        self.by_job = {vb["job_id"]: log_for(vb, **kw) for p in m["profiles"] for h in p["hosts"] for vb in [h["verified_by"]] if vb}
+        self.error = False
+
+    def __call__(self, url):
+        if self.error:
+            raise OSError("expired")
+        return self.by_job[int(url.split("/jobs/")[1].split("/")[0])]
+
+
+def recorded_runs():
+    m = fresh()
+    assert [vb for p in m["profiles"] for h in p["hosts"] for vb in [h["verified_by"]] if vb], "the repository records at least one run"
+    return m
+
+
+def test_a_recorded_run_whose_log_confirms_the_commit_and_the_counts_is_accepted_and_reported_as_confirmed():
+    m = recorded_runs()
+    problems, confirmed = chk.verify_ci_report(m, "o/r", Api(m), Logs(m), head_on_main=lambda sha: False)
+    assert problems == [] and confirmed == {(p["id"], h["os_arch"]) for p in m["profiles"] for h in p["hosts"] if h["verified_by"]}
+
+
+def test_a_log_that_shows_another_installed_commit_is_refused():
+    m = recorded_runs()
+    problems, confirmed = chk.verify_ci_report(m, "o/r", Api(m), Logs(m, sha="5e9c8da6248f9c4e170b77ab4ff202b519c970a8"), head_on_main=lambda sha: False)
+    assert problems and confirmed == set()                              # a refused log never opens the freshness exception
+    assert "installed " + "5e9c8da" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, sha="5e9c8da6248f9c4e170b77ab4ff202b519c970a8")))
+
+
+def test_the_old_record_that_names_the_new_pin_for_the_old_runs_numbers_is_refused():
+    m = recorded_runs()
+    for p in m["profiles"]:
+        for h in p["hosts"]:
+            if h["verified_by"]:
+                h["verified_by"]["summary"] = h["verified_by"]["summary"].replace("369 + 154 + 12", "359 + 135 + 11").replace("369 + 188 + 13", "359 + 133 + 10")
+    old_logs = Logs(m, sha="5e9c8da6248f9c4e170b77ab4ff202b519c970a8")      # what the run of 2026-11-01 printed
+    found = joined(chk.verify_ci_problems(m, "o/r", Api(m), old_logs))
+    assert "installed 5e9c8da6248f9c4e170b77ab4ff202b519c970a8, the record says " + m["source"]["pinned_commit"] in found
+
+
+def test_logged_counts_that_differ_from_the_recorded_ones_are_refused():
+    m = recorded_runs()
+    assert "passed tests, the record says" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, counts=[1, 2, 3])))
+    assert "shows no passed tests" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, counts=[])))
+
+
+def test_a_log_without_the_checkout_line_is_refused():
+    m = recorded_runs()
+    assert "cannot be confirmed" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, checkout=False)))
+
+
+def test_a_summary_without_counts_is_refused():
+    m = recorded_runs()
+    for p in m["profiles"]:
+        for h in p["hosts"]:
+            if h["verified_by"]:
+                h["verified_by"]["summary"] = "it passed"
+    logs = Logs(recorded_runs())
+    assert "does not state the passed counts" in joined(chk.verify_ci_problems(m, "o/r", Api(m), logs))
+
+
+def http_error(code):
+    import urllib.error
+    return urllib.error.HTTPError("https://api.example.invalid/logs", code, "x", {}, None)
+
+
+class Unreadable:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __call__(self, url):
+        raise self.exc
+
+
+@pytest.mark.parametrize("exc", [http_error(401), http_error(403), http_error(500), http_error(502), OSError("down"), TimeoutError("slow")])
+def test_a_log_that_cannot_be_read_for_any_reason_but_expiry_fails_closed_even_for_a_head_on_main(exc):
+    m = recorded_runs()
+    for on_main in (False, True):
+        found = joined(chk.verify_ci_problems(m, "o/r", Api(m), Unreadable(exc), head_on_main=lambda sha, v=on_main: v))
+        assert "failing closed" in found, (exc, on_main)
+
+
+@pytest.mark.parametrize("code", [404, 410])
+def test_a_log_that_is_gone_is_tolerated_for_a_head_on_main_only(code):
+    m = recorded_runs()
+    assert chk.verify_ci_problems(m, "o/r", Api(m), Unreadable(http_error(code)), head_on_main=lambda sha: True) == []
+    assert "the log is gone but the head of this run is not on main" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Unreadable(http_error(code)), head_on_main=lambda sha: False))
+    problems, confirmed = chk.verify_ci_report(m, "o/r", Api(m), Unreadable(http_error(code)), head_on_main=lambda sha: True)
+    assert confirmed == set()                                           # tolerated is not confirmed: it never opens the exception for a head that is off main
+
+
+def test_no_log_reader_fails_closed_for_a_head_off_main_and_asks_nothing_for_a_head_on_main():
+    m = recorded_runs()
+    assert "failing closed" in joined(chk.verify_ci_problems(m, "o/r", Api(m), None, head_on_main=lambda sha: False))
+    assert chk.verify_ci_problems(m, "o/r", Api(m), None, head_on_main=lambda sha: True) == []
+
+
+def test_the_false_old_record_is_refused_when_the_log_reader_gets_403_even_though_its_head_is_on_main():
+    m = recorded_runs()
+    for p in m["profiles"]:
+        for h in p["hosts"]:
+            if h["verified_by"]:
+                h["verified_by"]["summary"] = h["verified_by"]["summary"].replace("369 + 154 + 12", "359 + 135 + 11").replace("369 + 188 + 13", "359 + 133 + 10")
+    for exc in (http_error(403), http_error(401), http_error(500)):
+        assert "failing closed" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Unreadable(exc), head_on_main=lambda sha: True))
+
+
+def test_a_log_that_disagrees_is_refused_even_when_the_head_is_on_main():
+    m = recorded_runs()
+    assert joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, counts=[1]), head_on_main=lambda sha: True))
+
+
+def test_a_head_that_is_only_an_ancestor_of_the_commit_under_test_is_fresh_only_when_its_log_confirmed_it(repo):
+    root, on_main, off = repo
+    git(root, "checkout", "-q", "side")                                   # HEAD is on a branch that is not main; off is HEAD, an ancestor of itself
+    m = with_commits(on_main, off)
+    key = ("local-python-robot", profile(m, "local-python-robot")["hosts"][0]["os_arch"])
+    assert "not an ancestor of main" in joined(chk.freshness_problems(m, root, main_ref="main"))
+    assert "--verify-ci" in joined(chk.freshness_problems(m, root, main_ref="main"))
+    assert chk.freshness_problems(m, root, main_ref="main", head_ok=frozenset({key})) == []
+    assert "not an ancestor of main" in joined(chk.freshness_problems(m, root, main_ref="main", head_ok=frozenset({("other", "linux-x86_64")})))
+
+
+def test_a_head_that_is_in_neither_history_stays_refused_even_when_confirmed(repo):
+    root, on_main, off = repo                                             # HEAD is main (on_main); off is on the side branch only
+    m = with_commits(on_main, off)
+    key = ("local-python-robot", profile(m, "local-python-robot")["hosts"][0]["os_arch"])
+    found = joined(chk.freshness_problems(m, root, main_ref="main", head_ok=frozenset({key})))
+    assert "not an ancestor of main" in found and "--verify-ci" not in found
+
+
+def test_the_pinned_commit_never_gets_the_exception(repo):
+    root, on_main, off = repo
+    git(root, "checkout", "-q", "side")
+    m = with_commits(off)                                                  # the pin is only on the side branch
+    everything = frozenset((p["id"], h["os_arch"]) for p in m["profiles"] for h in p["hosts"])
+    assert "source pinned_commit" in joined(chk.freshness_problems(m, root, main_ref="main", head_ok=everything))
+
+
+def test_the_log_is_read_through_the_redirect_without_sending_the_credential(monkeypatch):
+    import http.server
+    import threading
+    seen = {}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            seen[self.path] = self.headers.get("Authorization")
+            if self.path == "/api/logs":
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{self.server.server_address[1]}/blob")
+                self.end_headers()
+                return
+            body = b"log text"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+    server = http.server.HTTPServer(("127.0.0.1", 0), H)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    monkeypatch.setenv("GH_TOKEN", "x" * 8)
+    monkeypatch.setattr(chk, "LOG_REDIRECT_PREFIXES", ("http://127.0.0.1",))          # the local server stands in for the https storage address
+    try:
+        assert chk.api_get_log(f"http://127.0.0.1:{server.server_address[1]}/api/logs") == "log text"
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert seen["/api/logs"] == "Bearer " + "x" * 8 and seen["/blob"] is None
+
+
+def test_a_log_with_one_right_and_one_wrong_checkout_line_is_refused():
+    m = recorded_runs()
+    logs = Logs(m)
+    for job, text in logs.by_job.items():
+        wrong = text.replace("pinned commit " + m["source"]["pinned_commit"], "pinned commit 5e9c8da6248f9c4e170b77ab4ff202b519c970a8", 1)
+        assert wrong != text
+        logs.by_job[job] = wrong
+    assert "installed" in joined(chk.verify_ci_problems(m, "o/r", Api(m), logs))
+
+
+def test_a_log_must_show_every_counted_suite_as_ok_with_no_skip_and_no_failure():
+    m = recorded_runs()
+    assert "'OK N tests, 0 skipped, 0 failed'" in joined(chk.verify_ci_problems(m, "o/r", Api(m), Logs(m, ok_lines=False)))
+    logs = Logs(m)
+    for job, text in logs.by_job.items():
+        logs.by_job[job] = text.replace(" passed in 8.86s", " passed, 2 skipped in 8.86s", 1).replace("0 skipped, 0 failed", "2 skipped, 0 failed", 1)
+    assert "'OK N tests, 0 skipped, 0 failed'" in joined(chk.verify_ci_problems(m, "o/r", Api(m), logs))
+
+
+def serve(handler_factory):
+    import http.server
+    import threading
+    server = http.server.HTTPServer(("127.0.0.1", 0), handler_factory)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def redirecting_handler(target):
+    import http.server
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path == "/api/logs":
+                self.send_response(302)
+                self.send_header("Location", target(self.server))
+                self.end_headers()
+                return
+            body = b"x" * 5000
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+    return H
+
+
+@pytest.mark.parametrize("target", ["file:///etc/hostname", "ftp://127.0.0.1/x", "http://127.0.0.1:9/blob", "//127.0.0.1/blob"])
+def test_the_log_redirect_is_followed_only_to_an_https_address(target, monkeypatch):
+    server = serve(redirecting_handler(lambda srv: target))
+    try:
+        with pytest.raises(OSError):
+            chk.api_get_log(f"http://127.0.0.1:{server.server_address[1]}/api/logs")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_log_body_is_bounded(monkeypatch):
+    monkeypatch.setattr(chk, "LOG_REDIRECT_PREFIXES", ("http://127.0.0.1",))      # the local server stands in for the https storage address
+    monkeypatch.setattr(chk, "LOG_MAX_BYTES", 1000)
+    server = serve(redirecting_handler(lambda srv: f"http://127.0.0.1:{srv.server_address[1]}/blob"))
+    try:
+        with pytest.raises(OSError) as info:
+            chk.api_get_log(f"http://127.0.0.1:{server.server_address[1]}/api/logs")
+        assert "larger than 1000" in str(info.value)
+        monkeypatch.setattr(chk, "LOG_MAX_BYTES", 5000)
+        assert len(chk.api_get_log(f"http://127.0.0.1:{server.server_address[1]}/api/logs")) == 5000
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+# ------------------------------------------------------------------------------------------------ the pin at the recorded head (no log, no network)
+@pytest.fixture()
+def pin_repo(tmp_path):
+    """main: commit A with pin aaaa...; side branch (HEAD): commit B with pin bbbb... ; PROFILES is committed in both."""
+    def write(pin):
+        (tmp_path / chk.PROFILES).write_text(json.dumps({"source": {"pinned_commit": pin}}))
+    git(tmp_path, "init", "-q", "-b", "main")
+    write("a" * 40)
+    git(tmp_path, "add", chk.PROFILES)
+    git(tmp_path, "commit", "-q", "-m", "A")
+    a = git(tmp_path, "rev-parse", "HEAD")
+    git(tmp_path, "checkout", "-q", "-b", "side")
+    write("b" * 40)
+    git(tmp_path, "commit", "-q", "-am", "B")
+    b = git(tmp_path, "rev-parse", "HEAD")
+    return tmp_path, a, b
+
+
+def recorded(head, source_commit, pinned="c" * 40):
+    m = fresh()
+    m["source"]["pinned_commit"] = pinned
+    for p in m["profiles"]:
+        for h in p["hosts"]:
+            h["verified_by"] = None
+    h = profile(m, "local-python-robot")["hosts"][0]
+    h["verified_by"] = {"head_sha": head, "source_commit": source_commit}
+    return m, ("local-python-robot", h["os_arch"])
+
+
+def test_the_pin_at_the_recorded_head_must_equal_the_source_commit_the_run_claims(pin_repo):
+    root, a, b = pin_repo
+    m, key = recorded(b, "b" * 40)
+    assert chk.pin_at_head_report(m, root) == ([], {key})
+    m, key = recorded(a, "b" * 40)                                      # the run's head had another pin: the record claims what that run cannot have installed
+    problems, ok = chk.pin_at_head_report(m, root)
+    assert ok == set() and "the pinned commit at the recorded head" in joined(problems) and "a" * 40 in joined(problems)
+
+
+def test_the_pin_at_the_recorded_head_fails_closed_when_it_cannot_be_read(pin_repo):
+    root, a, b = pin_repo
+    m, key = recorded("d" * 40, "b" * 40)
+    problems, ok = chk.pin_at_head_report(m, root)
+    assert ok == set() and "cannot read" in joined(problems) and "full history" in joined(problems)
+    git(root, "mv", chk.PROFILES, "other.json")
+    git(root, "commit", "-q", "-m", "C")
+    m, key = recorded(git(root, "rev-parse", "HEAD"), "b" * 40)
+    assert "cannot read" in joined(chk.pin_at_head_report(m, root)[0])       # the file is not at that path in that commit
+    (root / chk.PROFILES).write_text("not json")
+    git(root, "add", chk.PROFILES)
+    git(root, "commit", "-q", "-m", "D")
+    m, key = recorded(git(root, "rev-parse", "HEAD"), "b" * 40)
+    assert "no readable source.pinned_commit" in joined(chk.pin_at_head_report(m, root)[0])
+
+
+@pytest.mark.parametrize("head", ["v1", "main", "HEAD", "side", "abcdef123456", "--output=PLACEHOLDER", "-p", "--end-of-options", "", "B" * 40, "g" * 40, "a" * 39, "a" * 41])
+def test_a_recorded_head_that_is_not_a_full_commit_id_is_a_finding_and_never_reaches_git(pin_repo, head, tmp_path, monkeypatch):
+    root, a, b = pin_repo
+    target = tmp_path / "written-by-git"
+    head = head.replace("PLACEHOLDER", str(target))
+    calls = []
+    real = chk.caps._git
+    monkeypatch.setattr(chk.caps, "_git", lambda r, *args: calls.append(args) or real(r, *args))
+    problems, ok = chk.pin_at_head_report(recorded(head, "b" * 40)[0], root)
+    assert ok == set() and "not a full 40-character commit id" in joined(problems)
+    assert calls == [] and not target.exists()
+
+
+def test_git_gets_the_revision_after_end_of_options(pin_repo, monkeypatch):
+    root, a, b = pin_repo
+    calls = []
+    real = chk.caps._git
+    monkeypatch.setattr(chk.caps, "_git", lambda r, *args: calls.append(args) or real(r, *args))
+    assert chk.pin_at_head_report(recorded(b, "b" * 40)[0], root)[1]
+    assert calls == [("show", "--end-of-options", f"{b}:{chk.PROFILES}")]
+
+
+def test_the_log_redirect_is_https_only_by_default():
+    assert chk.LOG_REDIRECT_PREFIXES == ("https://",)
+
+
+def test_the_head_exception_without_verify_ci_rests_on_the_pin_at_head_alone(pin_repo, monkeypatch):
+    root, a, b = pin_repo                                               # HEAD = B, which is off main; the record cites B
+    m, key = recorded(b, "b" * 40, pinned=a)
+    pin_findings, pin_ok = chk.pin_at_head_report(m, root)
+    assert pin_findings == [] and chk.freshness_problems(m, root, main_ref="main", head_ok=frozenset(pin_ok)) == []      # offline, no log: accepted
+    m, key = recorded(b, "a" * 40, pinned=a)
+    pin_findings, pin_ok = chk.pin_at_head_report(m, root)
+    assert pin_findings and "not an ancestor of main" in joined(chk.freshness_problems(m, root, main_ref="main", head_ok=frozenset(pin_ok)))   # a wrong pin: refused
+
+
+def test_main_passes_the_log_reader_and_the_confirmed_pairs_to_the_checks(monkeypatch, capsys):
+    seen = {}
+
+    def fake_report(profiles, repo, fetch=None, fetch_log=None, head_on_main=None):
+        seen["fetch_log"], seen["fetch"] = fetch_log, fetch
+        return [], {("local-python-robot", "linux-x86_64")}
+
+    def fake_check_all(root, *, main_ref=None, freshness=True, head_ok=None):
+        seen["head_ok"] = head_ok
+        return []
+    monkeypatch.setattr(chk, "verify_ci_report", fake_report)
+    monkeypatch.setattr(chk, "check_all", fake_check_all)
+    assert chk.main(["--verify-ci"]) == 0
+    assert seen["fetch_log"] is chk.api_get_log and seen["fetch"] is chk.caps._api_get and seen["head_ok"] == frozenset({("local-python-robot", "linux-x86_64")})
+    seen.clear()
+    assert chk.main([]) == 0
+    assert seen == {"head_ok": None}                                    # without --verify-ci nothing reads the API, and the pin-at-head set alone decides
+
+
+def test_check_all_reports_the_pin_findings_and_lets_only_pairs_that_passed_every_check_use_the_head_exception(monkeypatch):
+    k1, k2 = ("local-python-robot", "linux-x86_64"), ("local-python-selenium", "linux-x86_64")
+    seen = {}
+    monkeypatch.setattr(chk, "semantic_problems", lambda *a, **k: [])
+    monkeypatch.setattr(chk, "docs_problems", lambda *a, **k: [])
+    monkeypatch.setattr(chk, "pin_at_head_report", lambda profiles, root: (["pin finding"], {k1}))
+    monkeypatch.setattr(chk, "freshness_problems", lambda profiles, root, main_ref=None, head_ok=frozenset(): seen.setdefault("calls", []).append(head_ok) or [])
+    found = chk.check_all(ROOT, main_ref="main")
+    assert "pin finding" in found and seen["calls"][-1] == frozenset({k1})                  # no --verify-ci: the pin-at-head set alone
+    chk.check_all(ROOT, main_ref="main", head_ok=frozenset({k1, k2}))
+    assert seen["calls"][-1] == frozenset({k1})                                             # with --verify-ci: confirmed AND pin-at-head
+    chk.check_all(ROOT, main_ref="main", head_ok=frozenset({k2}))
+    assert seen["calls"][-1] == frozenset()
+    seen.clear()
+    assert "pin finding" not in chk.check_all(ROOT, main_ref="main", freshness=False) and "calls" not in seen   # --no-freshness skips the git-based checks
 
 
 # ------------------------------------------------------------------------------------------------ the runner

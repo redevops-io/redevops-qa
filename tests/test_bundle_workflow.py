@@ -180,11 +180,13 @@ def test_the_verify_job_is_a_second_job_that_starts_from_the_kept_artifacts_in_a
     run = "\n".join(str(s.get("run", "")) for s in job["steps"])
     assert './install.sh --prefix "$RUNNER_TEMP/verifier"' in run and "install-browser" not in run and "--with-deps" not in run
     assert "verify \"$bundle\" --anchor \"$anchor\" --plan-digest \"$plan\" --require-anchor --require-plan-digest --json" in run
-    assert "check_demo_outcome.py\" verify" in run and run.count('test "$status" -eq 5') == 2 and "printf 'x' >> \"$RUNNER_TEMP/changed/report.json\"" in run
+    assert "check_demo_outcome.py\" verify" in run and run.count('test "$status" -eq 5') == 3 and "printf 'x' >> \"$RUNNER_TEMP/changed/report.json\"" in run
     # a refusal is checked by its finding codes, not only by the exit status (any crash that exits 5 would otherwise pass)
     for code in ("SIZE_MISMATCH report.json", "REPORT_UNREADABLE report.json", "ANCHOR_MISMATCH anchor", "ANCHOR_REQUIRED anchor"):
         assert f'grep -q "^  {code}:"' in run, code
     assert "--anchor \"sha256:$(printf '0%.0s' $(seq 64))\"" in run
+    # the downgrade guard of the optional signed anchor: the unsigned demo bundle must be refused where a signature is required (no key, no secret, no permission is involved)
+    assert '--require-signed-anchor > "$RUNNER_TEMP/unsigned.out"' in run and 'grep -q "^  ANCHOR_SIGNATURE_REQUIRED anchor_signature:"' in run and "--anchor-sig" not in run and "--anchor-pub" not in run
     assert not any(str(s.get("uses", "")).startswith("actions/upload-artifact") for s in job["steps"])
 
 
@@ -233,3 +235,35 @@ def test_the_root_check_uninstalls_before_it_removes_the_directory_that_holds_un
     assert uninstall < remove_work
     assert body.index('[ -e "$prefix/INSTALL.json" ]') < uninstall
     assert 'rm -rf -- "$prefix"' in body and body.index('rm -rf -- "$prefix"') < remove_work              # and the prefix is gone even if uninstall.sh refused
+
+
+# -------------------------------------------------------------------------------------------------------------- the browser pin in CI
+def test_the_acceptance_script_tampers_with_the_installed_browser_and_requires_the_refusals():
+    """The clean-runner job installs the real Chromium and then breaks it five ways: doctor must fail naming the difference and not launch the browser, demo must refuse (exit 3, no evidence
+    directory), a Robot-only plan must still run, and restoring the file must make doctor pass again. An installation without a browser must be reported as not installed."""
+    for fragment in ('tamper_case "one byte changed (same size)" CHANGED', 'tamper_case "a byte appended (size changed)" SIZE', 'tamper_case "a changed file mode" MODE', 'tamper_case "an extra file" EXTRA',
+                     'tamper_case "a missing file" MISSING', "doctor must exit 3", "doctor did not fail the browser build", "doctor launched a browser that failed the pin check",
+                     "demo must refuse to start the browser lane with exit status 3", "BROWSER_PIN", "demo made an evidence directory although the browser lane was refused",
+                     "a plan with only a Robot lane must still run with a tampered browser", "doctor did not pass again after restoring", "doctor did not say that the browser is not installed",
+                     "doctor did not report the browser build as matching the pin", "the tampered file was not restored",
+                     "doctor did not fail for a bundle installation without its browser pin", "demo must refuse to start the browser lane without the browser pin", "doctor did not pass again after restoring the browser pin"):
+        assert fragment in ACCEPT, fragment
+    assert ACCEPT.index("1b. the browser pin") < ACCEPT.index('step "2. rollback')
+
+
+def test_the_builder_puts_the_browser_lock_into_the_pinned_wheel_of_a_release_build():
+    source = (ROOT / "tools" / "build_bundle.py").read_text(encoding="utf-8")
+    assert "build_pinned_wheel(pins_file, trees, deps, version, epoch, wheels_dir, (BUNDLE_SRC / BROWSER_LOCK).read_bytes())" in source
+
+
+def test_the_bundle_tests_job_runs_the_browser_pin_tests_and_the_install_job_runs_the_real_browser_step():
+    run = "\n".join(str(s.get("run", "")) for s in MAIN["jobs"]["bundle-tests"]["steps"])
+    assert "tests/test_bundle_browser.py" in run and "tests/test_bundle_browser_lock.py" in run and "tests/test_browser_mutations.py" in run
+    install = MAIN["jobs"]["bundle-install"]
+    assert "browser.lock.json" in install["name"] or "pin" in install["name"]
+    assert any("tools/bundle_acceptance.sh" in str(s.get("run", "")) for s in install["steps"])
+
+
+def test_the_install_job_checks_that_the_fallback_urls_of_the_pin_serve_the_pinned_bytes():
+    runs = [str(s.get("run", "")) for s in MAIN["jobs"]["bundle-install"]["steps"]]
+    assert any(r.strip() == "python -I packages/qa-runner/src/qa_runner/browser_pin.py urls --lock bundle/browser.lock.json --fallbacks-only" for r in runs)

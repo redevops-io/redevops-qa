@@ -23,6 +23,17 @@ Actions `open`, `click`, `type`, `read`, `check`, `screenshot`, one at a time un
   content, only a fixed code such as `NOT_FOUND` or `STALE`.
 * `check` compares an element's text with an expected value and returns a **native** assertion that declares the assertion id the
   request names. It is evidence for a canonical assertion only through an explicit mapping, and is never an oracle verdict.
+* Starting ChromeDriver and Chrome is the slowest step of a session (a cold first start on a CI runner has taken close to ten
+  seconds), so it has its own budget: `AdapterConfig.launch_timeout_s` (default 60). Call `adapter.start()` once before the first action
+  to start the browser under that budget, outside every action's `timeout_s`; a start that does not finish in time is a `TIMEOUT`
+  fault and is never retried. When the first action starts the browser instead, the session's per-action `timeout_s` (default 10 s)
+  bounds the start too, so give that action a larger one. `close()` and `abort()` cancel a start that has not finished: the browser
+  is quit the moment its start returns, so an abandoned start does not leave a browser running. The start itself cannot be interrupted
+  from outside; it is bounded by ChromeDriver's own start-up limits.
+  A start that returns in the very instant the budget runs out counts as a success and its browser is kept. A start that really timed
+  out leaves the adapter terminal until `close()`: the late browser is quit when its start returns, every further `start()` or action
+  raises a `TIMEOUT` fault without launching a second browser (inside a session the later actions of that session fail fast the same
+  way), and `close()` makes the adapter usable again. A factory that raises `KeyboardInterrupt` or `SystemExit` propagates it unchanged.
 * Screenshots are off unless enabled, because an image cannot be redacted.
 * Stale and not-interactable elements are retried within the session's retry limit; a missing element, a timeout and a browser crash are
   not. A missing Selenium, browser or driver executable is `ERROR` with code `UNAVAILABLE`: never a pass, never a skip, no fallback.

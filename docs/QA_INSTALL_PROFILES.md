@@ -2,7 +2,7 @@
 
 # ReDevOps QA: install profiles
 
-This page is generated from [`qa-install-profiles.json`](../qa-install-profiles.json), the data the installer configurator is built from. Every profile but `local-python-qa` installs from a clone of https://github.com/redevops-io/redevops-qa at the pinned commit `5e9c8da6248f9c4e170b77ab4ff202b519c970a8`; The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them. The profile `local-python-qa` installs from a bundle archive instead (see its section).
+This page is generated from [`qa-install-profiles.json`](../qa-install-profiles.json), the data the installer configurator is built from. Every profile but `local-python-qa` installs from a clone of https://github.com/redevops-io/redevops-qa at the pinned commit `55c746e35412a92a287ebbbc239a69de0fbebf10`; The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them. The profile `local-python-qa` installs from a bundle archive instead (see its section).
 
 A profile is **verified** only when a CI job runs that exact profile, step by step, on the host named; **experimental** means the steps are written and partly or not at all run for that host; **planned** means nothing is offered yet and the reason is given.
 
@@ -44,7 +44,7 @@ Hosts:
 
 | Host | Status | Prerequisites | Verified by |
 |---|---|---|---|
-| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. | [run 41306373018](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018) (whole run green, head `6ee02a75fc5a`), [job 124847489639](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489639), installed from the pinned commit `5e9c8da6248f`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, installed from the pinned commit in a clean virtual environment; the whole run is green |
+| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. | [run 41712009322](https://github.com/redevops-io/redevops-qa/actions/runs/41712009322) (whole run green, head `036861144582`), [job 126182197434](https://github.com/redevops-io/redevops-qa/actions/runs/41712009322/job/126182197434), installed from the pinned commit `55c746e35412`, 2026-11-03: install, smoke and check phases then uninstall: 369 + 188 + 13 tests passed, 0 skipped, 0 failed, installed from the pinned commit in a clean virtual environment; the whole run is green |
 | linux-arm64 | experimental | Linux arm64 with a POSIX shell. | The same steps are written for this host but no CI job runs them here. |
 | macos-arm64 | experimental | macOS on Apple silicon with Python 3.12 as `python3.12`. | The same steps are written for this host but no CI job runs them here. |
 
@@ -60,7 +60,7 @@ Parameters:
 # Clone the repository
 git clone https://github.com/redevops-io/redevops-qa.git redevops-qa
 # Check out the pinned commit
-git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8
+git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10
 ```
 
 ### Install
@@ -134,7 +134,7 @@ Hosts:
 
 | Host | Status | Prerequisites | Verified by |
 |---|---|---|---|
-| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. Chrome and ChromeDriver 156 were present on that runner image. | [run 41306373018](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018) (whole run green, head `6ee02a75fc5a`), [job 124847489672](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489672), installed from the pinned commit `5e9c8da6248f`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, installed from the pinned commit in a clean virtual environment; the whole run is green |
+| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. Chrome and ChromeDriver 156 were present on that runner image. | [run 41712009322](https://github.com/redevops-io/redevops-qa/actions/runs/41712009322) (whole run green, head `036861144582`), [job 126182197472](https://github.com/redevops-io/redevops-qa/actions/runs/41712009322/job/126182197472), installed from the pinned commit `55c746e35412`, 2026-11-03: install, smoke and check phases then uninstall: 369 + 154 + 12 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, installed from the pinned commit in a clean virtual environment; the whole run is green |
 | macos-arm64 | experimental | macOS on Apple silicon with Python 3.12 as `python3.12`, Chrome and its ChromeDriver. | The same steps are written for this host but no CI job runs them here. |
 
 Parameters:
@@ -151,7 +151,7 @@ Parameters:
 # Clone the repository
 git clone https://github.com/redevops-io/redevops-qa.git redevops-qa
 # Check out the pinned commit
-git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8
+git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10
 ```
 
 ### Install
@@ -240,7 +240,7 @@ Parameters:
 # Clone the repository
 git clone https://github.com/redevops-io/redevops-qa.git redevops-qa
 # Check out the pinned commit
-git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8
+git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10
 ```
 
 ### Install
@@ -320,7 +320,7 @@ Prerequisites:
 * Python 3.12 available as `python3.12` with the `venv` module (Debian and Ubuntu: the `python3.12-venv` package). The bundle is built for CPython 3.12 and install.sh refuses any other minor.
 * The bundle archive and its `.tar.sha256` file in one directory (`bundle_dir`): built from a checkout of https://github.com/redevops-io/redevops-qa with `python tools/build_bundle.py build --out DIR`, or taken from a workflow run. No bundle is published. Compare the sha256 of the archive with a value you obtained from somewhere its producer does not control.
 * bash, tar, and root or sudo for the browser step's `--with-deps` (it installs the operating system libraries Chromium needs with apt).
-* Network access to the Playwright download host for Chromium (the browser is not in the bundle and is not hashed by it). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.
+* Network access to the Playwright download host for Chromium (the browser is not in the bundle; its archives are checked against sha256 values pinned in the bundle before they are unpacked). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.
 * All commands are run from one working directory, using a POSIX shell.
 
 Hosts:
@@ -351,7 +351,7 @@ tar xf '{bundle_dir}/redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64.tar'
 ```text
 # Install into a new directory: checks the Python minor, the platform and every file of the bundle, then pip install --no-index --require-hashes from the wheelhouse
 redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install.sh --prefix '{install_dir}' --python python3.12
-# The separate browser step: downloads Chromium (not part of the bundle, not hashed by it) and the operating system libraries it needs
+# The separate browser step: downloads Chromium (not part of the bundle; the archives and the unpacked tree are checked against the bundle's pin) and the operating system libraries it needs (not covered by the pin)
 redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install-browser.sh --prefix '{install_dir}' --with-deps
 ```
 
@@ -386,7 +386,7 @@ Limitations:
 
 * CPython 3.12 on Linux x86_64 only. Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.
 * No bundle is published and no release exists: the archive comes from a build of the repository or from a workflow run, and its digest is only as trustworthy as the place you obtained it from.
-* Chromium is downloaded when the browser step runs; the bundle records the build the pinned Playwright expects and does not hash or ship the browser.
+* Chromium is downloaded when the browser step runs and is not shipped in the bundle; the bundle pins the sha256 of the archives and the mode, size and sha256 of every file of the unpacked tree, the step refuses an archive that does not match, and doctor checks the installed tree. Not covered: the operating system libraries of --with-deps, and the availability of the download host.
 * The runner in this release runs plans against the bundled fixture app only; a Robot lane that asks for the kernel layers (`origin-only`) is limited by them and does not start where they are unavailable (`doctor` measures them), and a Robot lane that says `not-enforced` is limited by nothing (see the egress matrix in the runner's README).
-* `verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite shows that a bundle is the one it was taken from. A verified run does not show that the application under test is correct.
+* `verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite, or a signature of it by a key the producer does not hold (optional), shows that a bundle is the one it was taken from or signed. A verified run does not show that the application under test is correct.
 * The agent-harness and runtime-contracts trees are installed from the bundle at the commits pins.toml names; the name `agent-harness` on the public package index belongs to an unrelated project and is never installed.
