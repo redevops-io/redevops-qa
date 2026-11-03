@@ -16,6 +16,7 @@ import hashlib
 import os
 import re
 import sys
+import sysconfig
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -120,6 +121,11 @@ class Pins:
         return self.path.parent
 
 
+def _purelib() -> Path:
+    """Where this interpreter installs pure-Python packages (a virtual environment's site-packages, for a bundle install)."""
+    return Path(sysconfig.get_path("purelib")).resolve()
+
+
 def installed_pins_file() -> Optional[Path]:
     """The pins file of a bundle install: ``<prefix>/share/redevops-qa/pins.toml`` (the pinned trees it names lie next to it, under ``.pinned``). ``None`` when this
     environment holds no such file."""
@@ -133,13 +139,13 @@ def find_pins_file(start: Optional[Path] = None) -> Path:
         return Path(env)
     here = (start or Path(__file__)).resolve()
     try:
-        here.relative_to(Path(sys.prefix).resolve())
+        here.relative_to(_purelib())
         under_prefix = True
     except ValueError:
         under_prefix = False
     if under_prefix:
-        # This module is installed into the environment: its pins are the ones installed with it. A missing file is a failure, never a reason to look further up for another one (a stray
-        # pins.toml above the environment would name other trees).
+        # This module is installed into the interpreter's own package directory (not merely somewhere below its prefix: a checkout in /usr/src is not an installation): its pins are the ones
+        # installed with it. A missing file is a failure, never a reason to look further up for another one (a stray pins.toml above the environment would name other trees).
         installed = installed_pins_file()
         if installed is None:
             raise PinsInvalid(f"this package is installed under {sys.prefix} but {Path(sys.prefix) / 'share' / 'redevops-qa' / 'pins.toml'} is missing; reinstall the bundle, or set {PINS_FILE_ENV}")
