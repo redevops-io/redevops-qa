@@ -229,6 +229,7 @@ def check_matrix(matrix: dict) -> List[Finding]:
             if _CLAIMS.search(text):                    # the whole entry, not only the evidence: this file records facts and decisions, it never says a component is cleared, approved, compatible or permitted
                 findings.append(Finding("MATRIX_CLAIM", cid, f"the matrix never says a component is cleared, approved, compatible or permitted ({text[:70]!r})"))
                 break
+    findings += check_required_decisions(matrix)
     if any((c.get("redistribution") or {}).get("status") == "staged_unmodified" for c in by_id.values()):
         block = matrix.get("bundle_public_distribution")
         if not isinstance(block, dict) or block.get("status") != "owner_decision_required" or block.get("pending_decisions") != pending_decisions(matrix):
@@ -414,6 +415,8 @@ def _check_evidence(cid: str, comp: dict, policy: dict) -> List[Finding]:
             if not _nonempty(item.get(key)):
                 out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: {key} is missing or empty"))
         out += _check_owner_decision(cid, at, item.get("owner_decision"))
+        if status != "verified" and not re.fullmatch(r"unverified|declared:.+", str(item.get("spdx", ""))):
+            out.append(Finding("EVIDENCE_SPDX_ESTABLISHED", cid, f"{at}: an item that is {status} does not state a licence as established: spdx is 'unverified' (or 'declared:<expression>'), the declared expression goes in declared_spdx (found {item.get('spdx')!r})"))
         sources = item.get("sources")
         if status == "unverified":
             if not _nonempty(item.get("reason")):
@@ -491,6 +494,66 @@ def _check_evidence(cid: str, comp: dict, policy: dict) -> List[Finding]:
 
 DECISIONS = {"accepted", "accepted provisionally", "conditional acceptance", "none yet"}
 CONDITION_KINDS = {"notices_shipped", "residuals_retained", "documented", "declaration_verified", "table_section"}
+_NODE_NOTICES = ["playwright-playwright-driver-license", "playwright-playwright-driver-package-license", "playwright-playwright-driver-package-notice"]
+#: What the owner decided on 2026-11-03, kept HERE and not only in the matrix, so that deleting or weakening a recorded condition is a finding. Per item id: the decision, its date, the elected licence if
+#: any, and the minimum conditions (kind plus the content the record must at least contain). The record may state more, never less. The checker cannot know that the owner took the decision at all:
+#: it keeps the owner's wording from being edited away, it does not authenticate it.
+REQUIRED_DECISIONS = {
+    "pw-node-runtime": {"decision": "accepted provisionally", "date": "2026-11-03", "conditions": [
+        {"kind": "notices_shipped", "notices": _NODE_NOTICES}, {"kind": "residuals_retained", "contains": ["signature", "linked"]}]},
+    "pw-node-icu": {"decision": "accepted", "date": "2026-11-03", "conditions": [
+        {"kind": "notices_shipped", "notices": ["playwright-playwright-driver-license"]}, {"kind": "table_section", "item": "pw-node-runtime", "name": "ICU", "spdx": "Unicode-3.0"}]},
+    "pw-minimatch": {"decision": "accepted", "date": "2026-11-03", "conditions": [
+        {"kind": "notices_shipped", "notices": ["minimatch-10.2.5-license", "playwright-playwright-driver-package-lib-utilsbundle-js-license"]},
+        {"kind": "notices_shipped", "notices": ["minimatch-10.2.5-package-json"], "label_contains": "attribution"}]},
+    "pw-proxy-agent-negotiate": {"decision": "conditional acceptance", "date": "2026-11-03", "conditions": [
+        {"kind": "documented", "files": {"third_party/notices/README.md": ["proxy-agent-negotiate", "no licence text"], "bundle/README.md": ["proxy-agent-negotiate", "no licence text"], "tools/build_bundle.py": ["proxy-agent-negotiate", "no licence text"]}}]},
+    "rf-tablesorter-2.30.5": {"decision": "conditional acceptance", "date": "2026-11-03", "elected_licence": "MIT", "conditions": [
+        {"kind": "declaration_verified", "token": "MIT", "min_sources": 5}]},
+}
+
+
+def check_required_decisions(matrix: dict) -> List[Finding]:
+    """The recorded decisions against REQUIRED_DECISIONS: same decision, date and elected licence, and every required condition present at least as strong as required (notices a superset, the
+    label requirement kept, retained residual words a superset, documented files and words a superset, at least as many declaring sources)."""
+    out: List[Finding] = []
+    items = {i.get("id"): (c.get("id"), i) for c in matrix.get("components", []) for i in c.get("third_party_evidence") or [] if isinstance(i, dict)}
+    for iid, want in REQUIRED_DECISIONS.items():
+        if iid not in items:
+            out.append(Finding("OWNER_DECISION_WEAKENED", iid, "an item the owner decided on is missing from the matrix"))
+            continue
+        cid, item = items[iid]
+        block = item.get("owner_decision") or {}
+        for key in ("decision", "date", "elected_licence"):
+            if key in want and block.get(key) != want[key]:
+                out.append(Finding("OWNER_DECISION_WEAKENED", cid, f"{iid}: the owner decided {key} {want[key]!r}, the record says {block.get(key)!r}"))
+        have = [c for c in block.get("conditions") or [] if isinstance(c, dict)]
+        for req in want["conditions"]:
+            if not any(_at_least(c, req) for c in have):
+                out.append(Finding("OWNER_CONDITION_WEAKENED", cid, f"{iid}: the record has no condition of kind {req['kind']} at least as strong as the owner's ({_brief(req)})"))
+    return out
+
+
+def _brief(req: dict) -> str:
+    return ", ".join(f"{k}={v!r}" for k, v in req.items() if k != "kind")[:200]
+
+
+def _at_least(c: dict, req: dict) -> bool:
+    if c.get("kind") != req["kind"]:
+        return False
+    kind = req["kind"]
+    if kind == "notices_shipped":
+        return set(req["notices"]) <= set(c.get("notices") or []) and (not req.get("label_contains") or req["label_contains"] == c.get("label_contains"))
+    if kind == "residuals_retained":
+        return set(req["contains"]) <= set(c.get("contains") or [])
+    if kind == "documented":
+        have = c.get("files") or {}
+        return all(f in have and set(words) <= set(have[f]) for f, words in req["files"].items())
+    if kind == "declaration_verified":
+        return c.get("token") == req["token"] and int(c.get("min_sources") or 0) >= req["min_sources"]
+    if kind == "table_section":
+        return all(c.get(k) == req[k] for k in ("item", "name", "spdx"))
+    return False
 
 
 def _check_owner_decision(cid: str, at: str, block: object) -> List[Finding]:
@@ -861,10 +924,19 @@ def check_notices_lock(matrix: dict, lock: dict, root: Path = ROOT) -> List[Find
             out.append(Finding("NOTICE_DIGEST", f"{key[0]} {key[1]}", f"{key[2]}: the lock and the matrix record different sha256 values"))
     for key in sorted(set(wheel_files) - set(recorded)):
         out.append(Finding("NOTICES_LOCK", f"{key[0]} {key[1]}", f"{key[2]} is locked as a notice but the matrix does not record it as a licence file of that wheel"))
+    by_url: Dict[str, List[dict]] = {}
+    for f in by_id.values():
+        if (f.get("origin") or {}).get("url"):
+            by_url.setdefault(f["origin"]["url"], []).append(f)
     for comp in matrix.get("components", []):
         for item in comp.get("third_party_evidence") or []:
             if not isinstance(item, dict):
                 continue
+            for src in item.get("sources") or []:                      # a quote is checked against the stored bytes where the source is pinned (a notice with the same url); the others are checked only for presence
+                if isinstance(src, dict) and src.get("quote") and src.get("url") in by_url:
+                    bodies = [(Path(root) / f["origin"]["path"]).read_text(encoding="utf-8", errors="replace") for f in by_url[src["url"]] if (Path(root) / str(f["origin"].get("path", ""))).is_file()]
+                    if bodies and not any(src["quote"] in b for b in bodies):
+                        out.append(Finding("QUOTE_NOT_IN_SOURCE", comp.get("id", "?"), f"evidence {item.get('id')}: the quote {src['quote'][:60]!r} is not in the pinned file(s) of {src['url']}"))
             for nid in item.get("licence_texts") or []:
                 if nid not in by_id:
                     out.append(Finding("EVIDENCE_NOTICE", comp.get("id", "?"), f"evidence {item.get('id')}: licence text {nid!r} is not in the notices lock"))
@@ -980,6 +1052,93 @@ def _wheel_key(filename: str) -> Optional[Tuple[str, str]]:
     return (_norm(m.group(1)), m.group(2)) if m else None
 
 
+# --------------------------------------------------------------------------------------------- the inventory of shipped third-party material (best effort)
+IMPORT_TABLE_SCHEMA = "redevops-qa/playwright-import-candidates"
+_YEARS = r"(?:(?:19|20)\d\d(?:\s*[-,\u2013]\s*(?:(?:19|20)\d\d|present))*[,\s]*)+"
+_INV_HOLD = re.compile(r"copyright\s*(?:\(c\)|\u00a9)?\s*" + _YEARS + r"([^\n\r*]{2,80})|(?:\(c\)|\u00a9)\s*" + _YEARS + r"([^\n\r*]{2,80})", re.I)
+_INV_HOLD2 = re.compile(r"(?:\(c\)|\u00a9)\s+([A-Z][A-Za-z0-9.,' &-]{2,60})|(?<![a-z])copyright[\s#]+(?!notice|and\b|holder|law|statement|information|\(c\)|owner|the\b|of\b|\d)([A-Z][A-Za-z.' -]{3,50})")
+_INV_MARK = re.compile(r"@license|spdx-license-identifier|permission is hereby granted|dual licensed|licensed under|released under the|all rights reserved|redistribution and use in source", re.I)
+_INV_SKIP = {"wasm", "ttf", "png", "ico", "gif", "jpg", "jpeg", "woff", "woff2", "pyc", "map", "svg"}
+
+
+def scan_wheel_inventory(zf, own_holders: Iterable[str]) -> Dict[str, Tuple[List[str], List[str]]]:
+    """A candidate inventory of licence-bearing text files of a wheel, derived mechanically: every text file (binary files and fonts, images and source maps are skipped) is searched for copyright holder
+    lines ('Copyright (c) 2019 Mapbox', '(c) JS Foundation ...', 'copyright Andre Burgaud') and licence markers ('Licensed under', 'Permission is hereby granted', 'SPDX-License-Identifier', '@license',
+    'Dual licensed', 'All rights reserved'). A file is a candidate when it names a holder that is not one of ``own_holders`` (regular expressions, case-insensitive), or carries a marker and no holder
+    and no Apache-2.0 header of the product's own. BEST EFFORT: a file with no header (a minified file whose comments were stripped, a library with no notice) is not found, and the scan cannot show
+    that an inventory is complete. Returns {path: (foreign holders, markers)}."""
+    own = [re.compile(o, re.I) for o in own_holders]
+    out: Dict[str, Tuple[List[str], List[str]]] = {}
+    for name in zf.namelist():
+        if name.endswith("/") or name.rsplit(".", 1)[-1].lower() in _INV_SKIP or name.endswith("/node"):
+            continue
+        data = zf.read(name)
+        if b"\0" in data[:4096]:
+            continue
+        text = data.decode("utf-8", "replace")
+        holders = {(m.group(1) or m.group(2)).strip(" .,;:*/'\"") for m in _INV_HOLD.finditer(text)} | {(m.group(1) or m.group(2)).strip(" .,;:*/'\"") for m in _INV_HOLD2.finditer(text)}
+        foreign = sorted(h for h in holders if h and not any(o.search(h) for o in own))
+        marks = sorted({m.group(0).lower() for m in _INV_MARK.finditer(text)})
+        if foreign or (marks and not holders and "apache license" not in text.lower()):
+            out[name] = (foreign[:6], marks[:6])
+    return out
+
+
+def _inventory_patterns(comp: dict, rec: dict) -> List[str]:
+    pats = [lf.get("path") for lf in rec.get("license_files") or []]
+    for item in comp.get("third_party_evidence") or []:
+        if isinstance(item, dict) and item.get("wheel", rec.get("name")) == rec.get("name"):
+            pats += list(item.get("shipped_members") or []) + ([item["inlined_in"]] if item.get("inlined_in") else []) + list(item.get("covers_paths") or [])
+    return [p for p in pats if isinstance(p, str)]
+
+
+def check_inventory_scan(matrix: dict, comp: dict, rec: dict, zf, at: str) -> List[Finding]:
+    """Fail on a licence-bearing file the header scan finds in a shipped wheel that no evidence item covers (by shipped_members, inlined_in or covers_paths) and no recorded licence file is. The scan is
+    best effort and CANNOT prove completeness: it finds what carries a header, nothing else."""
+    import fnmatch
+    inv = matrix.get("inventory")
+    if not isinstance(inv, dict) or not comp.get("third_party_evidence"):
+        return []
+    pats = _inventory_patterns(comp, rec)
+    out = []
+    for path, (holders, marks) in sorted(scan_wheel_inventory(zf, inv.get("own_holders") or []).items()):
+        if not any(fnmatch.fnmatchcase(path, pat) for pat in pats):
+            out.append(Finding("INVENTORY_UNCOVERED", at, f"{path} carries a licence or copyright header (holders {holders}, markers {marks}) that no evidence item covers: add an item whose shipped_members, inlined_in or covers_paths names it"))
+    return out
+
+
+def check_import_candidates(matrix: dict, root: Path = ROOT) -> List[Finding]:
+    """The packages Playwright's own sources import for the parts that end up in the wheel (third_party/evidence/playwright-*-import-candidates.json, made by tools/collect_licence_evidence.py
+    import-candidates from the repository tarball and lock file at the pinned tag) against the matrix: each must be one of the inlined npm packages of the sidecar notices, named in an evidence item
+    (``packages``), or listed under inventory.excluded_packages with the reason it is not in the wheel. Best effort: it follows import statements, not what a bundler actually inlined."""
+    inv = matrix.get("inventory")
+    if not isinstance(inv, dict):
+        return []
+    out: List[Finding] = []
+    table_path = next(((Path(root) / "third_party" / "evidence").glob("playwright-*-import-candidates.json")), None) if (Path(root) / "third_party" / "evidence").is_dir() else None
+    if table_path is None:
+        return [Finding("INVENTORY_CANDIDATES", "matrix", "the inventory block needs third_party/evidence/playwright-*-import-candidates.json")]
+    data = _load_json(table_path)
+    if data.get("schema") != IMPORT_TABLE_SCHEMA:
+        return [Finding("INVENTORY_CANDIDATES", table_path.name, f"schema must be {IMPORT_TABLE_SCHEMA}")]
+    covered = set()
+    for comp in matrix.get("components", []):
+        for item in comp.get("third_party_evidence") or []:
+            if isinstance(item, dict):
+                covered |= set(item.get("packages") or [])
+                table = item.get("table")
+                if isinstance(table, dict) and table.get("kind") == "npm-inlined-packages" and (Path(root) / str(table.get("path", ""))).is_file():
+                    covered |= {r.get("package", "").rsplit("@", 1)[0] for r in _load_json(Path(root) / table["path"]).get("packages", [])}
+    excluded = inv.get("excluded_packages") or {}
+    for bad, reason in excluded.items():
+        if not _nonempty(reason):
+            out.append(Finding("INVENTORY_CANDIDATES", "matrix", f"inventory.excluded_packages {bad}: a reason is required"))
+    names = {p.get("name") for p in data.get("packages", [])}
+    for pkg in sorted(names - covered - set(excluded)):
+        out.append(Finding("INVENTORY_UNCOVERED_PACKAGE", "matrix", f"{pkg} is imported by Playwright's sources for the wheel (import-candidates table) but is in no evidence item (packages), not among the inlined npm packages and not under inventory.excluded_packages"))
+    return out
+
+
 # --------------------------------------------------------------------------------------------- the wheels themselves
 _SECTION = re.compile(r"^%% (\S+) NOTICES AND INFORMATION BEGIN HERE\n", re.M)
 # a licence-bearing file: any file whose name says licence, copying, notice(s), third-party, authors or copyright, anywhere in the wheel, and anything under a licenses/ or notices/ directory
@@ -1058,6 +1217,7 @@ def check_wheelhouse(matrix: dict, wheelhouse: Path, root: Path = ROOT) -> List[
                     if sections != notice.get("sections") or counts != notice.get("breakdown"):
                         out.append(Finding("NOTICE_BREAKDOWN_MISMATCH", at, f"{member}: the file has {sections} sections {counts}, the matrix records {notice.get('sections')} {notice.get('breakdown')}"))
                 out += _check_wheel_evidence(comp, rec, zf, at, root)
+                out += check_inventory_scan(matrix, comp, rec, zf, at)
     return out
 
 
@@ -1072,6 +1232,11 @@ def _check_wheel_evidence(comp: dict, rec: dict, zf, at: str, root: Path) -> Lis
         if not isinstance(item, dict) or item.get("wheel", rec.get("name")) != rec.get("name"):
             continue
         iid = f"{at}/evidence {item.get('id')}"
+        for src in item.get("sources") or []:                                # a source that is a member of the shipped wheel: its quote must be in the member's bytes
+            if isinstance(src, dict) and src.get("wheel_member"):
+                body = zf.read(src["wheel_member"]).decode("utf-8", "replace") if src["wheel_member"] in names else None
+                if body is None or (src.get("quote") and src["quote"] not in body):
+                    out.append(Finding("QUOTE_NOT_IN_SOURCE", iid, f"{src['wheel_member']} is not in the wheel or does not contain the quote {str(src.get('quote'))[:60]!r}"))
         for member in item.get("shipped_members") or []:
             if member not in names:
                 out.append(Finding("EVIDENCE_MEMBER_MISSING", iid, f"{member} is not in the wheel"))
@@ -1194,6 +1359,7 @@ def run(matrix_path: Path = DEFAULT_MATRIX, root: Path = ROOT, upstream: bool = 
             findings.append(Finding("BUNDLE_LOCK_UNREADABLE", str(lock_path), f"{type(exc).__name__}: {exc}"))
     mroot = Path(matrix_path).resolve().parent.parent          # the repository the matrix belongs to (third_party/..): where its evidence tables and notices live; ``root`` is what is scanned for installs
     findings += check_evidence_tables(matrix, mroot)
+    findings += check_import_candidates(matrix, mroot)
     notices_path = mroot / "third_party" / "notices" / "notices.lock.json"
     if notices_path.is_file():
         try:

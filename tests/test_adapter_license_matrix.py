@@ -72,7 +72,7 @@ def test_selenium_manager_crates_with_mpl_keep_selenium_out_of_the_redistributab
 def test_the_robot_framework_assets_without_a_licence_text_tied_to_the_shipped_file_are_recorded_as_unverified():
     rank, why = chk.effective_rank(comp(REAL, "robotframework"), POLICY)
     joined = " ".join(why)
-    assert rank == chk.UNVERIFIED and sum("unverified" in w for w in why) == 4 and all(n in joined for n in ("tablesorter", "Templates", "Highlight", "JSXCompressor"))     # jquery.min.js and libdoc.html are identified with their licence texts
+    assert rank == chk.UNVERIFIED and sum("unverified" in w for w in why) == 6 and all(n in joined for n in ("tablesorter", "Templates", "Highlight", "JSXCompressor", "asserts.py", "highlighting.py"))     # jquery.min.js and libdoc.html are identified with their licence texts
 
 
 def test_the_playwright_pin_in_the_package_is_the_pin_in_the_matrix():
@@ -478,15 +478,15 @@ def test_the_playwright_entry_describes_the_node_runtime_the_inlined_npm_package
 def test_the_robot_assets_are_identified_and_those_without_a_licence_text_are_recorded_unverified_with_their_exact_paths():
     rb = comp(REAL, "robotframework")
     unverified = [d for d in rb["bundled_deps"] if d["spdx"] == "unverified"]
-    assert sorted(d["evidence"] for d in unverified) == ["rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
+    assert sorted(d["evidence"] for d in unverified) == ["rf-asserts-unittest", "rf-highlighting-burgaud", "rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
     joined = json.dumps(unverified)
-    for path in ("robot/htmldata/lib/jquery.tablesorter.min.js", "robot/htmldata/lib/jquery.tmpl.min.js", "robot/htmldata/lib/jquery.highlight.min.js", "robot/htmldata/lib/jsxcompressor.min.js"):
+    for path in ("robot/htmldata/lib/jquery.tablesorter.min.js", "robot/htmldata/lib/jquery.tmpl.min.js", "robot/htmldata/lib/jquery.highlight.min.js", "robot/htmldata/lib/jsxcompressor.min.js", "robot/utils/asserts.py", "robot/output/console/highlighting.py"):
         assert path in joined, path
     assert "UNVERIFIED" in joined
     by_name = {d["name"].split(" ")[0] + " " + d["name"].split(" ")[1]: d for d in rb["bundled_deps"]}
     assert by_name["jQuery 3.5.1"]["spdx"] == "MIT" and by_name["Handlebars 4.7.9"]["spdx"] == "MIT"
     assert all(re.search(r"sha256 [0-9a-f]{64}", d["name"]) for d in rb["bundled_deps"] if "robot/htmldata" in d["name"] and "(sha256" in d["name"])
-    assert "PRIVATE STAGING ONLY" in rb["redistribution"]["reason"] and "tablesorter" in rb["redistribution"]["reason"] and rb["redistribution"]["public_distribution_blockers"] == ["rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
+    assert "PRIVATE STAGING ONLY" in rb["redistribution"]["reason"] and "tablesorter" in rb["redistribution"]["reason"] and rb["redistribution"]["public_distribution_blockers"] == ["rf-asserts-unittest", "rf-highlighting-burgaud", "rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
 
 
 def test_pyyaml_is_no_longer_described_as_never_shipped_and_typing_extensions_is_listed():

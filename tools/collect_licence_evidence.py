@@ -4,6 +4,8 @@
 
     python tools/collect_licence_evidence.py node-sections --wheel PLAYWRIGHT.whl --node-version 24.22.1 --out FILE        (offline)
     python tools/collect_licence_evidence.py npm-inlined   --wheel PLAYWRIGHT.whl --retrieved-on YYYY-MM-DD --out FILE    (network: the public npm registry)
+    python tools/collect_licence_evidence.py import-candidates --tarball PLAYWRIGHT-REPO.tar.gz --tag v1.64.1 --retrieved-on YYYY-MM-DD --out FILE   (the repository tarball of the tag; no network if given)
+    python tools/collect_licence_evidence.py inventory --wheel WHEEL.whl [--matrix FILE]                                  (offline: prints the candidate licence-bearing files and which are covered)
 
 ``node-sections`` reads ``playwright/driver/LICENSE`` (the Node.js licence file the wheel carries) and records, for each of the externally maintained libraries it lists, the name, the place
 in the Node.js source tree, the sha256 of its section and the licence its own text names (``NODE_CLASSES``, read by hand and checked here against the words of the section: a classification
@@ -123,6 +125,59 @@ def npm_inlined(wheel: Path, retrieved_on: str) -> dict:
             "packages": rows}
 
 
+#: the packages of Playwright's repository whose output ends up in the wheel (playwright-core, what it inlines from utils and isomorphic, and the five vite applications)
+WHEEL_PACKAGE_DIRS = ("playwright-core", "utils", "isomorphic", "web", "trace-viewer", "html-reporter", "recorder", "dashboard", "injected", "protocol", "playwright-client")
+SELF_NAMES = ("playwright", "playwright-core", "@playwright/test")
+_IMPORT = re.compile(r"""(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)['"]([^'"./][^'"]*)['"]""")
+
+
+def import_candidates(tarball: Path, tag: str, retrieved_on: str) -> dict:
+    """The bare package names imported by the sources of WHEEL_PACKAGE_DIRS (not their tests) that the repository's package-lock.json resolves, with the version, licence field and whether it is a
+    development dependency. This follows import statements: it says what Playwright's sources reach for, not what a bundler inlined."""
+    raw = tarball.read_bytes()
+    found: Dict[str, set] = {}
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tf:
+        lock_member = next(m for m in tf.getmembers() if m.name.count("/") == 1 and m.name.endswith("/package-lock.json"))
+        lock_bytes = tf.extractfile(lock_member).read()
+        lock = json.loads(lock_bytes)["packages"]
+        resolved = {k.split("node_modules/", 1)[1]: v for k, v in lock.items() if k.startswith("node_modules/") and k.count("node_modules/") == 1}
+        for m in tf.getmembers():
+            if not m.isfile():
+                continue
+            parts = m.name.split("/", 1)[1].split("/")
+            if len(parts) < 3 or parts[0] != "packages" or parts[1] not in WHEEL_PACKAGE_DIRS or not m.name.endswith((".ts", ".tsx", ".js", ".mjs", ".mts", ".jsx")) or "/tests/" in m.name or "/test/" in m.name:
+                continue
+            for spec in _IMPORT.findall(tf.extractfile(m).read().decode("utf-8", "replace")):
+                bits = spec.split("/")
+                name = "/".join(bits[:2]) if spec.startswith("@") else bits[0]
+                if name in resolved and name not in SELF_NAMES:
+                    found.setdefault(name, set()).add(parts[1])
+    pk = [{"name": n, "version": resolved[n].get("version"), "license": resolved[n].get("license"), "dev": bool(resolved[n].get("dev")), "imported_by": sorted(found[n])} for n in sorted(found)]
+    return {"schema": cal.IMPORT_TABLE_SCHEMA, "tag": tag, "retrieved_on": retrieved_on, "repository_tarball_sha256": sha256_bytes(raw), "package_lock_sha256": sha256_bytes(lock_bytes), "count": len(pk),
+            "package_dirs": list(WHEEL_PACKAGE_DIRS), "note": "bare package names imported by the sources of those directories (tests excluded) that package-lock.json resolves; follows import statements, not what a bundler inlined", "packages": pk}
+
+
+def inventory_report(wheel: Path, matrix_path: Path) -> int:
+    import yaml
+    matrix = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
+    inv = matrix.get("inventory") or {}
+    import fnmatch
+    with zipfile.ZipFile(wheel) as zf:
+        hits = cal.scan_wheel_inventory(zf, inv.get("own_holders") or [])
+    pats = []
+    for comp in matrix["components"]:
+        for rec in comp.get("shipped_wheels") or []:
+            if cal._wheel_key(wheel.name) == (cal._norm(rec["name"]), str(rec["version"])):
+                pats = cal._inventory_patterns(comp, rec)
+    unc = 0
+    for path, (holders, marks) in sorted(hits.items()):
+        covered = any(fnmatch.fnmatchcase(path, p) for p in pats)
+        unc += not covered
+        print(("covered   " if covered else "UNCOVERED ") + path + "  " + str(holders[:3]) + " " + str(marks[:3]))
+    print(f"{len(hits)} candidate files, {unc} uncovered. Best effort: a file without a header is not found; this does not show that the inventory is complete.")
+    return 1 if unc else 0
+
+
 def main(argv: Sequence[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -134,7 +189,22 @@ def main(argv: Sequence[str]) -> int:
     b.add_argument("--wheel", type=Path, required=True)
     b.add_argument("--retrieved-on", required=True)
     b.add_argument("--out", type=Path, required=True)
+    c = sub.add_parser("import-candidates")
+    c.add_argument("--tarball", type=Path, required=True)
+    c.add_argument("--tag", required=True)
+    c.add_argument("--retrieved-on", required=True)
+    c.add_argument("--out", type=Path, required=True)
+    d = sub.add_parser("inventory")
+    d.add_argument("--wheel", type=Path, required=True)
+    d.add_argument("--matrix", type=Path, default=cal.DEFAULT_MATRIX)
     args = ap.parse_args(list(argv))
+    if args.cmd == "inventory":
+        return inventory_report(args.wheel, args.matrix)
+    if args.cmd == "import-candidates":
+        data = import_candidates(args.tarball, args.tag, args.retrieved_on)
+        args.out.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"{args.out}: {data['count']} packages")
+        return 0
     data = node_sections(args.wheel, args.node_version) if args.cmd == "node-sections" else npm_inlined(args.wheel, args.retrieved_on)
     args.out.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     print(f"{args.out}: {data['count']} entries")

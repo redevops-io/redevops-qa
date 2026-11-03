@@ -8,7 +8,7 @@
     "kind": "authored",
     "path": "third_party/notices/README.md"
    },
-   "sha256": "322a6d4fb3998b1cd639f985e5f7f6fe98bb10aadbbdf786801585f50b4ee43e"
+   "sha256": "a106b3f6e36b3e2405477dfefe1c6d7b5d808b9efa61a4da9390f270211c2f0f"
   },
   {
    "covers": [
@@ -89,7 +89,7 @@
    ],
    "dest": "upstream/jquery-tmpl-07d08cb/jquery.tmpl.js-header.txt",
    "id": "jquery-tmpl-source-header",
-   "label": "EXCERPT (leading comment block) of jquery.tmpl.js in the cited repository at the cited tag or commit; not a whole file",
+   "label": "EXCERPT (leading comment block) of jquery.tmpl.js, as published at https://raw.githubusercontent.com/jquery/jquery-tmpl/07d08cb72c7556e950593d6c011d5725db54228e/jquery.tmpl.js; not a whole file",
    "origin": {
     "excerpt": "leading comment block",
     "kind": "upstream",
@@ -161,6 +161,38 @@
   },
   {
    "covers": [
+    "pw-xdg-open"
+   ],
+   "dest": "upstream/open-11.0.0/xdg-open-lines-1-34.txt",
+   "id": "open-11.0.0-xdg-open-header",
+   "label": "EXCERPT (lines 1-34) of package/xdg-open, as published at https://registry.npmjs.org/open/-/open-11.0.0.tgz; not a whole file",
+   "origin": {
+    "excerpt": "lines 1-34",
+    "kind": "upstream",
+    "member": "package/xdg-open",
+    "path": "third_party/notices/upstream/open-11.0.0/xdg-open-lines-1-34.txt",
+    "retrieved_on": "2026-11-03",
+    "tarball_sha256": "b8d4c664ab12fefd68d9d06c5e2472937c5a614cd535a5d97fb2c69f8bda4c1d",
+    "url": "https://registry.npmjs.org/open/-/open-11.0.0.tgz"
+   },
+   "sha256": "07966103fc6f07ca757220534a5f76e33f554b3153a194208ff4590f09a92be7"
+  },
+  {
+   "covers": [
+    "rf-open-iconic"
+   ],
+   "dest": "upstream/open-iconic-1d1e888/ICON-LICENSE",
+   "id": "open-iconic-icon-license",
+   "origin": {
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/open-iconic-1d1e888/ICON-LICENSE",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/iconic/open-iconic/1d1e8885c5031874b32f4e480e371ce2b1c24144/ICON-LICENSE"
+   },
+   "sha256": "b3f22ce84cba8df34011f5d420ec87ad75d7f91700f21cdc8589ee388594325e"
+  },
+  {
+   "covers": [
     "rf-libdoc-parcel-runtime"
    ],
    "dest": "upstream/parcel-2.16.4/LICENSE",
@@ -179,7 +211,7 @@
    ],
    "dest": "upstream/playwright-vendored-sources-1.64.1/devtools.ts-header.txt",
    "id": "pw-vendored-devtools-header",
-   "label": "EXCERPT (the two licence comment blocks before the first import) of packages/trace-viewer/src/third_party/devtools.ts in the cited repository at the cited tag or commit; not a whole file",
+   "label": "EXCERPT (the two licence comment blocks before the first import) of packages/trace-viewer/src/third_party/devtools.ts, as published at https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/trace-viewer/src/third_party/devtools.ts; not a whole file",
    "origin": {
     "excerpt": "the two licence comment blocks before the first import",
     "kind": "upstream",
@@ -195,7 +227,7 @@
    ],
    "dest": "upstream/playwright-vendored-sources-1.64.1/extractZip.ts-header.txt",
    "id": "pw-vendored-extractzip-header",
-   "label": "EXCERPT (leading comment block) of packages/utils/third_party/extractZip.ts in the cited repository at the cited tag or commit; not a whole file",
+   "label": "EXCERPT (leading comment block) of packages/utils/third_party/extractZip.ts, as published at https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/utils/third_party/extractZip.ts; not a whole file",
    "origin": {
     "excerpt": "leading comment block",
     "kind": "upstream",
@@ -211,7 +243,7 @@
    ],
    "dest": "upstream/playwright-vendored-sources-1.64.1/lockfile.ts-header.txt",
    "id": "pw-vendored-lockfile-header",
-   "label": "EXCERPT (leading comment block) of packages/utils/third_party/lockfile.ts in the cited repository at the cited tag or commit; not a whole file",
+   "label": "EXCERPT (leading comment block) of packages/utils/third_party/lockfile.ts, as published at https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/utils/third_party/lockfile.ts; not a whole file",
    "origin": {
     "excerpt": "leading comment block",
     "kind": "upstream",
@@ -227,7 +259,7 @@
    ],
    "dest": "upstream/playwright-vendored-sources-1.64.1/pixelmatch.js-header.txt",
    "id": "pw-vendored-pixelmatch-header",
-   "label": "EXCERPT (leading comment block) of packages/utils/third_party/pixelmatch.js in the cited repository at the cited tag or commit; not a whole file",
+   "label": "EXCERPT (leading comment block) of packages/utils/third_party/pixelmatch.js, as published at https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/utils/third_party/pixelmatch.js; not a whole file",
    "origin": {
     "excerpt": "leading comment block",
     "kind": "upstream",
@@ -239,7 +271,8 @@
   },
   {
    "covers": [
-    "pw-vite-codicon"
+    "pw-vite-codicon",
+    "pw-vite-vscode-css"
    ],
    "dest": "upstream/playwright-vscode-third-party-1.64.1/LICENSE.txt",
    "id": "playwright-vscode-license",
@@ -251,6 +284,38 @@
     "url": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/LICENSE.txt"
    },
    "sha256": "20535828272932407c2f5172aeb714ac7b374a34e5ecb1825af509f2902cde54"
+  },
+  {
+   "covers": [
+    "pw-vite-vscode-css"
+   ],
+   "dest": "upstream/playwright-vscode-third-party-1.64.1/codicon.css-header.txt",
+   "id": "pw-vscode-codicon-header",
+   "label": "EXCERPT (leading comment block) of packages/web/src/third_party/vscode/codicon.css, as published at https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/codicon.css; not a whole file",
+   "origin": {
+    "excerpt": "leading comment block",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/playwright-vscode-third-party-1.64.1/codicon.css-header.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/codicon.css"
+   },
+   "sha256": "1b0f2f1e1d3582f19d6f24b34a2d78ad8b5bfa9be778ab7c139bdff7cdeff2f9"
+  },
+  {
+   "covers": [
+    "pw-vite-vscode-css"
+   ],
+   "dest": "upstream/playwright-vscode-third-party-1.64.1/colors.css-header.txt",
+   "id": "pw-vscode-colors-header",
+   "label": "EXCERPT (leading comment block) of packages/web/src/third_party/vscode/colors.css, as published at https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/colors.css; not a whole file",
+   "origin": {
+    "excerpt": "leading comment block",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/playwright-vscode-third-party-1.64.1/colors.css-header.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/colors.css"
+   },
+   "sha256": "1b0f2f1e1d3582f19d6f24b34a2d78ad8b5bfa9be778ab7c139bdff7cdeff2f9"
   },
   {
    "covers": [
@@ -270,11 +335,43 @@
   },
   {
    "covers": [
+    "rf-highlighting-burgaud"
+   ],
+   "dest": "upstream/robotframework-7.5-src/robot-output-console-highlighting.py-lines-16-18.txt",
+   "id": "rf-highlighting-attribution",
+   "label": "EXCERPT (lines 16-18) of src/robot/output/console/highlighting.py, as published at https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/output/console/highlighting.py; not a whole file",
+   "origin": {
+    "excerpt": "lines 16-18",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/robotframework-7.5-src/robot-output-console-highlighting.py-lines-16-18.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/output/console/highlighting.py"
+   },
+   "sha256": "c0f2a2f322a0a3f0a5ed99a5c3a3eaeadc2b197c23b63188a81e2aa88179e484"
+  },
+  {
+   "covers": [
+    "rf-asserts-unittest"
+   ],
+   "dest": "upstream/robotframework-7.5-src/robot-utils-asserts.py-lines-33-53.txt",
+   "id": "rf-asserts-unittest-notice",
+   "label": "EXCERPT (lines 33-53) of src/robot/utils/asserts.py, as published at https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/utils/asserts.py; not a whole file",
+   "origin": {
+    "excerpt": "lines 33-53",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/robotframework-7.5-src/robot-utils-asserts.py-lines-33-53.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/utils/asserts.py"
+   },
+   "sha256": "9e1b44668ac3cb104f0133467412e710872b4842af58fde6c369a34506513b29"
+  },
+  {
+   "covers": [
     "rf-jquery-highlight"
    ],
    "dest": "upstream/sandbox-js-highlight-09bab14/README-line-4.txt",
    "id": "jquery-highlight-readme-licence-line",
-   "label": "EXCERPT (line 4) of README in the cited repository at the cited tag or commit; not a whole file",
+   "label": "EXCERPT (line 4) of README, as published at https://raw.githubusercontent.com/bartaz/sandbox.js/09bab1454d2251d129e0cc21bddddf99352ed01e/README; not a whole file",
    "origin": {
     "excerpt": "line 4",
     "kind": "upstream",
@@ -290,7 +387,7 @@
    ],
    "dest": "upstream/sandbox-js-highlight-09bab14/jquery.highlight.js-header.txt",
    "id": "jquery-highlight-source-header",
-   "label": "EXCERPT (leading comment block) of jquery.highlight.js in the cited repository at the cited tag or commit; not a whole file",
+   "label": "EXCERPT (leading comment block) of jquery.highlight.js, as published at https://raw.githubusercontent.com/bartaz/sandbox.js/09bab1454d2251d129e0cc21bddddf99352ed01e/jquery.highlight.js; not a whole file",
    "origin": {
     "excerpt": "leading comment block",
     "kind": "upstream",
@@ -320,7 +417,7 @@
    ],
    "dest": "upstream/tablesorter-2.30.5/README.md-lines-48-52.txt",
    "id": "tablesorter-2.30.5-readme-licensing",
-   "label": "EXCERPT (lines 48-52) of README.md of the Mottie fork at v2.30.5; not a whole file and not a licence text",
+   "label": "EXCERPT (line excerpt) of README.md, as published at https://raw.githubusercontent.com/Mottie/tablesorter/v2.30.5/README.md; not a whole file",
    "origin": {
     "excerpt": "line excerpt",
     "kind": "upstream",
@@ -336,7 +433,7 @@
    ],
    "dest": "upstream/tablesorter-2.30.5/jquery.tablesorter.js-lines-11-29.txt",
    "id": "tablesorter-2.30.5-source-header",
-   "label": "EXCERPT (lines 11-29) of dist/js/jquery.tablesorter.js of the Mottie fork at v2.30.5; not a whole file and not a licence text",
+   "label": "EXCERPT (line excerpt) of dist/js/jquery.tablesorter.js, as published at https://raw.githubusercontent.com/Mottie/tablesorter/v2.30.5/dist/js/jquery.tablesorter.js; not a whole file",
    "origin": {
     "excerpt": "line excerpt",
     "kind": "upstream",
@@ -422,6 +519,40 @@
     "url": "https://registry.npmjs.org/@xterm/addon-fit/-/addon-fit-0.10.0.tgz"
    },
    "sha256": "e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f"
+  },
+  {
+   "covers": [
+    "pw-vite-zipjs"
+   ],
+   "dest": "upstream/zip.js-2.7.73/LICENSE",
+   "id": "zipjs-2.7.73-license",
+   "origin": {
+    "kind": "upstream",
+    "member": "package/LICENSE",
+    "path": "third_party/notices/upstream/zip.js-2.7.73/LICENSE",
+    "retrieved_on": "2026-11-03",
+    "tarball_sha256": "2a6b18c0cda799f6e6ad6ec943248b2095775782f086a1e408c274fe5c1327f1",
+    "url": "https://registry.npmjs.org/@zip.js/zip.js/-/zip.js-2.7.73.tgz"
+   },
+   "sha256": "1b7ebc8d7889ed25491484ab2b102370742ca6c0b26650a0c62cc2269b579b84"
+  },
+  {
+   "covers": [
+    "pw-vite-zipjs"
+   ],
+   "dest": "upstream/zip.js-2.7.73/lib-core-streams-codecs-inflate.js-lines-1-26.txt",
+   "id": "zipjs-2.7.73-codec-header",
+   "label": "EXCERPT (lines 1-26; the same block heads deflate.js) of package/lib/core/streams/codecs/inflate.js, as published at https://registry.npmjs.org/@zip.js/zip.js/-/zip.js-2.7.73.tgz; not a whole file",
+   "origin": {
+    "excerpt": "lines 1-26; the same block heads deflate.js",
+    "kind": "upstream",
+    "member": "package/lib/core/streams/codecs/inflate.js",
+    "path": "third_party/notices/upstream/zip.js-2.7.73/lib-core-streams-codecs-inflate.js-lines-1-26.txt",
+    "retrieved_on": "2026-11-03",
+    "tarball_sha256": "2a6b18c0cda799f6e6ad6ec943248b2095775782f086a1e408c274fe5c1327f1",
+    "url": "https://registry.npmjs.org/@zip.js/zip.js/-/zip.js-2.7.73.tgz"
+   },
+   "sha256": "951795b226358bb0d5535a4d50e40dcb46fd93be55b6c2470b4b14fef7bed042"
   },
   {
    "covers": [],
@@ -526,9 +657,10 @@
   },
   {
    "covers": [
-    "pw-npm-inlined",
     "pw-minimatch",
-    "pw-proxy-agent-negotiate"
+    "pw-npm-inlined",
+    "pw-proxy-agent-negotiate",
+    "pw-vite-yaml"
    ],
    "dest": "wheels/playwright-1.64.1/playwright/driver/package/lib/utilsBundle.js.LICENSE",
    "id": "playwright-playwright-driver-package-lib-utilsbundle-js-license",

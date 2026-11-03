@@ -116,6 +116,8 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
         out.append(Finding("LICENCES", "BUNDLE.json", "the licence record says the third-party wheels are private staging only and that public distribution requires an owner decision"))
     if any(w.get("name") == "playwright" for w in manifest.get("wheels") or []):
         note = str((lic.get("third_party_notes") or {}).get("playwright", ""))
+        if "proxy-agent-negotiate" not in note or "no licence text" not in note:
+            out.append(Finding("LICENCES", "BUNDLE.json", "the licence record names the package without a licence text (proxy-agent-negotiate: no licence text), as the owner's condition requires"))
         if "Node.js" not in note or "npm" not in note:
             out.append(Finding("LICENCES", "BUNDLE.json", "the Playwright wheel contains a Node.js runtime and inlined npm packages; the licence record must say so"))
     # --- wheels and the lock

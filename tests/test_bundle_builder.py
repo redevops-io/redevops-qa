@@ -482,3 +482,17 @@ def test_the_manifest_never_says_a_component_is_cleared_or_approved(noticed):
     for rel in ("BUNDLE.json", "THIRD_PARTY_NOTICES/INDEX.json"):
         assert not re.search(r"\b(cleared|approved|clearance)\b", (noticed / rel).read_text(encoding="utf-8"), re.I), rel
     assert any(f.code == "FORBIDDEN_TEXT" for f in cb.check_bundle(noticed, allow_test_target=True)) is False
+
+
+def test_the_manifest_must_name_the_package_without_a_licence_text_as_the_owners_condition_requires(copy):
+    path = copy / "BUNDLE.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["wheels"].append({"filename": "playwright-1-py3-none-any.whl", "name": "playwright", "version": "1", "sha256": "0" * 64, "kind": "third-party", "license": "Apache-2.0"})
+    doc["licences"]["third_party_notes"] = {"playwright": "A Node.js runtime and inlined npm packages."}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    resum(copy)
+    assert any("proxy-agent-negotiate" in f.message for f in cb.check_bundle(copy, allow_test_target=True) if f.code == "LICENCES")
+    doc["licences"]["third_party_notes"] = {"playwright": "A Node.js runtime and inlined npm packages; proxy-agent-negotiate has no licence text."}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    resum(copy)
+    assert not [f for f in cb.check_bundle(copy, allow_test_target=True) if f.code == "LICENCES"]

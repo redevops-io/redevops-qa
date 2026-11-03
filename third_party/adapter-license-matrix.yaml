@@ -63,10 +63,19 @@ policy:
   allowed_exceptions: [LLVM-exception]
   # Distribution names that CI and the adapter packages may install without being adapter frameworks. (pyyaml is also shipped in the bundle: see pyyaml-shipped.)
   ci_tooling: [pytest, pyyaml, jsonschema]
+inventory:
+  method: "How the inventory of shipped third-party material is derived (third_party/README.md): the notice files each wheel carries; the Playwright lock file and import statements at the pinned tag for the packages the vite bundles and coreBundle.js resolve (third_party/evidence/playwright-*-import-candidates.json, made by tools/collect_licence_evidence.py import-candidates); a licence/copyright header scan of every text file in the Playwright and Robot Framework wheels (tools/check_adapter_licenses.py --wheelhouse, tools/collect_licence_evidence.py inventory); the sections of the Node.js LICENSE; and manual reading of what those leave open."
+  limits: "BEST EFFORT. It cannot prove completeness: a minified file whose comments were stripped, a library without a notice or header, data inlined as an opaque string, and code that Playwright's sources reach through a path the import scan does not follow are not found. The checker fails on what the scans find that no item covers; it never claims that nothing else is shipped."
+  own_holders: ["microsoft corp", "robot framework", "nokia networks"]
+  excluded_packages:
+    vite: "build tool of the vite applications; its output is the bundles, vite itself is not inlined"
+    "@vitejs/plugin-react": "build plugin; not inlined"
+    electron: "development dependency used for types and tests of the Electron integration; not in the wheel"
+    chromium-bidi: "required at run time by path (chromium-bidi/lib/cjs/...) from coreBundle.js; the package is not inlined and not in the wheel (no code of it in the wheel, only the two specifier strings)"
 bundle_public_distribution:
   status: owner_decision_required
   reason: "the owner decides public distribution of the bundle once every shipped third-party item has a decision; this file records facts and the decisions taken so far and decides nothing on its own"
-  pending_decisions: [playwright-python, playwright-python-direct-deps, pw-npm-inlined, pw-vendored-sources, pw-vite-browser-logos, pw-vite-codemirror, pw-vite-codicon, pw-vite-react, pw-vite-xterm, pw-webp-codec, pyyaml-shipped, rf-jquery-3.5.1, rf-jquery-highlight, rf-jquery-tmpl, rf-jsxcompressor, rf-libdoc-handlebars, rf-libdoc-mark-js, rf-libdoc-parcel-runtime, rf-libdoc-source-map, robotframework, typing-extensions-shipped]
+  pending_decisions: [playwright-python, playwright-python-direct-deps, pw-npm-inlined, pw-vendored-sources, pw-vite-browser-logos, pw-vite-codemirror, pw-vite-codicon, pw-vite-react, pw-vite-vscode-css, pw-vite-xterm, pw-vite-yaml, pw-vite-zipjs, pw-webp-codec, pw-xdg-open, pyyaml-shipped, rf-asserts-unittest, rf-highlighting-burgaud, rf-jquery-3.5.1, rf-jquery-highlight, rf-jquery-tmpl, rf-jsxcompressor, rf-libdoc-handlebars, rf-libdoc-mark-js, rf-libdoc-parcel-runtime, rf-libdoc-source-map, rf-open-iconic, robotframework, typing-extensions-shipped]
 components:
   # ------------------------------------------------------------------------------------------------ Selenium
   - id: selenium-python
@@ -136,10 +145,13 @@ components:
       - {name: "mark.js 8.11.1 inlined in libdoc.html", spdx: MIT, evidence: rf-libdoc-mark-js, note: "as above"}
       - {name: "source-map 0.6.1 inlined in libdoc.html (a dependency of Handlebars' code generator)", spdx: BSD-3-Clause, evidence: rf-libdoc-source-map, note: "as above; the BSD 3-clause text is shipped in THIRD_PARTY_NOTICES"}
       - {name: "Parcel bundler runtime code in libdoc.html (parcelRequire module registry, Parcel 2.16.4)", spdx: MIT, evidence: rf-libdoc-parcel-runtime, note: "the small module-registry code the bundler adds around the CommonJS modules; the licence text is that of the Parcel repository at v2.16.4"}
+      - {name: "robot/utils/asserts.py (assertion functions copied from unittest.TestCase, Steve Purcell)", spdx: unverified, evidence: rf-asserts-unittest, note: "UNVERIFIED, no owner decision: the file's docstring carries the unittest copyright line and says 'the same terms as Python itself, so long as this copyright message and disclaimer are retained'; the Python terms are not reproduced"}
+      - {name: "Windows console highlighting code in robot/output/console/highlighting.py (adapted from Andre Burgaud's color_console.py)", spdx: unverified, evidence: rf-highlighting-burgaud, note: "UNVERIFIED, no owner decision: a comment names the author and the MIT License; no licence text"}
+      - {name: "Open Iconic icons in robot/htmldata/rebot/log.css (six SVG data URIs)", spdx: MIT, evidence: rf-open-iconic, note: "byte for byte six SVG files of iconic/open-iconic; MIT text of the icon licence shipped in THIRD_PARTY_NOTICES"}
       - {name: "the rest of libdoc.html (templates, styles, scripts, the favicon)", spdx: Apache-2.0, note: "Robot Framework's own source under src/web/libdoc of the repository at v7.5, under the repository's LICENSE.txt, which the wheel carries; the other files under robot/htmldata (common, rebot, testdoc: css, js, html) carry no header and are Robot Framework's own code, except that log.html, report.html and testdoc.html load the jquery assets listed here"}
     not_checked: ["the other files under robot/htmldata (common, rebot, testdoc: css, js, html) were read for headers only and are taken to be Robot Framework's own code", "the licence of Johann Burkard's 'highlight v3', the origin of the jQuery Highlight plugin"]
     trademark: {status: verified, note: "the wheel's package description states that the Robot Framework trademark is owned by the Robot Framework Foundation; repository rule: the name identifies the integration only, no logos, no use in a ReDevOps product name"}
-    redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, public_distribution_blockers: [rf-jquery-highlight, rf-jquery-tmpl, rf-jsxcompressor, rf-tablesorter-2.30.5], reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified wheel is shipped in the pinned bundle with its LICENSE.txt and AUTHORS.rst. Identified and with their licence text shipped in the bundle's THIRD_PARTY_NOTICES: jQuery 3.5.1 (with Sizzle) and the libraries inlined in libdoc.html (Handlebars, mark.js, source-map, Parcel runtime). Open facts, each with a declared licence and no licence text that can be tied to the shipped bytes: jQuery tablesorter 2.30.5 (declared (MIT OR GPL-2.0); the original project's MIT text ships as a related text), jQuery Templates (MIT or GPL Version 2 header), jQuery Highlight (MIT header) and JSXCompressor (Apache-2.0 or LGPL-3.0 header). Owner decisions are recorded per item; the items without one say none yet"}
+    redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, public_distribution_blockers: [rf-asserts-unittest, rf-highlighting-burgaud, rf-jquery-highlight, rf-jquery-tmpl, rf-jsxcompressor, rf-tablesorter-2.30.5], reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified wheel is shipped in the pinned bundle with its LICENSE.txt and AUTHORS.rst. Identified and with their licence text shipped in the bundle's THIRD_PARTY_NOTICES: jQuery 3.5.1 (with Sizzle) and the libraries inlined in libdoc.html (Handlebars, mark.js, source-map, Parcel runtime). Open facts, each with a declared licence and no licence text that can be tied to the shipped bytes: jQuery tablesorter 2.30.5 (declared (MIT OR GPL-2.0); the original project's MIT text ships as a related text), jQuery Templates (MIT or GPL Version 2 header), jQuery Highlight (MIT header) and JSXCompressor (Apache-2.0 or LGPL-3.0 header). Owner decisions are recorded per item; the items without one say none yet"}
     shipped_wheels:
       - name: robotframework
         version: "7.5"
@@ -156,6 +168,9 @@ components:
           - {path: "robot/htmldata/lib/jquery.highlight.min.js", size: 1524, sha256: "595f2a0621a75c7dc18e5076ce7bca1064600ccc974cbd8229be6ef263243f33"}
           - {path: "robot/htmldata/lib/jquery.tmpl.min.js", size: 6141, sha256: "58fe3741dce607dc6a2abbaddda4f489f9be856f26c20c67a820131018ae153f"}
           - {path: "robot/htmldata/lib/jsxcompressor.min.js", size: 13667, sha256: "b8269afbdc3549e56fe693b04928ace2141bf7df455e0700588a596185de8780"}
+          - {path: "robot/htmldata/rebot/log.css", size: 7625, sha256: "9c3962fb91baa4611d4b80d4ba34f31d71f17ef2fc0ee1d63ae9043d38e30f09"}
+          - {path: "robot/utils/asserts.py", size: 8669, sha256: "0bb95c0a1aa8e06583a9080fb2799e47a36b78d230ce6256706a0571141e53be"}
+          - {path: "robot/output/console/highlighting.py", size: 7859, sha256: "9afac39cb6ca3f044df9ef7b0e98f7850a7bb75d2b011f5b2bdc87d7754fb202"}
     owner_decision: {decision: "none yet"}
     third_party_evidence:
       - id: rf-jquery-3.5.1
@@ -224,7 +239,7 @@ components:
           - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/jquery.tmpl.min.js", retrieved_on: "2026-11-03", sha256: "58fe3741dce607dc6a2abbaddda4f489f9be856f26c20c67a820131018ae153f", note: "the shipped file at the Robot Framework tag v7.5"}
           - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/versions.txt", retrieved_on: "2026-11-03", sha256: "8d8643766422971aa2467da445f2e93f44991b140018cc09bc48c8b20238f936"}
           - {role: "identification", url: "https://raw.githubusercontent.com/jquery/jquery-tmpl/07d08cb72c7556e950593d6c011d5725db54228e/jquery.tmpl.js", retrieved_on: "2026-11-03", sha256: "801c7e1800bc12d942bdd14949dfab1ef22805374e673df6b2197dfb22ce8378"}
-          - {role: "declared_licence", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/jquery.tmpl.min.js", retrieved_on: "2026-11-03", sha256: "58fe3741dce607dc6a2abbaddda4f489f9be856f26c20c67a820131018ae153f", quote: "Dual licensed under the MIT or GPL Version 2 licenses.", note: "header of the shipped file; it also says 'Copyright Software Freedom Conservancy, Inc.' and 'http://jquery.org/license'"}
+          - {role: "declared_licence", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/jquery.tmpl.min.js", retrieved_on: "2026-11-03", sha256: "58fe3741dce607dc6a2abbaddda4f489f9be856f26c20c67a820131018ae153f", quote: "Dual licensed under the MIT or GPL Version 2 licenses.", note: "header of the shipped file; it also says 'Copyright Software Freedom Conservancy, Inc.' and 'http://jquery.org/license'", wheel_member: "robot/htmldata/lib/jquery.tmpl.min.js"}
           - {role: "declared_licence", url: "https://raw.githubusercontent.com/jquery/jquery-tmpl/07d08cb72c7556e950593d6c011d5725db54228e/jquery.tmpl.js", retrieved_on: "2026-11-03", sha256: "801c7e1800bc12d942bdd14949dfab1ef22805374e673df6b2197dfb22ce8378", quote: "* Dual licensed under the MIT or GPL Version 2 licenses.", note: "the same statement in the upstream source header, which reads 'Copyright 2011, Software Freedom Conservancy, Inc.'"}
           - {role: "declared_licence", url: "https://jquery.com/license/", retrieved_on: "2026-11-03", sha256: "a2b1c541f0b74c971b85ffb733d6cb6ac3a440ed2a1fef3e69a9b50dbfc238d6", quote: "Projects referencing this document are released under the terms of the MIT license.", note: "the page http://jquery.org/license named in the header (it redirects to jquery.com/license/); it speaks of the MIT licence only, and it names no GPL alternative"}
         licence_text_absent: "no licence text in the upstream repository jquery/jquery-tmpl (the tree has no LICENSE or COPYING file and its README does not mention a licence; GitHub reports none), none in the shipped file, and the page the header points to states that projects referencing it are released under the MIT license without reproducing the text"
@@ -250,7 +265,7 @@ components:
           - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/jquery.highlight.min.js", retrieved_on: "2026-11-03", sha256: "595f2a0621a75c7dc18e5076ce7bca1064600ccc974cbd8229be6ef263243f33", note: "the shipped file at the Robot Framework tag v7.5"}
           - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/versions.txt", retrieved_on: "2026-11-03", sha256: "8d8643766422971aa2467da445f2e93f44991b140018cc09bc48c8b20238f936"}
           - {role: "identification", url: "https://raw.githubusercontent.com/bartaz/sandbox.js/09bab1454d2251d129e0cc21bddddf99352ed01e/jquery.highlight.js", retrieved_on: "2026-11-03", sha256: "12f3a300c0e1986c56f2f186dfc63605f495e882996e2ea671050862e73c3c9c"}
-          - {role: "declared_licence", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/jquery.highlight.min.js", retrieved_on: "2026-11-03", sha256: "595f2a0621a75c7dc18e5076ce7bca1064600ccc974cbd8229be6ef263243f33", quote: " * Licensed under MIT license.", note: "header of the shipped file, with ' * Copyright (c) 2009 Bartek Szopka'"}
+          - {role: "declared_licence", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/jquery.highlight.min.js", retrieved_on: "2026-11-03", sha256: "595f2a0621a75c7dc18e5076ce7bca1064600ccc974cbd8229be6ef263243f33", quote: " * Licensed under MIT license.", note: "header of the shipped file, with ' * Copyright (c) 2009 Bartek Szopka'", wheel_member: "robot/htmldata/lib/jquery.highlight.min.js"}
           - {role: "declared_licence", url: "https://raw.githubusercontent.com/bartaz/sandbox.js/09bab1454d2251d129e0cc21bddddf99352ed01e/README", retrieved_on: "2026-11-03", sha256: "9b485be85b699bac89109ec281c39809de49ed65ef9472e1e8917a763e2be689", quote: "The source code is released under MIT Licence."}
         licence_text_absent: "no licence text: the upstream repository bartaz/sandbox.js (tree: README, jquery.highlight.js, sizzle-selenium.js, specify.js; GitHub reports no licence) has only the README sentence and the source header, and the shipped file has only the header; the plugin is 'based on highlight v3 by Johann Burkard', whose own licence was not fetched"
         licence_texts: [jquery-highlight-source-header, jquery-highlight-readme-licence-line]
@@ -275,7 +290,7 @@ components:
           - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/jsxcompressor.min.js", retrieved_on: "2026-11-03", sha256: "b8269afbdc3549e56fe693b04928ace2141bf7df455e0700588a596185de8780", note: "the shipped file at the Robot Framework tag v7.5"}
           - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/versions.txt", retrieved_on: "2026-11-03", sha256: "8d8643766422971aa2467da445f2e93f44991b140018cc09bc48c8b20238f936"}
           - {role: "identification", url: "https://raw.githubusercontent.com/jsxgraph/jsxgraph/7f2e58cacb86cbafe21113564ce2677cc4ac09dc/distrib/jsxcompressor.zip", retrieved_on: "2026-11-03", sha256: "b2fda1cc31e3afa01ceb9bfedd427b39b8505fa16ec67188bccd31e45a48582d", note: "its JSXCompressor/jsxcompressor.min.js (sha256 17d2594249d551acbb87c8588cef7da5041932a31c81d89dcbd83c22718512ff) differs from the shipped file"}
-          - {role: "declared_licence", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/jsxcompressor.min.js", retrieved_on: "2026-11-03", sha256: "b8269afbdc3549e56fe693b04928ace2141bf7df455e0700588a596185de8780", quote: "    Dual licensed under the Apache License Version 2.0, or LGPL Version 3 licenses.", note: "header of the shipped file"}
+          - {role: "declared_licence", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/lib/jsxcompressor.min.js", retrieved_on: "2026-11-03", sha256: "b8269afbdc3549e56fe693b04928ace2141bf7df455e0700588a596185de8780", quote: "    Dual licensed under the Apache License Version 2.0, or LGPL Version 3 licenses.", note: "header of the shipped file", wheel_member: "robot/htmldata/lib/jsxcompressor.min.js"}
           - {role: "declared_licence", url: "https://raw.githubusercontent.com/jsxgraph/jsxgraph/7f2e58cacb86cbafe21113564ce2677cc4ac09dc/JSXCompressor/README.md", retrieved_on: "2026-11-03", sha256: "b76b51efbac66bdf7b95e2fdf6f1d1e54a25a2e12318a0577fc791c9f700672d", quote: "    JSXCompressor is free software dual licensed under the GNU LGPL or Apache License."}
           - {role: "related_licence_text", url: "https://raw.githubusercontent.com/jsxgraph/jsxgraph/7f2e58cacb86cbafe21113564ce2677cc4ac09dc/JSXCompressor/LICENSE.APACHE", retrieved_on: "2026-11-03", sha256: "c1b9df1275e769f3dbab000d1e457a2d4b0f28eb5da6c77e48dc37eeba202ed7", notice: "jsxcompressor-apache-license", ships_as_fetched: true, note: "the Apache-2.0 text in the JSXCompressor directory of the JSXGraph repository, the project that publishes this tool; the LGPL-3.0 alternative is not elected and its text is not shipped"}
         licence_text_absent: "the shipped file carries no licence text, only a header naming a dual licence and saying a copy of each licence should have been received; the JSXGraph repository holds the Apache-2.0 text (and the LGPL text) for JSXCompressor, but the shipped bytes (a 2018 download) are not tied to a file of that repository, so the text is shipped as a candidate of the same project"
@@ -286,6 +301,75 @@ components:
           - "replace or remove: not possible without modifying the Robot Framework wheel; the bundle ships it unmodified"
         obligations_as_the_texts_state: "Apache-2.0 alternative: the licence text travels with copies, notices are retained, a patent licence is granted with a termination clause on patent litigation; the LGPL-3.0 alternative (not shipped) is a copyleft licence"
         residual: "the exact release was not identified (no upstream file is byte for byte the shipped one); the candidate text comes from the project's current repository"
+        owner_decision:
+          decision: "none yet"
+      - id: rf-asserts-unittest
+        component: "robot/utils/asserts.py, whose assertion functions are copied from unittest.TestCase (Steve Purcell)"
+        version: "Robot Framework 7.5 (byte for byte the file at the tag v7.5)"
+        wheel: robotframework
+        status: declared_only
+        spdx: "unverified"
+        declared_spdx: "the terms of Python itself, as the file's header states for the unittest code ('so long as this copyright message and disclaimer are retained in their original form')"
+        shipped_members: ["robot/utils/asserts.py"]
+        identified_by: "the shipped file (sha256 recorded in recorded_members) is byte for byte src/robot/utils/asserts.py at the Robot Framework tag v7.5; its docstring says 'Most of the functions are copied more or less directly from unittest.TestCase which comes with the following license' and reproduces the unittest copyright line (Copyright (c) 1999-2003 Steve Purcell), a permission sentence and the disclaimers"
+        sources:
+          - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/utils/asserts.py", retrieved_on: "2026-11-03", sha256: "0bb95c0a1aa8e06583a9080fb2799e47a36b78d230ce6256706a0571141e53be"}
+          - {role: "declared_licence", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/utils/asserts.py", retrieved_on: "2026-11-03", sha256: "0bb95c0a1aa8e06583a9080fb2799e47a36b78d230ce6256706a0571141e53be", quote: "    it under the same terms as Python itself, so long as this copyright message", note: "the permission sentence of the unittest licence as reproduced in the file's docstring", wheel_member: "robot/utils/asserts.py"}
+        licence_text_absent: "the notice (the copyright line, the permission sentence and the disclaimers) is carried in the file's own docstring and ships with the file, but the 'terms of Python itself' it refers to are not reproduced there and were not fetched: no text of the Python licence of 1999-2003 was tied to this file"
+        licence_texts: [rf-asserts-unittest-notice]
+        options:
+          - "accept the notice in the file: the terms are the retention of the copyright message and the disclaimers, which the unmodified file carries"
+          - "ask Robot Framework which licence text it relies on for the unittest-derived code; nothing was filed"
+          - "replace or remove: not possible without modifying the Robot Framework wheel; the bundle ships it unmodified"
+        obligations_as_the_texts_state: "as the file's header states: the copyright message and the disclaimer are retained in their original form; the author disclaims liability and warranties"
+        residual: "the referenced Python terms are not reproduced; the notice file excerpt of this item is the docstring block, not a separate licence"
+        owner_decision:
+          decision: "none yet"
+      - id: rf-highlighting-burgaud
+        component: "Windows console highlighting code in robot/output/console/highlighting.py, adapted from color_console.py by Andre Burgaud"
+        version: "Robot Framework 7.5 (byte for byte the file at the tag v7.5)"
+        wheel: robotframework
+        status: declared_only
+        spdx: "unverified"
+        declared_spdx: "MIT (as the file's comment says: 'copyright Andre Burgaud, licensed under the MIT License')"
+        shipped_members: ["robot/output/console/highlighting.py"]
+        identified_by: "the shipped file is byte for byte src/robot/output/console/highlighting.py at the Robot Framework tag v7.5; a comment says the Windows highlighting code is 'adapted from color_console.py. It is copyright Andre Burgaud, licensed under the MIT License, and available here' with the address of the author's article"
+        sources:
+          - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/output/console/highlighting.py", retrieved_on: "2026-11-03", sha256: "9afac39cb6ca3f044df9ef7b0e98f7850a7bb75d2b011f5b2bdc87d7754fb202"}
+          - {role: "declared_licence", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/output/console/highlighting.py", retrieved_on: "2026-11-03", sha256: "9afac39cb6ca3f044df9ef7b0e98f7850a7bb75d2b011f5b2bdc87d7754fb202", quote: "# Andre Burgaud, licensed under the MIT License, and available here:", wheel_member: "robot/output/console/highlighting.py"}
+          - {role: "declared_licence", url: "https://www.burgaud.com/bring-colors-to-the-windows-console-with-python/", retrieved_on: "2026-11-03", sha256: "24d5444de033f8d0ff440e2ee5773039cf28e4023b2b63581110ac5dbc5f6cf9", quote: "The source code included in this article is distributed under the MIT License", note: "the author's article (the address in the file now redirects here); the site footer reads '© 2000- André Burgaud'; the page names the MIT License and holds no licence text"}
+        licence_text_absent: "the file's comment names the MIT licence and the author, and the author's article says its source code is distributed under the MIT License; no MIT text with the author's copyright line ships in the wheel or was found at the cited address"
+        licence_texts: [rf-highlighting-attribution]
+        options:
+          - "rely on the comment and the article's declaration"
+          - "ask Robot Framework for the licence text of the adapted code; nothing was filed"
+          - "replace or remove: not possible without modifying the Robot Framework wheel; the bundle ships it unmodified"
+        obligations_as_the_texts_state: "none stated beyond 'copyright Andre Burgaud, licensed under the MIT License'; if MIT applies, the copyright notice and the permission notice in copies"
+        residual: "the adapted portion is the Windows-only part of the file; the author's page is a volatile web page"
+        owner_decision:
+          decision: "none yet"
+      - id: rf-open-iconic
+        component: "six Open Iconic SVG icons inlined as data URIs in robot/htmldata/rebot/log.css (minus, plus, link-intact, chevron-bottom, chevron-top, align-left)"
+        version: "iconic/open-iconic commit 1d1e8885c5031874b32f4e480e371ce2b1c24144"
+        wheel: robotframework
+        status: verified
+        spdx: "MIT"
+        shipped_members: ["robot/htmldata/rebot/log.css"]
+        identified_by: "the shipped log.css opens with 'Icons are from Open Iconic <https://useiconic.com/open/>. Licensed under the MIT License.' and holds six data:image/svg+xml;base64 icons; each decoded icon is byte for byte one of the files of the svg directory of iconic/open-iconic at the commit named (minus.svg, plus.svg, link-intact.svg, chevron-bottom.svg, chevron-top.svg, align-left.svg); the 223 files of that directory were compared"
+        sources:
+          - {role: "identification", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/rebot/log.css", retrieved_on: "2026-11-03", sha256: "9c3962fb91baa4611d4b80d4ba34f31d71f17ef2fc0ee1d63ae9043d38e30f09", note: "the shipped file at the Robot Framework tag v7.5 (equal to the wheel's file); its first comment says 'Icons are from Open Iconic <https://useiconic.com/open/>. Licensed under the MIT License.'"}
+          - {role: "identification", url: "https://raw.githubusercontent.com/iconic/open-iconic/1d1e8885c5031874b32f4e480e371ce2b1c24144/svg/minus.svg", retrieved_on: "2026-11-03", sha256: "78f453538c8219e5e6ac9b8ce58d8322312ba4988129313c41ca9961c6f26c24", note: "byte for byte the SVG decoded from data URI number 1 of the shipped log.css"}
+          - {role: "identification", url: "https://raw.githubusercontent.com/iconic/open-iconic/1d1e8885c5031874b32f4e480e371ce2b1c24144/svg/plus.svg", retrieved_on: "2026-11-03", sha256: "ddf54e8986e8f721b100e8ae50f87bcc6ac6de66e5755831cb424435868f56b4", note: "byte for byte the SVG decoded from data URI number 2 of the shipped log.css"}
+          - {role: "identification", url: "https://raw.githubusercontent.com/iconic/open-iconic/1d1e8885c5031874b32f4e480e371ce2b1c24144/svg/link-intact.svg", retrieved_on: "2026-11-03", sha256: "61828f9261623ce5759f03c3993ae8e1c866392088764261be8bec039d14f6fe", note: "byte for byte the SVG decoded from data URI number 3 of the shipped log.css"}
+          - {role: "identification", url: "https://raw.githubusercontent.com/iconic/open-iconic/1d1e8885c5031874b32f4e480e371ce2b1c24144/svg/chevron-bottom.svg", retrieved_on: "2026-11-03", sha256: "04bbc096dc6ee2c4cf9f1009ad3caac1518c48619dd442d475c97ff9f1c78955", note: "byte for byte the SVG decoded from data URI number 4 of the shipped log.css"}
+          - {role: "identification", url: "https://raw.githubusercontent.com/iconic/open-iconic/1d1e8885c5031874b32f4e480e371ce2b1c24144/svg/chevron-top.svg", retrieved_on: "2026-11-03", sha256: "f418e1b2e4b6f019bc75de3302c97024c43d5a351297e71e17067ef80a28a124", note: "byte for byte the SVG decoded from data URI number 5 of the shipped log.css"}
+          - {role: "identification", url: "https://raw.githubusercontent.com/iconic/open-iconic/1d1e8885c5031874b32f4e480e371ce2b1c24144/svg/align-left.svg", retrieved_on: "2026-11-03", sha256: "d9a32c7fe499bd2e55ae4c54abfd040968787563d02fe5744837d7d09e611817", note: "byte for byte the SVG decoded from data URI number 6 of the shipped log.css"}
+          - {role: "declared_licence", url: "https://raw.githubusercontent.com/robotframework/robotframework/v7.5/src/robot/htmldata/rebot/log.css", retrieved_on: "2026-11-03", sha256: "9c3962fb91baa4611d4b80d4ba34f31d71f17ef2fc0ee1d63ae9043d38e30f09", quote: "   Licensed under the MIT License. */", wheel_member: "robot/htmldata/rebot/log.css"}
+          - {role: "declared_licence", url: "https://raw.githubusercontent.com/iconic/open-iconic/1d1e8885c5031874b32f4e480e371ce2b1c24144/README.md", retrieved_on: "2026-11-03", sha256: "f7074d5d0144efc2c2347a3e1ead9e5cc4f1f9805fda08ecb9f55325cf1d015d", quote: "All code (including SVG markup) is under the [MIT License](http://opensource.org/licenses/MIT).", note: "the README also says 'All fonts are under the [SIL Licensed]'; the shipped file uses SVG icons, not the fonts"}
+          - {role: "licence_text", url: "https://raw.githubusercontent.com/iconic/open-iconic/1d1e8885c5031874b32f4e480e371ce2b1c24144/ICON-LICENSE", retrieved_on: "2026-11-03", sha256: "b3f22ce84cba8df34011f5d420ec87ad75d7f91700f21cdc8589ee388594325e", notice: "open-iconic-icon-license", ships_as_fetched: true, note: "MIT, Copyright (c) 2014 Waybury"}
+        licence_texts: [open-iconic-icon-license]
+        obligations_as_the_texts_state: "MIT: the copyright notice and the permission notice are included in all copies or substantial portions"
+        residual: "the commit is the head of the upstream repository at the retrieval date; an older commit with the same six files is equally possible (the files are tiny and unchanged for years, not verified); other Robot Framework stylesheets were not found to carry icons without a header"
         owner_decision:
           decision: "none yet"
       - id: rf-libdoc-handlebars
@@ -568,8 +652,12 @@ components:
       - {name: "React 19.2.7, ReactDOM 19.2.7 and scheduler 0.27.0 in the lib/vite bundles", spdx: MIT, evidence: pw-vite-react, note: "licence text from the published tarballs, shipped in THIRD_PARTY_NOTICES"}
       - {name: "CodeMirror 5.65.18 in the lib/vite bundles", spdx: MIT, evidence: pw-vite-codemirror, note: "licence text from the published tarball"}
       - {name: "xterm.js 5.5.0 and its fit addon 0.10.0 in the lib/vite trace viewer bundle", spdx: MIT, evidence: pw-vite-xterm, note: "licence texts from the published tarballs"}
-      - {name: "the codicon icon font (lib/vite/**/codicon*.ttf, 3 copies)", spdx: unverified, evidence: pw-vite-codicon, note: "UNVERIFIED, no owner decision: Playwright files a Visual Studio Code MIT text beside its copy, the upstream icon-font project licenses its content under CC BY 4.0; which governs the copy is not established"}
+      - {name: "the codicon icon font (lib/vite/**/codicon*.ttf, 3 copies)", spdx: unverified, evidence: pw-vite-codicon, note: "UNVERIFIED, no owner decision: Playwright files a Visual Studio Code MIT text beside its copy, the upstream README puts its 'other content' under CC BY 4.0 and its code under MIT; which governs the copy is not established"}
       - {name: "browser logo SVGs of the dashboard (firefox, firefox-beta, firefox-nightly, safari)", spdx: unverified, evidence: pw-vite-browser-logos, note: "UNVERIFIED, no owner decision: no licence for the artwork, which the upstream project calls the property of the trademark owners"}
+      - {name: "zip.js 2.7.73 in the lib/vite bundles (service worker, HTML report, dashboard)", spdx: BSD-3-Clause, evidence: pw-vite-zipjs, note: "licence texts from the published tarball, shipped in THIRD_PARTY_NOTICES; the version is read from Playwright's lock file"}
+      - {name: "yaml 2.9.0 in the lib/vite trace viewer and recorder bundles", spdx: ISC, evidence: pw-vite-yaml, note: "the ISC text ships in utilsBundle.js.LICENSE"}
+      - {name: "Visual Studio Code colour variables and codicon CSS rules (colors.css, codicon.css) in the lib/vite CSS", spdx: MIT, evidence: pw-vite-vscode-css, note: "Microsoft MIT text from the folder Playwright vendors them in"}
+      - {name: "xdg-open script of xdg-utils (playwright/driver/package/lib/xdg-open)", spdx: MIT, evidence: pw-xdg-open, note: "byte for byte the file of open 11.0.0; the MIT text is in its header"}
       - {name: "vendored third-party sources compiled into coreBundle.js and the trace viewer (pixelmatch, extract-zip, lockfile, DevTools curl generator, Puppeteer-derived bidi files)", spdx: "ISC AND BSD-2-Clause AND MIT AND BSD-3-Clause AND Apache-2.0", evidence: pw-vendored-sources, note: "the licence headers of these files are in Playwright's source at the tag and not in the shipped bundles; the headers ship as excerpts in THIRD_PARTY_NOTICES"}
     trademark: {status: unverified, note: "not checked"}
     not_checked: ["Playwright trademark: no trademark policy was read (trademark status: unverified, not checked)", "other files of the wheel that were not scanned for third-party content: lib/xdg-open (a shell script that carries an MIT permission text in its own header), lib/tools/** (markdown and scripts), the two appIcon.png files, types/ and bin/", "nbytes 0.1.4 and ncrypto 0.0.1, reported by process.versions of the Node.js executable: Node project code with no section of its own in the Node.js LICENSE", "the yaml package in the vite bundles: the lock version (2.9.0) equals the ISC section of utilsBundle.js.LICENSE, not matched in the bytes"]
@@ -595,6 +683,7 @@ components:
         recorded_members:
           - {path: "playwright/driver/node", size: 126879696, sha256: "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb"}
           - {path: "playwright/driver/package/lib/webp_codec.wasm", size: 565369, sha256: "164cd9583a3e4d081f767d3b41ff0a730443dc7535fcc5caff83561463384b79"}
+          - {path: "playwright/driver/package/lib/xdg-open", size: 32416, sha256: "7d759d54f0d4ce1beeb34ee62c587985b5042374e8de237b0dcb8cd47aa698cf"}
     owner_decision: {decision: "none yet"}
     third_party_evidence:
       - id: pw-node-runtime
@@ -636,6 +725,7 @@ components:
         table: {kind: npm-inlined-packages, path: "third_party/evidence/playwright-1.64.1-inlined-npm-packages.json", sha256: "962017cd750119e81087a600c0100ff9714fc42665df71aa0672e5559c1c0ded", source_members: ["playwright/driver/package/lib/utilsBundle.js.LICENSE", "playwright/driver/package/lib/serverRegistry.js.LICENSE"]}
         obligations_as_the_texts_state: "MIT, ISC, BSD-2-Clause and BSD-3-Clause: keep the copyright notice and the permission or redistribution conditions with copies (in binary form, in the documentation or other materials provided with it); the BSD-3-Clause texts add that the contributors' names may not be used to endorse derived products"
         residual: "that the code of a package is inlined into utilsBundle.js is taken from Playwright's own notice file, the bundled JavaScript was not compared with each package's source; the registry declaration and the licence file are of the version named in the notice"
+        covers_paths: ["playwright/driver/package/lib/utilsBundle.js", "playwright/driver/package/lib/serverRegistry.js"]
         owner_decision:
           decision: "none yet"
       - id: pw-minimatch
@@ -687,7 +777,7 @@ components:
           date: "2026-11-03"
           decided_by: "owner"
           conditions:
-            - {id: "missing-text-documented", text: "the MIT declaration is evidence of licensing, and the missing licence text stays explicitly documented where a redistributor sees it (the bundle README and the notices README) and in this record", kind: "documented", files: {"bundle/README.md": ["proxy-agent-negotiate", "no licence text"], "third_party/notices/README.md": ["proxy-agent-negotiate", "no licence text"]}, status: "satisfied"}
+            - {id: "missing-text-documented", text: "the MIT declaration is evidence of licensing, and the missing licence text stays explicitly documented where a redistributor sees it (the bundle README, the notices README and the BUNDLE.json note the builder writes) and in this record", kind: "documented", files: {"bundle/README.md": ["proxy-agent-negotiate", "no licence text"], "third_party/notices/README.md": ["proxy-agent-negotiate", "no licence text"], "tools/build_bundle.py": ["proxy-agent-negotiate", "no licence text"]}, status: "satisfied"}
       - id: pw-node-icu
         component: "ICU (International Components for Unicode) in the Node.js runtime, as the Node.js LICENSE reproduces it (Unicode License V3 and ICU's third-party notices)"
         version: "ICU 78.3 (process.versions.icu), CLDR 48.0, Unicode 17.0"
@@ -727,6 +817,7 @@ components:
         licence_texts: [playwright-playwright-driver-package-lib-webp-codec-license]
         obligations_as_the_texts_state: "libwebp BSD-3-Clause: binary redistributions reproduce the copyright notice, the conditions and the disclaimer in the documentation or other materials provided, the names of Google and its contributors are not used to endorse derived products; the WebM Additional IP Rights Grant is a perpetual royalty-free patent licence for these implementations of WebM that terminates for whoever starts patent litigation alleging that they infringe; Emscripten: either the MIT or the University of Illinois/NCSA licence (both texts are in the file), the Node.js (MIT) text for the code taken from it, and the MIT licence of musl"
         residual: "the wasm was not rebuilt, the pinned commit is the statement of Playwright's own build script at the tag; the Emscripten version that produced the glue is not stated in the shipped bytes (its LICENSE is identical across every tag looked at); the wrapper webp_wasm.c is Playwright's own code under Playwright's Apache-2.0 LICENSE"
+        covers_paths: ["playwright/driver/package/lib/webp_codec.*"]
         owner_decision:
           decision: "none yet"
       - id: pw-vite-react
@@ -747,6 +838,8 @@ components:
         licence_texts: [react-19.2.7-license]
         obligations_as_the_texts_state: "MIT: the copyright notice and the permission notice are included in all copies or substantial portions"
         residual: "the licence comments of the libraries are stripped from the bundles, so the text travels in THIRD_PARTY_NOTICES; which other packages are inlined in these bundles was derived from Playwright's package manifests and lock file and from code signatures, not enumerated from the bytes (yaml 2.9.0, ISC, is the same lock version as the section of utilsBundle.js.LICENSE)"
+        covers_paths: ["playwright/driver/package/lib/vite/**"]
+        packages: [react, react-dom]
         owner_decision:
           decision: "none yet"
       - id: pw-vite-codemirror
@@ -765,6 +858,7 @@ components:
         licence_texts: [codemirror-5.65.18-license]
         obligations_as_the_texts_state: "MIT: the copyright notice and the permission notice are included in all copies or substantial portions"
         residual: "the licence comment is stripped from the bundle; the text travels in THIRD_PARTY_NOTICES"
+        packages: [codemirror]
         owner_decision:
           decision: "none yet"
       - id: pw-vite-xterm
@@ -785,6 +879,7 @@ components:
         licence_texts: [xterm-5.5.0-license, xterm-addon-fit-0.10.0-license]
         obligations_as_the_texts_state: "MIT: the copyright notice and the permission notice are included in all copies or substantial portions"
         residual: "the versions are read from the lock file, not from the shipped bytes; the licence comments are stripped from the bundle"
+        packages: ["@xterm/xterm", "@xterm/addon-fit"]
         owner_decision:
           decision: "none yet"
       - id: pw-vite-codicon
@@ -793,7 +888,7 @@ components:
         wheel: playwright
         status: declared_only
         spdx: "unverified"
-        declared_spdx: "MIT (the licence file Playwright keeps in its vendored folder, a Visual Studio Code MIT text) and CC-BY-4.0 (the licence of the icon font in its upstream project microsoft/vscode-codicons, MIT for that project's code)"
+        declared_spdx: "MIT (the licence file Playwright keeps in its vendored folder, a Visual Studio Code MIT text) or CC-BY-4.0 (what GitHub and the npm registry report for the upstream project microsoft/vscode-codicons and its package; its README puts its documentation and other content under CC BY 4.0 and its code under MIT)"
         shipped_members: []
         inlined_in: "playwright/driver/package/lib/vite/traceViewer/codicon.DCmgc-ay.ttf"
         identified_by: "the three shipped files (sha256 0f1d5219...) are byte for byte packages/web/src/third_party/vscode/codicon.ttf at the Playwright tag v1.64.1; the font's name table says 'codicon', 'Version 1.11' and carries no copyright or licence record; none of the 96 versions of the npm package @vscode/codicons has a codicon.ttf with the same bytes (all 96 were compared), so the exact upstream release was not found"
@@ -803,9 +898,9 @@ components:
           - {role: "declared_licence", url: "https://raw.githubusercontent.com/microsoft/vscode-codicons/6200d186bea39354a18737cfff73fe19dbc5fcff/README.md", retrieved_on: "2026-11-03", sha256: "940627a4abfb7b8616b495fbdda353ea4401b154c890b1327b7e180dddf69294", quote: "in this repository under the [Creative Commons Attribution 4.0 International Public License](https://creativecommons.org/licenses/by/4.0/legalcode), / see the [LICENSE](LICENSE) file, and grant you a license to any code in the repository under the [MIT License](https://opensource.org/licenses/MIT), see the"}
           - {role: "declared_licence", url: "https://registry.npmjs.org/@vscode%2fcodicons", retrieved_on: "2026-11-03", sha256: "9f77f9c59a1ad281743460716209065a2c15f66f786b80fbce5bddf62af65379", quote: "\"license\":\"CC-BY-4.0\"", note: "the registry document of the package @vscode/codicons (the volatile document of 96 versions)"}
           - {role: "related_licence_text", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/LICENSE.txt", retrieved_on: "2026-11-03", sha256: "20535828272932407c2f5172aeb714ac7b374a34e5ecb1825af509f2902cde54", notice: "playwright-vscode-license", ships_as_fetched: true, note: "the MIT text (Copyright (c) 2015 - present Microsoft Corporation) that Playwright keeps in the folder of its vendored copy"}
-          - {role: "related_licence_text", url: "https://raw.githubusercontent.com/microsoft/vscode-codicons/6200d186bea39354a18737cfff73fe19dbc5fcff/LICENSE", retrieved_on: "2026-11-03", sha256: "af5e030844efddbc7ab00dcfea8b019703753d4d9f5172d727c533a492aec665", notice: "vscode-codicons-license", ships_as_fetched: true, note: "Creative Commons Attribution 4.0 International, the licence the upstream project gives its content"}
+          - {role: "related_licence_text", url: "https://raw.githubusercontent.com/microsoft/vscode-codicons/6200d186bea39354a18737cfff73fe19dbc5fcff/LICENSE", retrieved_on: "2026-11-03", sha256: "af5e030844efddbc7ab00dcfea8b019703753d4d9f5172d727c533a492aec665", notice: "vscode-codicons-license", ships_as_fetched: true, note: "Creative Commons Attribution 4.0 International, the licence the upstream README names for its documentation and other content"}
           - {role: "related_licence_text", url: "https://raw.githubusercontent.com/microsoft/vscode-codicons/6200d186bea39354a18737cfff73fe19dbc5fcff/LICENSE-CODE", retrieved_on: "2026-11-03", sha256: "9906940f61b1f0b533fa7d99baf55178b2808fbe113ea51dfbfad8572ccd5f2b", notice: "vscode-codicons-license-code", ships_as_fetched: true, note: "the MIT text for the upstream project's code"}
-        licence_text_absent: "no licence text can be tied to the shipped font: the folder Playwright copied it into carries a Visual Studio Code MIT text and its codicon.css header says MIT, while the upstream icon-font project licenses its content (the font) under CC BY 4.0 and only its code under MIT; the font itself carries no licence record and no upstream release with the same bytes was found, so which of the two texts governs this copy is not established here"
+        licence_text_absent: "no licence text can be tied to the shipped font: the folder Playwright copied it into carries a Visual Studio Code MIT text and its codicon.css header says MIT, while the upstream project microsoft/vscode-codicons says in its README that 'the Microsoft documentation and other content in this repository' are under CC BY 4.0 and 'any code' under MIT (GitHub and the npm registry report CC-BY-4.0 for the repository and the package); that the font is part of that other content is an inference and not a statement of the README; the font itself carries no licence record and no upstream release with the same bytes was found, so which of the two texts governs this copy is not established here"
         licence_texts: [playwright-vscode-license, vscode-codicons-license, vscode-codicons-license-code]
         options:
           - "upstream clarification: ask Playwright (microsoft/playwright) which licence applies to packages/web/src/third_party/vscode/codicon.ttf and to add it to the wheel's notices; nothing was filed"
@@ -817,21 +912,27 @@ components:
         owner_decision:
           decision: "none yet"
       - id: pw-vite-browser-logos
-        component: "the Firefox, Firefox Beta, Firefox Nightly and Safari logo SVGs of the Playwright dashboard (lib/vite/dashboard/assets/*.svg), from the npm packages @browser-logos/*"
-        version: "@browser-logos/firefox 3.0.10, firefox-beta 4.1.4, firefox-nightly 3.0.6, safari 2.1.0"
+        component: "the ten @browser-logos logo packages the Playwright dashboard imports: Firefox, Firefox Beta, Firefox Nightly and Safari as SVG files (lib/vite/dashboard/assets/*.svg), and Chrome, Chrome Beta, Chrome Canary, Chrome Dev, Chromium and Edge inlined as six data: SVG URIs in dashboard/assets/index-*.js"
+        version: "@browser-logos/chrome 2.0.0, chrome-beta 3.0.0, chrome-canary 2.0.0, chrome-dev 3.0.0, chromium 2.0.1, edge 2.0.7, firefox 3.0.10, firefox-beta 4.1.4, firefox-nightly 3.0.6, safari 2.1.0 (as Playwright's lock file resolves them)"
         wheel: playwright
         status: declared_only
         spdx: "unverified"
         declared_spdx: "none for the logo artwork (the project says the logos are trademarks of their owners; its other content is MIT)"
         shipped_members: []
         inlined_in: "playwright/driver/package/lib/vite/dashboard/assets/firefox-1bWoP6pv.svg"
-        identified_by: "each shipped SVG is byte for byte the SVG of the corresponding npm package at the version Playwright's package-lock.json at v1.64.1 resolves (sha512 integrity equal to the registry's and to the tarballs fetched here); the browser logo packages declare no licence in the registry and carry no licence file; playwright-logo.svg is Playwright's own"
+        identified_by: "four shipped SVGs are byte for byte package/<name>.svg of the packages firefox 3.0.10, firefox-beta 4.1.4, firefox-nightly 3.0.6 and safari 2.1.0; the dashboard bundle also carries six data:image/svg+xml strings (counted in the shipped file) for the Chrome-family and Edge logos, which are processed copies and not byte for byte the npm SVGs, so they are tied to chrome 2.0.0, chrome-beta 3.0.0, chrome-canary 2.0.0, chrome-dev 3.0.0, chromium 2.0.1 and edge 2.0.7 by Playwright's source (packages/dashboard/package.json imports all ten) and its lock file, not by bytes; none of the ten registry entries declares a licence and none of the tarballs has a licence file; playwright-logo.svg is Playwright's own"
         sources:
           - {role: "identification", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/package-lock.json", retrieved_on: "2026-11-03", sha256: "478ec38a5b4c6825123880b67475d3229dd2c3a4df49b53d9b5634045a4135d1"}
           - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/firefox/-/firefox-3.0.10.tgz", retrieved_on: "2026-11-03", sha256: "40043e42ff2778d54799d51075b77bf69afa1fd0dddc3d88ffe484ce5651ac43", note: "package/firefox.svg is byte for byte the shipped lib/vite/dashboard/assets/firefox-1bWoP6pv.svg"}
           - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/firefox-beta/-/firefox-beta-4.1.4.tgz", retrieved_on: "2026-11-03", sha256: "74e46df8e675d48a64bee0eedba8cfd04b78df2621184440cfddde272eea6794", note: "package/firefox-beta.svg is byte for byte the shipped lib/vite/dashboard/assets/firefox-beta-k3eOH_eK.svg"}
           - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/firefox-nightly/-/firefox-nightly-3.0.6.tgz", retrieved_on: "2026-11-03", sha256: "29c9efccc4f5a41a95369f89674f0fba08cd78b0a56c9f297d74b511e8f1ab74", note: "package/firefox-nightly.svg is byte for byte the shipped lib/vite/dashboard/assets/firefox-nightly-Cp5nfeDT.svg"}
           - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/safari/-/safari-2.1.0.tgz", retrieved_on: "2026-11-03", sha256: "a6a620563ec47dd4e77287b563a830367f05eb49b5b65669336acc6a0ef386b0", note: "package/safari.svg is byte for byte the shipped lib/vite/dashboard/assets/safari-na3_-uQk.svg"}
+          - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/chrome/-/chrome-2.0.0.tgz", retrieved_on: "2026-11-03", sha256: "3431fa5e7a70b2c4aa13a481a4bd89314d3a3748133d3904ef8c12641dd1829e", note: "@browser-logos/chrome 2.0.0: resolved by Playwright's lock file (sha512 integrity equal to the registry's and to the tarball fetched here); no licence in the registry, no licence file; its package/chrome.svg is NOT byte for byte any shipped file (the logo is inlined as a data: URI in the dashboard bundle)"}
+          - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/chrome-beta/-/chrome-beta-3.0.0.tgz", retrieved_on: "2026-11-03", sha256: "a7f5c1491f7667dc6d63a568b395448b04f24b105a3814d3605d70c4adc9f7e2", note: "@browser-logos/chrome-beta 3.0.0: resolved by Playwright's lock file (sha512 integrity equal to the registry's and to the tarball fetched here); no licence in the registry, no licence file; its package/chrome-beta.svg is NOT byte for byte any shipped file (the logo is inlined as a data: URI in the dashboard bundle)"}
+          - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/chrome-canary/-/chrome-canary-2.0.0.tgz", retrieved_on: "2026-11-03", sha256: "f1fdd3432c5917023a7ff405adda23c01b45ac7af99f5fd22f3987d18be00606", note: "@browser-logos/chrome-canary 2.0.0: resolved by Playwright's lock file (sha512 integrity equal to the registry's and to the tarball fetched here); no licence in the registry, no licence file; its package/chrome-canary.svg is NOT byte for byte any shipped file (the logo is inlined as a data: URI in the dashboard bundle)"}
+          - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/chrome-dev/-/chrome-dev-3.0.0.tgz", retrieved_on: "2026-11-03", sha256: "da0d4e22cccfa942bf30301017148ea34e3cb899a3f645fc23b46b6b4c587e7b", note: "@browser-logos/chrome-dev 3.0.0: resolved by Playwright's lock file (sha512 integrity equal to the registry's and to the tarball fetched here); no licence in the registry, no licence file; its package/chrome-dev.svg is NOT byte for byte any shipped file (the logo is inlined as a data: URI in the dashboard bundle)"}
+          - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/chromium/-/chromium-2.0.1.tgz", retrieved_on: "2026-11-03", sha256: "e71f2f9d2d0d973b6c950b8efce554e66fd570699961fec9efcd1d62c87c8c80", note: "@browser-logos/chromium 2.0.1: resolved by Playwright's lock file (sha512 integrity equal to the registry's and to the tarball fetched here); no licence in the registry, no licence file; its package/chromium.svg is NOT byte for byte any shipped file (the logo is inlined as a data: URI in the dashboard bundle)"}
+          - {role: "identification", url: "https://registry.npmjs.org/@browser-logos/edge/-/edge-2.0.7.tgz", retrieved_on: "2026-11-03", sha256: "cb0b4edbcc7d420d73764e3cbe388112d7d4663146f28083499f3735db7a8114", note: "@browser-logos/edge 2.0.7: resolved by Playwright's lock file (sha512 integrity equal to the registry's and to the tarball fetched here); no licence in the registry, no licence file; its package/edge.svg is NOT byte for byte any shipped file (the logo is inlined as a data: URI in the dashboard bundle)"}
           - {role: "declared_licence", url: "https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/README.md", retrieved_on: "2026-11-03", sha256: "5f70d1ea560f8d45b36d0090903a32bb1e61fb617cc6aa1332fc52d713bdb3be", quote: "All logos and trademarks are the property of their respective owners. / Everything else is available under the [MIT license][license]."}
           - {role: "related_licence_text", url: "https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/LICENSE.txt", retrieved_on: "2026-11-03", sha256: "a8fa11ef7da0447b701294ffa4c9649670f33bd727ceac0ac47f7e0cce4087c4", notice: "browser-logos-repo-license", ships_as_fetched: true, note: "the MIT text of the repository, which by its README does not cover the logos"}
         licence_text_absent: "none of the four @browser-logos packages declares a licence or contains a licence file; the upstream repository alrra/browser-logos says 'All logos and trademarks are the property of their respective owners' and offers 'everything else' under MIT, so there is no licence for the artwork of the logos themselves, whose owners are the browser vendors"
@@ -842,6 +943,7 @@ components:
           - "replace or remove: not possible without modifying the Playwright wheel (the files are members of lib/vite/dashboard); the bundle ships it unmodified"
         obligations_as_the_texts_state: "none stated for the artwork; the repository's MIT text (the copyright notice and permission notice in copies) covers 'everything else' of that repository, which its README distinguishes from the logos"
         residual: "the trademark and artwork terms of Mozilla and Apple were not read"
+        packages: ["@browser-logos/chrome", "@browser-logos/chrome-beta", "@browser-logos/chrome-canary", "@browser-logos/chrome-dev", "@browser-logos/chromium", "@browser-logos/edge", "@browser-logos/firefox", "@browser-logos/firefox-beta", "@browser-logos/firefox-nightly", "@browser-logos/safari"]
         owner_decision:
           decision: "none yet"
       - id: pw-vendored-sources
@@ -866,6 +968,85 @@ components:
         licence_texts: [pw-vendored-pixelmatch-header, pw-vendored-lockfile-header, pw-vendored-extractzip-header, pw-vendored-devtools-header]
         obligations_as_the_texts_state: "ISC, MIT and BSD 2-clause and 3-clause texts: the copyright notice and the permission notice or the redistribution conditions travel with copies (binary form: in the documentation or other materials provided); the BSD 3-clause texts add that the names of the copyright holders and contributors are not used to endorse derived products; Apache-2.0 (the Puppeteer-derived files): the licence text and the NOTICE content travel, with the patent licence and its termination clause"
         residual: "identification in the shipped bundles is by distinctive strings, not by a byte comparison of the compiled code; the shipped texts are excerpts (the licence comment blocks) of the source files at the tag; the Puppeteer-derived files are covered by Playwright's own shipped Apache-2.0 LICENSE and NOTICE, no separate text was added"
+        covers_paths: ["playwright/driver/package/lib/coreBundle.js"]
+        owner_decision:
+          decision: "none yet"
+      - id: pw-vite-zipjs
+        component: "zip.js (@zip.js/zip.js) in the Playwright trace viewer service worker, HTML report and dashboard bundles, with the JCraft-derived inflate and deflate code"
+        version: "2.7.73 (from Playwright's lock file; the shipped bytes do not state a version)"
+        wheel: playwright
+        status: verified
+        spdx: "BSD-3-Clause"
+        shipped_members: []
+        inlined_in: "playwright/driver/package/lib/vite/traceViewer/sw.bundle.js"
+        identified_by: "traceViewer/sw.bundle.js, htmlReport/report.js and dashboard/assets/index-*.js contain the zip.js reader code (ZipReader, ZipReaderStream, BlobReader, Zip64, inflate/deflate streams) with every comment stripped, so no copyright or licence text and no version string is left in them; Playwright's source imports @zip.js/zip.js and its no-worker inflate and deflate modules in the trace viewer, HTML reporter and dashboard packages, and its package-lock.json at v1.64.1 resolves @zip.js/zip.js 2.7.73 (sha512 integrity equal to the registry's and to the tarball fetched here)"
+        sources:
+          - {role: "identification", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/package-lock.json", retrieved_on: "2026-11-03", sha256: "478ec38a5b4c6825123880b67475d3229dd2c3a4df49b53d9b5634045a4135d1", note: "resolves @zip.js/zip.js 2.7.73 (BSD-3-Clause) as a development dependency that is bundled at build time"}
+          - {role: "identification", url: "https://registry.npmjs.org/@zip.js/zip.js/-/zip.js-2.7.73.tgz", retrieved_on: "2026-11-03", sha256: "2a6b18c0cda799f6e6ad6ec943248b2095775782f086a1e408c274fe5c1327f1"}
+          - {role: "declared_licence", url: "https://registry.npmjs.org/@zip.js/zip.js/2.7.73", retrieved_on: "2026-11-03", sha256: "92926b9802ad42e9da4b201d1f3936600d7ef29bc605d48ab885bbfc47ebbb95", quote: "\"license\":\"BSD-3-Clause\"", note: "the registry document of the version"}
+          - {role: "licence_text", url: "https://registry.npmjs.org/@zip.js/zip.js/-/zip.js-2.7.73.tgz", retrieved_on: "2026-11-03", sha256: "1b7ebc8d7889ed25491484ab2b102370742ca6c0b26650a0c62cc2269b579b84", notice: "zipjs-2.7.73-license", ships_as_fetched: true, note: "package/LICENSE: BSD 3-Clause, Copyright (c) 2023, Gildas Lormeau"}
+          - {role: "licence_text", url: "https://registry.npmjs.org/@zip.js/zip.js/-/zip.js-2.7.73.tgz", retrieved_on: "2026-11-03", sha256: "951795b226358bb0d5535a4d50e40dcb46fd93be55b6c2470b4b14fef7bed042", notice: "zipjs-2.7.73-codec-header", ships_as_fetched: true, note: "excerpt: the 26-line licence block that heads package/lib/core/streams/codecs/inflate.js and deflate.js (Copyright (c) 2022 Gildas Lormeau; its disclaimer names JCraft, Inc.)"}
+        licence_texts: [zipjs-2.7.73-license, zipjs-2.7.73-codec-header]
+        obligations_as_the_texts_state: "BSD 3-clause (both blocks): source redistributions retain the copyright notice, the conditions and the disclaimer; binary redistributions reproduce them in the documentation or other materials provided; the names of the authors (the second block: of the authors, with JCraft, Inc. in the disclaimer) are not used to endorse derived products without written permission"
+        residual: "the version is read from the lock file, not from the shipped bytes; the comments of the library are stripped from the bundles, so the texts travel in THIRD_PARTY_NOTICES"
+        packages: ["@zip.js/zip.js"]
+        owner_decision:
+          decision: "none yet"
+      - id: pw-vite-yaml
+        component: "yaml (the npm package) in the Playwright trace viewer and recorder bundles"
+        version: "2.9.0 (from Playwright's lock file; the same package and version as the yaml section of utilsBundle.js.LICENSE)"
+        wheel: playwright
+        status: verified
+        spdx: "ISC"
+        shipped_members: []
+        inlined_in: "playwright/driver/package/lib/vite/traceViewer/assets/defaultSettingsView-D-g2vrvf.js"
+        identified_by: "the trace viewer and recorder bundles contain the yaml library's classes (YAMLMap, YAMLSeq, YAMLParseError); the literal yaml.version=`1.1` in them is the YAML specification version, not the package version; Playwright's package-lock.json at v1.64.1 resolves yaml 2.9.0, the version whose registry entry, tarball and ISC licence file were compared with the utilsBundle.js.LICENSE section (see pw-npm-inlined)"
+        sources:
+          - {role: "identification", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/package-lock.json", retrieved_on: "2026-11-03", sha256: "478ec38a5b4c6825123880b67475d3229dd2c3a4df49b53d9b5634045a4135d1"}
+          - {role: "identification", url: "https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz", retrieved_on: "2026-11-03", sha256: "008fa204cb1ba700e0272ba045abbf09a6ffe63456e8146ba97cac6c2ad1ef91", note: "the same tarball as the yaml row of the npm table; its sha512 integrity was verified"}
+          - {role: "licence_text", url: "https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz", retrieved_on: "2026-11-03", sha256: "5bba27375d93e9119f76c1015f7672cf9ad5f70952296e0842fb2243d6376869", notice: "playwright-playwright-driver-package-lib-utilsbundle-js-license", ships_as_fetched: false, note: "package/LICENSE (ISC); contained in the yaml@2.9.0 section of the shipped utilsBundle.js.LICENSE"}
+        licence_texts: [playwright-playwright-driver-package-lib-utilsbundle-js-license]
+        obligations_as_the_texts_state: "ISC: the copyright notice and the permission notice appear in all copies"
+        residual: "the version is read from the lock file; the library's comments are stripped from the vite bundles"
+        packages: [yaml]
+        owner_decision:
+          decision: "none yet"
+      - id: pw-vite-vscode-css
+        component: "Visual Studio Code colour variables (colors.css) and codicon rules (codicon.css) that Playwright vendors, in the vite bundles' CSS"
+        version: "Playwright tag v1.64.1, packages/web/src/third_party/vscode"
+        wheel: playwright
+        status: verified
+        spdx: "MIT"
+        shipped_members: []
+        inlined_in: "playwright/driver/package/lib/vite/traceViewer/defaultSettingsView.C8BeHuxd.css"
+        identified_by: "all 533 --vscode-* custom properties defined by colors.css at the tag v1.64.1 appear in the shipped CSS files of the vite bundles (533 of 533), whose header comment is stripped; the folder holds a LICENSE.txt (MIT, Copyright (c) 2015 - present Microsoft Corporation) and the headers of colors.css and codicon.css read 'Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License. See License.txt in the project root for license information.'"
+        sources:
+          - {role: "identification", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/colors.css", retrieved_on: "2026-11-03", sha256: "ac0ae041873e9eb794c2bf2769417369cb83fe8dd73e62d6e859677d8c182496"}
+          - {role: "identification", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/codicon.css", retrieved_on: "2026-11-03", sha256: "475c72e3a1766bd9989d15906507878e7218885d9b3a937dc91a68682befda6d"}
+          - {role: "declared_licence", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/colors.css", retrieved_on: "2026-11-03", sha256: "ac0ae041873e9eb794c2bf2769417369cb83fe8dd73e62d6e859677d8c182496", quote: " *  Licensed under the MIT License. See License.txt in the project root for license information."}
+          - {role: "licence_text", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/LICENSE.txt", retrieved_on: "2026-11-03", sha256: "20535828272932407c2f5172aeb714ac7b374a34e5ecb1825af509f2902cde54", notice: "playwright-vscode-license", ships_as_fetched: true, note: "the MIT text beside the vendored files"}
+          - {role: "licence_text", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/colors.css", retrieved_on: "2026-11-03", sha256: "1b0f2f1e1d3582f19d6f24b34a2d78ad8b5bfa9be778ab7c139bdff7cdeff2f9", notice: "pw-vscode-colors-header", ships_as_fetched: true, note: "excerpt: the header comment"}
+          - {role: "licence_text", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/codicon.css", retrieved_on: "2026-11-03", sha256: "1b0f2f1e1d3582f19d6f24b34a2d78ad8b5bfa9be778ab7c139bdff7cdeff2f9", notice: "pw-vscode-codicon-header", ships_as_fetched: true, note: "excerpt: the header comment"}
+        licence_texts: [playwright-vscode-license, pw-vscode-colors-header, pw-vscode-codicon-header]
+        obligations_as_the_texts_state: "MIT: the copyright notice and the permission notice are included in all copies or substantial portions"
+        residual: "this covers the CSS rules; the icon font file that codicon.css points at is a separate item (pw-vite-codicon) whose licence is not established"
+        owner_decision:
+          decision: "none yet"
+      - id: pw-xdg-open
+        component: "xdg-open, the shell script of the xdg-utils project that the npm package open ships (playwright/driver/package/lib/xdg-open)"
+        version: "the xdg-open of open 11.0.0 (xdg-utils version not stated in the file)"
+        wheel: playwright
+        status: verified
+        spdx: "MIT"
+        shipped_members: ["playwright/driver/package/lib/xdg-open"]
+        identified_by: "the shipped lib/xdg-open (sha256 7d759d54...) is byte for byte package/xdg-open of the published npm package open 11.0.0 (sha512 integrity equal to the registry's and to Playwright's lock file); its own header carries the copyright lines (Fathi Boudra, Rex Dieter, Kevin Krammer, Jeremy White) and a complete MIT permission text"
+        sources:
+          - {role: "identification", url: "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/package-lock.json", retrieved_on: "2026-11-03", sha256: "478ec38a5b4c6825123880b67475d3229dd2c3a4df49b53d9b5634045a4135d1", note: "resolves open 11.0.0"}
+          - {role: "identification", url: "https://registry.npmjs.org/open/-/open-11.0.0.tgz", retrieved_on: "2026-11-03", sha256: "b8d4c664ab12fefd68d9d06c5e2472937c5a614cd535a5d97fb2c69f8bda4c1d", note: "package/xdg-open inside it is the shipped file"}
+          - {role: "licence_text", url: "https://registry.npmjs.org/open/-/open-11.0.0.tgz", retrieved_on: "2026-11-03", sha256: "07966103fc6f07ca757220534a5f76e33f554b3153a194208ff4590f09a92be7", notice: "open-11.0.0-xdg-open-header", ships_as_fetched: true, note: "excerpt: lines 1-34 of package/xdg-open, the header with the MIT text; the file itself ships in the wheel with it"}
+        licence_texts: [open-11.0.0-xdg-open-header]
+        obligations_as_the_texts_state: "MIT: the copyright notice and the permission notice are included in all copies or substantial portions (the shipped script carries them in its header)"
+        residual: "the version of xdg-utils the script comes from is not stated; the package open itself is covered by the pw-npm-inlined item"
         owner_decision:
           decision: "none yet"
     verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; the registry entry for the pinned version lists its dependencies; the shipped linux x86_64 wheel was unpacked and its licence and notice files and bundled components read (the wheel file names, sizes and sha256 are recorded above); the Node.js runtime, its licence file and the inlined npm packages were identified and their licence texts fetched from the primary sources named under third_party_evidence", checked_on: "2026-11-03"}

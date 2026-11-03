@@ -35,3 +35,31 @@ under `third_party/notices/upstream/`, each with its sha256). `tools/build_bundl
 locked one, and also packs them as a wheel that installs `share/redevops-qa/THIRD_PARTY_NOTICES`; `tools/check_bundle.py` and `redevops-qa doctor` check the tree against its index.
 `python tools/check_adapter_licenses.py --wheelhouse DIR [--notices DIR/../THIRD_PARTY_NOTICES]` re-checks the recorded digests, licence files, the notice breakdown, the two evidence tables and the notices tree
 against the wheels of a built bundle (the `bundle` CI job does). `tools/collect_licence_evidence.py` makes the two evidence tables from a Playwright wheel. Nothing here is a clearance.
+
+## How the inventory is derived, and what it cannot show
+
+"What third-party material do the shipped wheels contain" is not answered by any one file, so the matrix derives it from several sources and says where each stops (the same text is in the `inventory`
+block of the matrix, which the checker requires):
+
+1. **Each wheel's own notice files**: the licence and notice files the wheel carries (Playwright's `ThirdPartyNotices.txt`, the sidecar `*.LICENSE` files, `driver/LICENSE`; Robot Framework's
+   `LICENSE.txt` and `AUTHORS.rst`; the dist-info licence files of the Python wheels). They name what their authors chose to name.
+2. **Node.js's LICENSE sections**: the externally maintained libraries the LICENSE of the exact Node.js release lists (`third_party/evidence/node-*-licence-sections.json`).
+3. **Playwright's lock file and import statements at the pinned tag** for what the vite bundles and `coreBundle.js` resolve: `tools/collect_licence_evidence.py import-candidates` reads the repository
+   tarball of the tag, takes the bare package names imported by the sources of the packages that end up in the wheel (tests excluded) and keeps those the lock file resolves
+   (`third_party/evidence/playwright-*-import-candidates.json`). Each candidate must be among the inlined npm packages of the sidecar notices, named in an evidence item (`packages`), or listed under
+   `inventory.excluded_packages` with the reason it is not in the wheel (build tools, development-only dependencies, a package required at run time by path but not shipped).
+4. **A licence and copyright header scan of every text file of the Playwright and Robot Framework wheels** (`scan_wheel_inventory` in `tools/check_adapter_licenses.py`; `python tools/collect_licence_evidence.py inventory --wheel
+   WHEEL` prints the candidates and which are covered): a file that names a copyright holder other than the product's own (`inventory.own_holders`), or carries a licence marker ("Licensed under", "Permission is
+   hereby granted", SPDX identifier, "Dual licensed", "All rights reserved") without a holder, is a candidate. `tools/check_adapter_licenses.py --wheelhouse` FAILS when a candidate is not covered by an
+   evidence item (its `shipped_members`, `inlined_in` or `covers_paths`) or a recorded licence file.
+5. **Reading by hand** for what 1 to 4 leave open (for example the codicon font, whose licence is not in the file, and the logo packages that declare none).
+
+**Limits.** This is best effort: it cannot prove that the inventory is complete, and the checker does not claim completeness. What it cannot find: a minified file whose comments were stripped, a library with no notice or header, data inlined as an
+opaque string (the logo data URIs, a font), code reached through a path the import scan does not follow, and anything a bundler inlined that no source of Playwright imports by a bare package name are
+not found by 3 or 4. Several items of this matrix were found by hand after the first lists were written; the scans exist so that the next such item fails the check instead of waiting for a reviewer,
+not to show that no further item exists. Quotes of declaring sources are checked against the stored bytes where the source is pinned in `THIRD_PARTY_NOTICES` (same URL) or is a member of the shipped wheel
+(`wheel_member`); the other quotes are checked only for presence and format.
+
+**Owner decisions.** The wording of the owner's decisions of 2026-11-03 (the decision, its date, the elected licence and the minimum conditions) is kept in the checker as `REQUIRED_DECISIONS`, so deleting or
+weakening a condition in the record is a finding (`OWNER_CONDITION_WEAKENED`); the record may state more than the owner required, never less. The checker cannot know that the owner took a decision: it keeps the
+recorded wording from being edited away, it does not authenticate the decision.
