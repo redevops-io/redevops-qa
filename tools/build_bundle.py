@@ -6,8 +6,10 @@
     python tools/build_bundle.py lock-third-party [--out FILE]
 
 What the bundle is (see ``bundle/README.md``, which is shipped inside it): the repository's own packages built as wheels, one wheel that carries the pinned
-upstream source trees (runtime-contracts and agent-harness at the commits ``pins.toml`` names, with the vector files the pin check reads), and the third-party
-wheels of ``bundle/third-party.lock.json`` for ONE Python minor and ONE platform (CPython 3.12, Linux x86_64). ``requirements.lock`` names every wheel with its
+upstream source trees (runtime-contracts and agent-harness at the commits ``pins.toml`` names, with the vector files the pin check reads), the third-party
+wheels of ``bundle/third-party.lock.json`` for ONE Python minor and ONE platform (CPython 3.12, Linux x86_64), and the licence and notice texts of those wheels
+(``THIRD_PARTY_NOTICES``: the files ``third_party/notices/notices.lock.json`` names, each read from a shipped wheel or from ``third_party/notices`` and checked against its sha256;
+also installed, as one more wheel, under ``share/redevops-qa/THIRD_PARTY_NOTICES``). ``requirements.lock`` names every wheel with its
 sha256; ``install.sh`` installs with ``pip install --no-index --find-links wheelhouse --require-hashes -r requirements.lock``. Chromium is not in the bundle: it is
 downloaded when the browser step runs, and it is recorded in ``BUNDLE.json``, not hashed by this builder.
 
@@ -44,6 +46,12 @@ BUNDLE_SRC = ROOT / "bundle"
 SCHEMA = "redevops-qa/bundle"
 SCHEMA_VERSION = "1.0"
 LOCK_SCHEMA = "redevops-qa/bundle-third-party-lock"
+NOTICES_SRC = ROOT / "third_party" / "notices"
+NOTICES_LOCK = NOTICES_SRC / "notices.lock.json"
+NOTICES_LOCK_SCHEMA = "redevops-qa/third-party-notices-lock"
+NOTICES_INDEX_SCHEMA = "redevops-qa/third-party-notices-index"
+NOTICES_DIR = "THIRD_PARTY_NOTICES"                          # the tree at the top of the bundle, and (as an installed copy) <venv>/share/redevops-qa/THIRD_PARTY_NOTICES
+NOTICES_DIST = "redevops_qa_third_party_notices"
 
 #: the repository packages that are part of the bundle (Selenium and Appium are outside the release claim and are not shipped)
 FIRST_PARTY = ("qa-adapter-kit", "qa-bridge", "qa-checks", "qa-egress", "qa-evidence", "qa-fixture-app", "qa-playwright", "qa-robot", "qa-runner")
@@ -273,6 +281,72 @@ def build_pinned_wheel(pins_file: Path, trees: Dict[str, tuple], deps, version: 
     return out
 
 
+# -------------------------------------------------------------------------------------------------------------------------- third-party notices
+def read_notices_lock(path: Path = NOTICES_LOCK) -> dict:
+    lock = json.loads(path.read_text(encoding="utf-8"))
+    if lock.get("schema") != NOTICES_LOCK_SCHEMA or lock.get("version") != 1 or not isinstance(lock.get("files"), list) or not lock["files"]:
+        raise BuildError(f"{path.name}: schema must be {NOTICES_LOCK_SCHEMA} version 1 with a non-empty files list")
+    seen = set()
+    for f in lock["files"]:
+        dest = f.get("dest", "")
+        if not dest or dest.startswith("/") or "\\" in dest or any(part in ("", ".", "..") for part in dest.split("/")) or dest == "INDEX.json" or dest in seen:
+            raise BuildError(f"{path.name}: {dest!r} is not a unique relative path of the notices tree")
+        seen.add(dest)
+        if not re.fullmatch(r"[0-9a-f]{64}", str(f.get("sha256", ""))):
+            raise BuildError(f"{path.name}: {dest}: sha256 is not 64 lowercase hex digits")
+    return lock
+
+
+def build_notices(lock: dict, wheels: Dict[str, Path], root: Path = ROOT) -> Dict[str, bytes]:
+    """The files of the THIRD_PARTY_NOTICES tree, {path: bytes}, INDEX.json included. A file whose origin is a shipped wheel is read from that wheel, any other from the repository; each is
+    checked against the sha256 the lock records, and a mismatch stops the build (a notice that is not the one that was reviewed does not ship). ``wheels`` maps a normalised wheel name and
+    version, ``name==version``, to the wheel file. Deterministic: the same lock, wheels and files give the same bytes."""
+    out: Dict[str, bytes] = {}
+    index = []
+    for f in sorted(lock["files"], key=lambda f: f["dest"]):
+        origin = f.get("origin") or {}
+        if origin.get("kind") == "wheel":
+            key = f"{canonical_name(origin['wheel'])}=={origin['version']}"
+            if key not in wheels:
+                raise BuildError(f"{f['dest']}: the notice comes from the wheel {key}, which this bundle does not ship")
+            with zipfile.ZipFile(wheels[key]) as zf:
+                if origin["member"] not in zf.namelist():
+                    raise BuildError(f"{f['dest']}: {origin['member']} is not in {wheels[key].name}")
+                data = zf.read(origin["member"])
+        elif origin.get("kind") in ("upstream", "authored"):
+            path = (root / origin["path"]).resolve()
+            if root.resolve() not in path.parents or not path.is_file():
+                raise BuildError(f"{f['dest']}: {origin.get('path')} is not a file of the repository")
+            data = path.read_bytes()
+        else:
+            raise BuildError(f"{f['dest']}: unknown origin kind {origin.get('kind')!r}")
+        if sha256_bytes(data) != f["sha256"]:
+            raise BuildError(f"{f['dest']}: does not have the sha256 the notices lock records (the file changed since it was reviewed)")
+        out[f["dest"]] = data
+        index.append({"path": f["dest"], "sha256": f["sha256"], "size": len(data), "origin": origin, "covers": f.get("covers", [])})
+    out["INDEX.json"] = (json.dumps({"schema": NOTICES_INDEX_SCHEMA, "version": 1,
+                                     "note": "the licence and notice texts of the third-party software this bundle ships; each file is byte for byte a file of a shipped wheel or of the upstream source named in its origin; not legal advice and not an approval of any component",
+                                     "files": index}, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return out
+
+
+def build_notices_wheel(files: Dict[str, bytes], version: str, epoch: int, dst_dir: Path) -> Path:
+    """One wheel that installs the notices tree as ``share/redevops-qa/THIRD_PARTY_NOTICES`` of the environment it is installed into. No import path is added."""
+    info = f"{NOTICES_DIST}-{version}.dist-info"
+    data_root = f"{NOTICES_DIST}-{version}.data/data/share/redevops-qa/{NOTICES_DIR}"
+    wheel_files: Dict[str, bytes] = {f"{data_root}/{rel}": data for rel, data in sorted(files.items())}
+    wheel_files[f"{info}/METADATA"] = (f"Metadata-Version: 2.1\nName: {NOTICES_DIST.replace('_', '-')}\nVersion: {version}\nSummary: The licence and notice texts of the third-party software of the redevops-qa bundle, "
+                                      "installed under share/redevops-qa/THIRD_PARTY_NOTICES\nLicense: Not one licence: these are the texts of other projects' licences, each file as published; see INDEX.json\n"
+                                      "Requires-Python: >=3.11\n").encode()
+    wheel_files[f"{info}/WHEEL"] = b"Wheel-Version: 1.0\nGenerator: redevops-qa tools/build_bundle.py\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+    wheel_files[f"{info}/top_level.txt"] = b"\n"
+    record = "\n".join(record_line(n, d) for n, d in sorted(wheel_files.items())) + f"\n{info}/RECORD,,\n"
+    wheel_files[f"{info}/RECORD"] = record.encode()
+    out = dst_dir / f"{NOTICES_DIST}-{version}-py3-none-any.whl"
+    write_wheel(out, wheel_files, epoch)
+    return out
+
+
 # ------------------------------------------------------------------------------------------------------------------------- own packages
 def make_build_venv(work: Path, epoch: int, cache: Path) -> Path:
     """A venv holding the pinned build tool (``bundle/build-requirements.lock``, hash-checked)."""
@@ -434,7 +508,7 @@ def browser_record(wheel: Optional[Path]) -> dict:
 
 
 def assemble(out_dir: Path, *, name: str, entries: Sequence[WheelEntry], target: dict, epoch: int, label: str, version: str, commit: str, pins_info: Optional[dict],
-             licences_from: Dict[str, Path], build_tools: Dict[str, str], readme_template: str) -> Path:
+             licences_from: Dict[str, Path], build_tools: Dict[str, str], readme_template: str, notices: Optional[Dict[str, bytes]] = None) -> Path:
     """Write the bundle directory ``out_dir/name`` and return it. Nothing here reads the network or a clock."""
     bdir = out_dir / name
     (bdir / "wheelhouse").mkdir(parents=True)
@@ -458,6 +532,11 @@ def assemble(out_dir: Path, *, name: str, entries: Sequence[WheelEntry], target:
             if (base / f).is_file():
                 (licence_dir / group).mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(base / f, licence_dir / group / f)
+    if notices:
+        for rel, data in sorted(notices.items()):
+            dst = bdir / NOTICES_DIR / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(data)
     third = [w for w in wheels if w["kind"] == "third-party"]
     pw = next((e.path for e in entries if wheel_name_version(e.path.name)[0] == "playwright"), None)
     manifest = {
@@ -470,13 +549,16 @@ def assemble(out_dir: Path, *, name: str, entries: Sequence[WheelEntry], target:
             "runtime_contracts": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause); not open source. licences/runtime-contracts/",
             "agent_harness": "AGPL-3.0-or-later (plain, without the Commons Clause). licences/agent-harness/",
             "third_party_staging": "PRIVATE STAGING ONLY: the third-party wheels are shipped unmodified under the status staged_unmodified of third_party/adapter-license-matrix.yaml; public distribution of this bundle requires an owner decision.",
-            "third_party_notes": {"playwright": "The Playwright wheel contains a Node.js runtime binary (playwright/driver/node) with its licence file (playwright/driver/LICENSE), the Playwright driver with 81 npm packages inlined into lib/utilsBundle.js and lib/serverRegistry.js (sidecar .LICENSE files) and libwebp (lib/webp_codec.LICENSE), each under its own notice; the declared licence of the wheel, Apache-2.0, does not describe them. They are not classified one by one."},
+            "third_party_notes": {"playwright": "The Playwright wheel contains a Node.js runtime binary (playwright/driver/node, Node.js 24.22.1, byte for byte the official release executable) with its licence file (playwright/driver/LICENSE), the Playwright driver with 79 distinct npm packages inlined into lib/utilsBundle.js and lib/serverRegistry.js (81 notice sections in sidecar .LICENSE files) and libwebp (lib/webp_codec.LICENSE), each under its own notice; the declared licence of the wheel, Apache-2.0, does not describe them. Their licence texts ship in THIRD_PARTY_NOTICES. One package, proxy-agent-negotiate 1.1.0, has no licence text in any source that was looked at (declared MIT) and stays open for the owner."},
             "third_party": f"{len(third)} wheels under their own licences, unmodified, each carrying its licence files in its dist-info: " + ", ".join(f"{w['name']} {w['version']} ({w['license']})" for w in third),
             "chromium": "downloaded at install time under its own licences; not part of this bundle",
         },
         "integrity": "SHA256SUMS and requirements.lock are inside the bundle: they detect damage and partial replacement, not a replaced bundle. Compare the digest of the archive with a value obtained from somewhere the archive's producer does not control.",
         "scope": "CPython " + target["python"] + ", " + target["platform"].replace("-", " ") + ". No other Python minor or platform is claimed.",
     }
+    if notices:
+        manifest["third_party_notices"] = {"directory": NOTICES_DIR, "installed_as": f"share/redevops-qa/{NOTICES_DIR} of the installed environment", "files": len(notices), "index_sha256": sha256_bytes(notices["INDEX.json"]),
+                                           "statement": "the licence and notice texts of the shipped third-party wheels and of the components found inside them, each byte for byte as published; the facts behind them are in third_party/adapter-license-matrix.yaml of the source repository; distribution acceptability is an owner decision"}
     (bdir / "BUNDLE.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     values = {"bundle_name": name, "bundle_version": version, "python": target["python"], "platform": target["platform"].replace("-", " "), "python_tag": target["python_tag"],
               "wheel_count": str(len(wheels)), "commit": commit}
@@ -514,8 +596,12 @@ def cmd_build(args) -> int:
             raise BuildError("bundle/third-party.lock.json is for another target than this builder's")
         tp_dir = work / "third-party"
         tp_dir.mkdir()
+        tp_wheels: Dict[str, Path] = {}
         for path in fetch_third_party(lock, work, epoch, cache, tp_dir):
             entries.append(WheelEntry(path, "third-party", next(w["license"] for w in lock["wheels"] if w["filename"] == path.name)))
+            tp_wheels["==".join(wheel_name_version(path.name))] = path
+        notices = build_notices(read_notices_lock(), tp_wheels)
+        entries.append(WheelEntry(build_notices_wheel(notices, version, epoch, wheels_dir), "notices", "the licence and notice texts of the third-party wheels, each as published"))
         build_lock = (BUNDLE_SRC / "build-requirements.lock").read_text(encoding="utf-8")
         tools = dict(re.findall(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", build_lock, re.M))
         pins_info = {"set": pins.pin_set, "pins_toml_sha256": sha256_file(pins_file),
@@ -523,7 +609,7 @@ def cmd_build(args) -> int:
                      "harness": {"version": pins.harness_qa.version, "tag": pins.harness_qa.tag, "commit": pins.harness_qa.commit, "distribution_sha256": pins.harness_qa.distribution_sha256}}
         bdir = assemble(work / "out", name=name, entries=entries, target=dict(TARGET), epoch=epoch, label=args.label, version=version, commit=commit, pins_info=pins_info,
                         licences_from={"redevops-qa": root, "runtime-contracts": trees["contracts"][1], "agent-harness": trees["harness_qa"][1]}, build_tools=tools,
-                        readme_template=(BUNDLE_SRC / "README.md").read_text(encoding="utf-8"))
+                        readme_template=(BUNDLE_SRC / "README.md").read_text(encoding="utf-8"), notices=notices)
         shutil.copytree(bdir, out_dir / name)
     tar_path = out_dir / f"{name}.tar"
     write_tar(out_dir / name, tar_path, epoch)

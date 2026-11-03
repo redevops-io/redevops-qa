@@ -60,7 +60,7 @@ jobs:
       - name: Run the matrix tests (scrubbed environment)
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
-            python -m pytest -q tests/test_adapter_license_matrix.py --junitxml="$RUNNER_TEMP/junit-adapter-licences.xml"
+            python -m pytest -q tests/test_adapter_license_matrix.py tests/test_third_party_evidence.py --junitxml="$RUNNER_TEMP/junit-adapter-licences.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-adapter-licences.xml"
 
@@ -523,10 +523,11 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           for d in build-1 build-previous; do python -I "$GITHUB_WORKSPACE/tools/check_bundle.py" "$RUNNER_TEMP/$d"/redevops-qa-bundle-*-cp312-linux-x86_64; done
-      - name: Check the licence matrix against the wheels of the bundle just built (digests, licence files, the breakdown of the inlined notices)
+      - name: Check the licence matrix against the wheels of the bundle just built (digests, licence files, the breakdown of the inlined notices, the evidence tables) and its THIRD_PARTY_NOTICES tree against the notices lock and the shipped wheels
         run: |
           python -m pip install "pyyaml>=6,<7"
-          python tools/check_adapter_licenses.py --wheelhouse "$(ls -d "$RUNNER_TEMP"/build-1/redevops-qa-bundle-*-cp312-linux-x86_64)/wheelhouse"
+          b="$(ls -d "$RUNNER_TEMP"/build-1/redevops-qa-bundle-*-cp312-linux-x86_64)"
+          python tools/check_adapter_licenses.py --wheelhouse "$b/wheelhouse" --notices "$b/THIRD_PARTY_NOTICES"
       - name: Print the digest of the archive (the value to compare a download with)
         run: |
           sha256sum "$RUNNER_TEMP"/build-1/*.tar

@@ -1,0 +1,318 @@
+{
+ "count": 44,
+ "license_file_sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+ "node_version": "24.22.1",
+ "note": "the list of externally maintained libraries in the Node.js LICENSE file of this version; location_class is about the path in the source tree only and does not say what is linked into the executable",
+ "schema": "redevops-qa/node-licence-sections",
+ "sections": [
+  {
+   "location": "deps/acorn",
+   "location_class": "source-dependency",
+   "name": "Acorn",
+   "section_sha256": "f450db307b369d9c8dec54e73aba64fc118368339abafa1295c273d5df9838e4",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/cares",
+   "location_class": "source-dependency",
+   "name": "c-ares",
+   "section_sha256": "9f9f46cc5cafff2a8787695016826ae700bcf5480358271f4b19a6e2b188f140",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/merve",
+   "location_class": "source-dependency",
+   "name": "merve",
+   "section_sha256": "67a5bcc3df2ae58fc8b24b1c3d9ce9199c269fec9fff4ad74fba3ffa5d53866e",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/v8/third_party/ittapi",
+   "location_class": "source-dependency",
+   "name": "ittapi",
+   "section_sha256": "554acb02510019f8de13c39fa3642c8b19b0878f3f978a8100034ae4994b7931",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "deps/amaro",
+   "location_class": "source-dependency",
+   "name": "amaro",
+   "section_sha256": "5c0fbbf576681fabcfe33e09323a0b284e13269eb85d33387d773fe7f8626d97",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/amaro/dist",
+   "location_class": "source-dependency",
+   "name": "swc",
+   "section_sha256": "407584f8622b528db99b12ffca23929991c90494cbe6f602a0cd9763bb55ee14",
+   "spdx": "Apache-2.0"
+  },
+  {
+   "location": "deps/icu-small",
+   "location_class": "source-dependency",
+   "name": "ICU",
+   "section_sha256": "1dcebd6ab53b3562845796912ab65afb45186883808e692d8d38a87631ed9d48",
+   "spdx": "Unicode-3.0"
+  },
+  {
+   "location": "deps/uv",
+   "location_class": "source-dependency",
+   "name": "libuv",
+   "section_sha256": "6c08071181ee450f8e662712690466ed17a41f1c3e7fc384fc5c63914894b7bf",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/LIEF",
+   "location_class": "source-dependency",
+   "name": "LIEF",
+   "section_sha256": "337790ca182160086f4d5e31e30d18bcb339cb1f74ed28fe53814bbf5ea2ede6",
+   "spdx": "Apache-2.0"
+  },
+  {
+   "location": "deps/llhttp",
+   "location_class": "source-dependency",
+   "name": "llhttp",
+   "section_sha256": "f35205cd55dda169372e3b8f8c947d11559f18bbed2cfab29adfb29e3689cd37",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/corepack",
+   "location_class": "separate-javascript-tree",
+   "name": "corepack",
+   "section_sha256": "b4b9cd50b7273b6df53db54c35ae4f4aa78edf9ffee89efb17fbea0caa98e21a",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/undici",
+   "location_class": "source-dependency",
+   "name": "undici",
+   "section_sha256": "19af144436151452a03185fdb4aa30fc5bbf1597d4a16b59fda6898a09cec2b6",
+   "spdx": "MIT"
+  },
+  {
+   "location": "test/fixtures/postject-copy",
+   "location_class": "tools-or-test-path",
+   "name": "postject",
+   "section_sha256": "d2dcfa7ad443209d83e2b999c5a70e039e161a21989f48d797b4caea6d5b4365",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/openssl",
+   "location_class": "source-dependency",
+   "name": "OpenSSL",
+   "section_sha256": "c7d8114e5eedd040105876ac4a4ebb26d77be63f798209e2c0e6ae8b55a962fd",
+   "spdx": "Apache-2.0"
+  },
+  {
+   "location": "lib/punycode.js",
+   "location_class": "source-dependency",
+   "name": "Punycode.js",
+   "section_sha256": "f42dacb38773d598413dfdf1d77478fcc1c0be48ac96b80c881b8ce93d590cc8",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/v8",
+   "location_class": "source-dependency",
+   "name": "V8",
+   "section_sha256": "1a7c13994b66fdb0c090e4cf44de7a7a25c4cab46125e24fad758f2cc6c362cd",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "deps/v8/src/third_party/siphash",
+   "location_class": "source-dependency",
+   "name": "SipHash",
+   "section_sha256": "9ef24eb957886240edd7e07572314de122f6b150cffabcda218906880112e62a",
+   "spdx": "CC0-1.0"
+  },
+  {
+   "location": "deps/zlib",
+   "location_class": "source-dependency",
+   "name": "zlib",
+   "section_sha256": "06776f64f6f2455e32e05d825497223049377e29b76a7219b109497f5b74b14c",
+   "spdx": "Zlib"
+  },
+  {
+   "location": "deps/simdjson",
+   "location_class": "source-dependency",
+   "name": "simdjson",
+   "section_sha256": "25e070f387d4e7563977b49f830380d147266569d189c1204feea514c76776b6",
+   "spdx": "Apache-2.0"
+  },
+  {
+   "location": "deps/v8/third_party/simdutf",
+   "location_class": "source-dependency",
+   "name": "simdutf",
+   "section_sha256": "24db87aa748e2a08f6231c5b2838e98989c4674b3d2fe80462a34d1309b932dd",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/ada",
+   "location_class": "source-dependency",
+   "name": "ada",
+   "section_sha256": "c2a8a3cc177d50c9d17641655e3e0383a6a45701c40f6252e367d201c987c361",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/minimatch",
+   "location_class": "source-dependency",
+   "name": "minimatch",
+   "section_sha256": "3cf470e673bdf7e3fce8d0874991b91fa3b3169a49db4073b486839ce2fad3c8",
+   "spdx": "BlueOak-1.0.0"
+  },
+  {
+   "location": "deps/npm",
+   "location_class": "separate-javascript-tree",
+   "name": "npm",
+   "section_sha256": "3b6f5654a4834f406d2c374a2cafffe9de5d45cdb28cdc808e6c7e73ffc0700d",
+   "spdx": "Artistic-2.0"
+  },
+  {
+   "location": "tools/gyp",
+   "location_class": "tools-or-test-path",
+   "name": "GYP",
+   "section_sha256": "14964b42797f4b3141be5c07197b8e705a45b2678489e5cd8c4da5bb1f1ec06a",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "deps/inspector_protocol",
+   "location_class": "source-dependency",
+   "name": "inspector_protocol",
+   "section_sha256": "44c96610ce075356c167db58100e2e2ebbc7873403240a5b9d255c94cd5fed96",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "tools/inspector_protocol/jinja2",
+   "location_class": "tools-or-test-path",
+   "name": "jinja2",
+   "section_sha256": "96f2faa737fc17c237172df255964c842ada17e4ca9932e254dbf664281d9c2a",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "tools/inspector_protocol/markupsafe",
+   "location_class": "tools-or-test-path",
+   "name": "markupsafe",
+   "section_sha256": "a297771f4702bd7472c7300fb9b3aa845aead52e52d8f8502cc1f9fcbbe30560",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "tools/cpplint.py",
+   "location_class": "tools-or-test-path",
+   "name": "cpplint.py",
+   "section_sha256": "fa3c4bd4baf04cef56fc373d3adf3546f62d6b26fe4d4517699e56235c31c6c6",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "tools/gypi_to_gn.py",
+   "location_class": "tools-or-test-path",
+   "name": "gypi_to_gn.py",
+   "section_sha256": "b3a92fef01934924e0346ce98f69f50f562d1e608c35ccda51479ca40d0cd7d5",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "deps/googletest",
+   "location_class": "tools-or-test-path",
+   "name": "gtest",
+   "section_sha256": "66d76edc549caf4b12ff3e511dbd2d22490a5b06e0d4a592b44ca3c66c50333c",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "deps/nghttp2",
+   "location_class": "source-dependency",
+   "name": "nghttp2",
+   "section_sha256": "de5d94dfba86eeea1b9269a64607a410520407536c837ee399a6aaa62dc2c9e7",
+   "spdx": "MIT"
+  },
+  {
+   "location": "src/large_pages",
+   "location_class": "source-dependency",
+   "name": "large_pages",
+   "section_sha256": "26ca634af3f195bb1b87944108636948617a6ed430e72cb00abbc2489a13e109",
+   "spdx": "MIT"
+  },
+  {
+   "location": "lib/internal/freeze_intrinsics.js",
+   "location_class": "source-dependency",
+   "name": "caja",
+   "section_sha256": "0aa2a69d9104ae2882631ec0a8f871a1349cb99ebe8139f09abb011fef6b8726",
+   "spdx": "Apache-2.0"
+  },
+  {
+   "location": "deps/brotli",
+   "location_class": "source-dependency",
+   "name": "brotli",
+   "section_sha256": "eccb964d0bc2aeb4106ea2a7582ee8ec40e79e4b7c974288c744262f59fd27ba",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/zstd",
+   "location_class": "source-dependency",
+   "name": "zstd",
+   "section_sha256": "be61d48919a4bcafa4b0a75054cc48dece1f9f13706b7712d800bba0088ba8f3",
+   "spdx": "BSD-3-Clause"
+  },
+  {
+   "location": "deps/histogram",
+   "location_class": "source-dependency",
+   "name": "HdrHistogram",
+   "section_sha256": "9b6b741731e3416ab59cc7b963707dc22f791e4521e9130db7e0d3154a9db57a",
+   "spdx": "CC0-1.0 OR BSD-2-Clause"
+  },
+  {
+   "location": "src/heap_utils.cc",
+   "location_class": "source-dependency",
+   "name": "node-heapdump",
+   "section_sha256": "174b99cbc86fddc9ee70abaaf5796dc990879b4a49a4a4a145daa089f32a51a4",
+   "spdx": "ISC"
+  },
+  {
+   "location": "lib/internal/fs/rimraf.js",
+   "location_class": "source-dependency",
+   "name": "rimraf",
+   "section_sha256": "84c3034ee9c3038981eaab5cf1306930a7082a0cf057c624f36fc9f86b980ff8",
+   "spdx": "ISC"
+  },
+  {
+   "location": "deps/uvwasi",
+   "location_class": "source-dependency",
+   "name": "uvwasi",
+   "section_sha256": "ff034819bc1f32c8bd2d0ee1cd2e3956140f6fd4a2d3dfafc2587457a107e332",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/ngtcp2/ngtcp2/",
+   "location_class": "source-dependency",
+   "name": "ngtcp2",
+   "section_sha256": "c1c36eee17c21729dba3aaf6976f4537b24e1ea2543dbb10754e096d80fcd254",
+   "spdx": "MIT"
+  },
+  {
+   "location": "deps/ngtcp2/nghttp3/",
+   "location_class": "source-dependency",
+   "name": "nghttp3",
+   "section_sha256": "e9a6f2185bc089126659a30267860e1c125e3f454b020501b91b65aeec742b20",
+   "spdx": "MIT"
+  },
+  {
+   "location": "lib/internal/fs/cp",
+   "location_class": "source-dependency",
+   "name": "node-fs-extra",
+   "section_sha256": "8822f5b0fce3d4ee3a983b520ef2dbfdebb540a81c9a1ecc65d5c44a472900a4",
+   "spdx": "MIT"
+  },
+  {
+   "location": "lib/internal/process/finalization",
+   "location_class": "source-dependency",
+   "name": "on-exit-leak-free",
+   "section_sha256": "bab282545179adaae81e43e4af606badda918a8e278bb6a907dead69a8f539e7",
+   "spdx": "MIT"
+  },
+  {
+   "location": "lib/internal/streams/fast-utf8-stream.js",
+   "location_class": "source-dependency",
+   "name": "sonic-boom",
+   "section_sha256": "02545de96b9ba48e4fb2dbbf0d10fee7fc9ab439aea356482dc8e8efdad91e85",
+   "spdx": "MIT"
+  }
+ ],
+ "source_member": "playwright/driver/LICENSE"
+}

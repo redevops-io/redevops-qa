@@ -11,7 +11,14 @@ Reads ``third_party/adapter-license-matrix.yaml`` and fails (exit 1) when:
 * (with --wheelhouse DIR) a recorded wheel, licence file or notice breakdown that the wheels of a built bundle do not bear out, or a licence-like file the matrix does not record;
 * a wheel of bundle/third-party.lock.json (what the pinned bundle ships) has no entry here with the same name, version, file name and sha256 under a shipping status
   (``redistributable`` or ``staged_unmodified``), a shipped wheel is recorded under any other status, or the matrix lists a shipped wheel the lock does not hold;
-* an adapter framework is installed without an exact pin.
+* an adapter framework is installed without an exact pin;
+* a ``third_party_evidence`` item claims ``verified`` without its evidence fields (exact version, how the component was identified from the shipped bytes, and for every source its
+  URL, retrieval date and sha256, plus a licence text that ships in the bundle's THIRD_PARTY_NOTICES tree under the sha256 the notices lock records), or a component whose evidence is
+  not all ``verified`` does not list the open items under ``public_distribution_blockers``;
+* (with --notices DIR) the THIRD_PARTY_NOTICES tree of a built bundle is not exactly what third_party/notices/notices.lock.json records.
+
+A verified item records facts (which component, which version, which licence text, fetched from where, when, with which digest). It is never a clearance: ``public_distribution`` stays
+``owner_decision_required`` and no text in the matrix says a component is cleared or approved.
 
 This is technical triage, not legal advice. ``--verify-upstream`` re-fetches each licence file at its pinned tag and compares
 its SHA-256 with the matrix (it needs the network and is not run by the offline test suite).
@@ -48,6 +55,12 @@ TRADEMARK = {"verified", "unverified"}
 BUNDLE_CHECK = {"inspected", "not_inspected"}
 ALLOWED, REVIEW, UNVERIFIED, BLOCKED = 0, 1, 2, 3
 RANK_NAME = {ALLOWED: "allowed", REVIEW: "review", UNVERIFIED: "unverified", BLOCKED: "blocked"}
+EVIDENCE_STATUS = {"verified", "declared_only", "unverified"}
+EVIDENCE_ROLES = {"licence_text", "declared_licence", "identification", "integrity"}
+NOTICES_LOCK_SCHEMA = "redevops-qa/third-party-notices-lock"
+NOTICES_LOCK = ROOT / "third_party" / "notices" / "notices.lock.json"
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_CLAIMS = re.compile(r"\b(cleared|approved|clearance)\b", re.I)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _EXACT = re.compile(r"^\d+(\.\d+)*([.-]?(a|b|rc|beta|dev)\d+)?$")
 _TOKEN = re.compile(r"\s*(\(|\)|[A-Za-z0-9.+:_-]+)")
@@ -333,6 +346,7 @@ def _check_component(cid: str, comp: dict, policy: dict, by_id: Dict[str, dict])
             out.append(Finding("UNVERIFIED_STAGING", cid, "a framework or library is shipped only after the content of the wheel was inspected (bundled_deps_check: inspected)"))
         if red.get("default_enabled") is not False:
             out.append(Finding("ENABLED_BY_DEFAULT_NOT_APPROVED", cid, "a staged entry is not enabled by default"))
+    out += _check_evidence(cid, comp, policy)
     # --- requires
     for req in comp.get("requires") or []:
         other = by_id.get(req)
@@ -340,6 +354,124 @@ def _check_component(cid: str, comp: dict, policy: dict, by_id: Dict[str, dict])
             out.append(Finding("MATRIX_SCHEMA", cid, f"requires unknown component {req!r}"))
         elif red.get("default_enabled") is True and other.get("redistribution", {}).get("status") in ("excluded_by_default", "unverified"):
             out.append(Finding("ENABLED_BY_DEFAULT_NOT_APPROVED", cid, f"enabled by default but requires {req}, which is {other['redistribution']['status']}"))
+    return out
+
+
+# --------------------------------------------------------------------------------------------- evidence of what the shipped bytes are
+def _strings(obj: object) -> Iterable[str]:
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _strings(v)
+
+
+def _nonempty(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _check_evidence(cid: str, comp: dict, policy: dict) -> List[Finding]:
+    """The ``third_party_evidence`` items of one component. ``verified`` is a claim about facts and needs all of them: the exact component and version, how it was identified from the shipped
+    bytes, and for each source the URL, the retrieval date and the sha256 of what was fetched, with at least one licence text that is shipped (a notice id of the notices lock). ``declared_only``
+    says a licence is declared by the primary source but no licence text exists there; ``unverified`` says nothing could be established. Nothing here clears anything."""
+    out: List[Finding] = []
+    items = comp.get("third_party_evidence")
+    red = comp.get("redistribution") or {}
+    if items is None:
+        if "public_distribution_blockers" in red:
+            out.append(Finding("EVIDENCE_SCHEMA", cid, "public_distribution_blockers is listed but the entry has no third_party_evidence"))
+        return out
+    if not isinstance(items, list) or not items:
+        return [Finding("EVIDENCE_SCHEMA", cid, "third_party_evidence must be a non-empty list when present")]
+    ids: Dict[str, dict] = {}
+    for item in items:
+        iid = item.get("id") if isinstance(item, dict) else None
+        if not _nonempty(iid) or iid in ids:
+            out.append(Finding("EVIDENCE_SCHEMA", cid, f"evidence item id missing or duplicated: {iid!r}"))
+            continue
+        ids[iid] = item
+        at = f"evidence {iid}"
+        status = item.get("status")
+        if status not in EVIDENCE_STATUS:
+            out.append(Finding("EVIDENCE_SCHEMA", cid, f"{at}: status must be one of {sorted(EVIDENCE_STATUS)}"))
+            continue
+        for key in ("component", "version", "spdx", "residual"):
+            if not _nonempty(item.get(key)):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: {key} is missing or empty"))
+        for text in _strings(item):
+            if _CLAIMS.search(text):
+                out.append(Finding("EVIDENCE_CLAIM", cid, f"{at}: evidence records facts and never says a component is cleared or approved ({text[:60]!r})"))
+                break
+        sources = item.get("sources")
+        if status == "unverified":
+            if not _nonempty(item.get("reason")):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: an unverified item states the exact reason"))
+            continue
+        if not _nonempty(item.get("identified_by")):
+            out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: identified_by (how the component and version were read from the shipped bytes) is missing"))
+        if not isinstance(item.get("shipped_members"), list) and not _nonempty(item.get("inlined_in")):
+            out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: shipped_members (paths in the wheel) or inlined_in is required"))
+        roles = set()
+        if not isinstance(sources, list) or not sources:
+            out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: sources must be a non-empty list"))
+            sources = []
+        for src in sources:
+            if not isinstance(src, dict) or src.get("role") not in EVIDENCE_ROLES:
+                out.append(Finding("EVIDENCE_SCHEMA", cid, f"{at}: every source has a role of {sorted(EVIDENCE_ROLES)}"))
+                continue
+            roles.add(src["role"])
+            if not str(src.get("url", "")).startswith("https://"):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {src['role']} source needs an https url"))
+            if not _DATE.match(str(src.get("retrieved_on", ""))):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {src['role']} source needs retrieved_on as YYYY-MM-DD"))
+            if not _SHA256.match(str(src.get("sha256", ""))):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {src['role']} source needs the sha256 of what was fetched (64 lowercase hex digits)"))
+            if src["role"] == "licence_text" and not _nonempty(src.get("notice")):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a licence_text source names the notice id that ships it"))
+            if src["role"] == "licence_text" and not isinstance(src.get("ships_as_fetched"), bool):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a licence_text source says whether the shipped notice is the fetched file as it is (ships_as_fetched: true or false)"))
+        if "identification" not in roles:
+            out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: at least one identification source is required"))
+        texts = item.get("licence_texts")
+        if status == "verified":
+            if "licence_text" not in roles:
+                out.append(Finding("EVIDENCE_UNSUPPORTED_VERIFIED", cid, f"{at}: verified needs a fetched licence text (a licence_text source)"))
+            if not isinstance(texts, list) or not texts:
+                out.append(Finding("EVIDENCE_UNSUPPORTED_VERIFIED", cid, f"{at}: verified needs licence_texts, the notice ids that ship the text"))
+            if str(item.get("spdx", "")).strip().lower() == "unverified":
+                out.append(Finding("EVIDENCE_UNSUPPORTED_VERIFIED", cid, f"{at}: verified with no licence identifier"))
+        else:   # declared_only
+            if "declared_licence" not in roles:
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: declared_only needs a declared_licence source"))
+            if not _nonempty(item.get("licence_text_absent")):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: declared_only states where the licence text was looked for and not found (licence_text_absent)"))
+            if not isinstance(item.get("options"), list) or not item.get("options"):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: declared_only lists the options the owner has (options)"))
+    # the open items are the blockers for public distribution, and the entry says so
+    if red.get("status") == "staged_unmodified":
+        open_ids = sorted(i for i, it in ids.items() if it.get("status") != "verified")
+        listed = red.get("public_distribution_blockers")
+        if not isinstance(listed, list) or sorted(listed) != open_ids:
+            out.append(Finding("EVIDENCE_BLOCKERS", cid, f"public_distribution_blockers must list exactly the evidence items that are not verified: {open_ids} (found {listed!r})"))
+    # bundled content that names evidence agrees with it
+    for dep in comp.get("bundled_deps") or []:
+        refs = dep.get("evidence")
+        if refs is None:
+            if str(dep.get("spdx", "")).strip() == "unverified" and red.get("status") == "staged_unmodified":
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"bundled {dep.get('name')}: an unverified licence in a shipped wheel needs an evidence item that states why"))
+            continue
+        refs = refs if isinstance(refs, list) else [refs]
+        for ref in refs:
+            item = ids.get(ref)
+            if item is None:
+                out.append(Finding("EVIDENCE_SCHEMA", cid, f"bundled {dep.get('name')}: evidence {ref!r} is not an item of this entry"))
+            elif item.get("status") == "verified" and str(dep.get("spdx", "")).strip() == "unverified":
+                out.append(Finding("EVIDENCE_SCHEMA", cid, f"bundled {dep.get('name')}: its evidence {ref} is verified but the licence is still marked unverified"))
+            elif item.get("status") != "verified" and str(dep.get("spdx", "")).strip() not in ("unverified",) and item.get("status") == "unverified":
+                out.append(Finding("EVIDENCE_SCHEMA", cid, f"bundled {dep.get('name')}: its evidence {ref} is unverified but a licence is claimed"))
     return out
 
 
@@ -470,9 +602,218 @@ def check_bundle_lock(matrix: dict, lock: dict) -> List[Finding]:
     return out
 
 
+# --------------------------------------------------------------------------------------------- the notices that ship, and the tables of facts behind the matrix
+_NODE_ITEM = re.compile(r"^- (.+?), located at (.+?), is licensed as follows:[ \t]*$", re.M)
+_NPM_BODY_HEAD = re.compile(r"^=+\n")
+_NPM_BODY_TAIL = re.compile(r"\n=+\s*$")
+NODE_TABLE_SCHEMA = "redevops-qa/node-licence-sections"
+NPM_TABLE_SCHEMA = "redevops-qa/npm-inlined-packages"
+#: licences the registry declares and the notice text classifies as, for the same package (the one pair that is allowed to differ is a package with no licence text at all)
+_NPM_AGREE = {"MIT": "MIT", "ISC": "ISC", "BSD-3-Clause": "BSD-3-Clause", "BSD-2-Clause": "BSD-2-Clause", "BlueOak-1.0.0": "BlueOak-1.0.0"}
+
+
+def location_class(location: str) -> str:
+    """Where in the Node.js source tree a licence section says the component lives (a statement about the path only, not about what is linked into the executable)."""
+    loc = location.strip().rstrip("/")
+    if loc.startswith(("tools/", "test/")) or loc == "deps/googletest":
+        return "tools-or-test-path"
+    if loc in ("deps/npm", "deps/corepack"):
+        return "separate-javascript-tree"
+    return "source-dependency"
+
+
+def node_license_sections(text: str) -> List[dict]:
+    """The externally maintained libraries a Node.js LICENSE file lists ('- NAME, located at PATH, is licensed as follows:'), each with the sha256 of its section (from its list line to the next)."""
+    hits = list(_NODE_ITEM.finditer(text))
+    out = []
+    for i, m in enumerate(hits):
+        end = hits[i + 1].start() if i + 1 < len(hits) else len(text)
+        out.append({"name": m.group(1), "location": m.group(2), "location_class": location_class(m.group(2)),
+                    "section_sha256": hashlib.sha256(text[m.start():end].encode("utf-8")).hexdigest()})
+    return out
+
+
+def npm_notice_sections(text: str) -> Dict[str, Tuple[str, str]]:
+    """{'name@version': (licence class, sha256 of the section body)} of a '%% name@version NOTICES AND INFORMATION BEGIN HERE' sidecar file (the body is what lies between the '====' rules)."""
+    parts = _SECTION.split(text)
+    out: Dict[str, Tuple[str, str]] = {}
+    for i in range(1, len(parts), 2):
+        body = parts[i + 1].split("\nEND OF ", 1)[0]
+        body = _NPM_BODY_TAIL.sub("", _NPM_BODY_HEAD.sub("", body, count=1))
+        out[parts[i]] = (classify_notice(body), hashlib.sha256(body.encode("utf-8")).hexdigest())
+    return out
+
+
+def _load_json(path: Path):
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def load_notices_lock(path: Path = NOTICES_LOCK) -> dict:
+    return _load_json(path)
+
+
+def _safe_dest(dest: object) -> bool:
+    if not isinstance(dest, str) or not dest or dest.startswith("/") or "\\" in dest:
+        return False
+    return all(part not in ("", ".", "..") for part in dest.split("/"))
+
+
+def check_notices_lock(matrix: dict, lock: dict, root: Path = ROOT) -> List[Finding]:
+    """The notices lock (what the bundle ships under THIRD_PARTY_NOTICES) against the repository and the matrix: every file well formed, every repository file present with its digest and no
+    repository file unlisted, every licence file the matrix records for a shipped wheel in the lock (with the digest the matrix records), nothing in the lock that is not shipped, and every notice
+    an evidence item names present."""
+    out: List[Finding] = []
+    if lock.get("schema") != NOTICES_LOCK_SCHEMA or lock.get("version") != 1 or not isinstance(lock.get("files"), list) or not lock["files"]:
+        return [Finding("NOTICES_LOCK", "notices.lock.json", f"schema must be {NOTICES_LOCK_SCHEMA} version 1 with a non-empty files list")]
+    by_id: Dict[str, dict] = {}
+    dests = set()
+    repo_paths = set()
+    wheel_files: Dict[Tuple[str, str, str], str] = {}
+    for f in lock["files"]:
+        fid = f.get("id") if isinstance(f, dict) else None
+        if not _nonempty(fid) or fid in by_id:
+            out.append(Finding("NOTICES_LOCK", str(fid), "file id missing or duplicated"))
+            continue
+        by_id[fid] = f
+        if not _safe_dest(f.get("dest")) or f["dest"] in dests or f["dest"] in ("INDEX.json",):
+            out.append(Finding("NOTICES_LOCK", fid, f"dest {f.get('dest')!r} is not a unique relative path of the tree"))
+        dests.add(f.get("dest"))
+        if not _SHA256.match(str(f.get("sha256", ""))):
+            out.append(Finding("NOTICES_LOCK", fid, "sha256 must be 64 lowercase hex digits"))
+        if not isinstance(f.get("covers"), list):
+            out.append(Finding("NOTICES_LOCK", fid, "covers must be a list (empty when the file belongs to no evidence item)"))
+        origin = f.get("origin") or {}
+        kind = origin.get("kind")
+        if kind == "wheel":
+            if not all(_nonempty(origin.get(k)) for k in ("wheel", "version", "member")):
+                out.append(Finding("NOTICES_LOCK", fid, "a wheel origin names the wheel, its version and the member"))
+            else:
+                wheel_files[(_norm(origin["wheel"]), str(origin["version"]), origin["member"])] = f.get("sha256", "")
+        elif kind in ("upstream", "authored"):
+            rel = str(origin.get("path", ""))
+            repo_paths.add(rel)
+            path = Path(root) / rel
+            if not rel.startswith("third_party/notices/") or not _safe_dest(rel):
+                out.append(Finding("NOTICES_LOCK", fid, f"{rel!r} is not a file under third_party/notices/"))
+            elif not path.is_file():
+                out.append(Finding("NOTICES_LOCK", fid, f"{rel} does not exist"))
+            elif hashlib.sha256(path.read_bytes()).hexdigest() != f.get("sha256"):
+                out.append(Finding("NOTICE_DIGEST", fid, f"{rel} does not have the sha256 the lock records"))
+            if kind == "upstream":
+                if not str(origin.get("url", "")).startswith("https://") or not _DATE.match(str(origin.get("retrieved_on", ""))):
+                    out.append(Finding("NOTICES_LOCK", fid, "an upstream file records the https url it was fetched from and the date (retrieved_on)"))
+        else:
+            out.append(Finding("NOTICES_LOCK", fid, "origin.kind must be wheel, upstream or authored"))
+    base = Path(root) / "third_party" / "notices"
+    if base.is_dir():
+        for p in sorted(base.rglob("*")):
+            rel = p.relative_to(root).as_posix()
+            if p.is_file() and p.name != "notices.lock.json" and rel not in repo_paths:
+                out.append(Finding("UNLISTED_NOTICE_FILE", rel, "a file under third_party/notices that the notices lock does not list (it would not ship)"))
+    recorded: Dict[Tuple[str, str, str], str] = {}
+    for comp in matrix.get("components", []):
+        if (comp.get("redistribution") or {}).get("status") not in SHIPPING:
+            continue
+        for wheel in comp.get("shipped_wheels") or []:
+            for lf in wheel.get("license_files") or []:
+                recorded[(_norm(wheel.get("name", "")), str(wheel.get("version", "")), lf.get("path"))] = lf.get("sha256")
+    for key, digest in sorted(recorded.items()):
+        if key not in wheel_files:
+            out.append(Finding("NOTICE_NOT_SHIPPED", f"{key[0]} {key[1]}", f"{key[2]} is a licence file of a shipped wheel but the notices lock does not ship a copy"))
+        elif wheel_files[key] != digest:
+            out.append(Finding("NOTICE_DIGEST", f"{key[0]} {key[1]}", f"{key[2]}: the lock and the matrix record different sha256 values"))
+    for key in sorted(set(wheel_files) - set(recorded)):
+        out.append(Finding("NOTICES_LOCK", f"{key[0]} {key[1]}", f"{key[2]} is locked as a notice but the matrix does not record it as a licence file of that wheel"))
+    for comp in matrix.get("components", []):
+        for item in comp.get("third_party_evidence") or []:
+            if not isinstance(item, dict):
+                continue
+            for nid in item.get("licence_texts") or []:
+                if nid not in by_id:
+                    out.append(Finding("EVIDENCE_NOTICE", comp.get("id", "?"), f"evidence {item.get('id')}: licence text {nid!r} is not in the notices lock"))
+                elif item.get("id") not in (by_id[nid].get("covers") or []):
+                    out.append(Finding("EVIDENCE_NOTICE", comp.get("id", "?"), f"evidence {item.get('id')}: the lock does not list it under covers of {nid}"))
+            for src in item.get("sources") or []:
+                if isinstance(src, dict) and src.get("role") == "licence_text" and _nonempty(src.get("notice")):
+                    entry = by_id.get(src["notice"])
+                    if entry is None:
+                        out.append(Finding("EVIDENCE_NOTICE", comp.get("id", "?"), f"evidence {item.get('id')}: notice {src['notice']!r} is not in the notices lock"))
+                    elif src.get("ships_as_fetched") is True and entry.get("sha256") != src.get("sha256"):
+                        out.append(Finding("EVIDENCE_NOTICE", comp.get("id", "?"), f"evidence {item.get('id')}: the fetched text ({str(src.get('sha256'))[:12]}) is not the shipped notice {src['notice']} ({str(entry.get('sha256'))[:12]})"))
+    return out
+
+
+def check_evidence_tables(matrix: dict, root: Path = ROOT) -> List[Finding]:
+    """The JSON tables an evidence item points at (``table: {path, sha256, kind}``): present, with the recorded digest and the right schema."""
+    out: List[Finding] = []
+    for comp in matrix.get("components", []):
+        for item in comp.get("third_party_evidence") or []:
+            table = item.get("table") if isinstance(item, dict) else None
+            if table is None:
+                continue
+            at = f"{comp.get('id')}/{item.get('id')}"
+            path = Path(root) / str(table.get("path", ""))
+            if not path.is_file() or not str(table.get("path", "")).startswith("third_party/evidence/"):
+                out.append(Finding("EVIDENCE_TABLE", at, f"{table.get('path')} is not a file under third_party/evidence/"))
+                continue
+            if hashlib.sha256(path.read_bytes()).hexdigest() != table.get("sha256"):
+                out.append(Finding("EVIDENCE_TABLE", at, f"{table.get('path')} does not have the recorded sha256"))
+                continue
+            data = _load_json(path)
+            want = {"node-licence-sections": NODE_TABLE_SCHEMA, "npm-inlined-packages": NPM_TABLE_SCHEMA}.get(table.get("kind"))
+            if want is None or data.get("schema") != want:
+                out.append(Finding("EVIDENCE_TABLE", at, f"{table.get('path')}: kind {table.get('kind')!r} and schema {data.get('schema')!r} do not agree"))
+    return out
+
+
+def check_notices_tree(lock: dict, tree: Path, wheelhouse: Optional[Path] = None) -> List[Finding]:
+    """A built bundle's THIRD_PARTY_NOTICES tree against the notices lock: exactly the locked files and INDEX.json, each with the locked digest, an INDEX that lists what the lock lists, and (with the
+    wheelhouse) every wheel-origin file byte for byte the member of the shipped wheel."""
+    import zipfile
+    out: List[Finding] = []
+    tree = Path(tree)
+    if not tree.is_dir():
+        return [Finding("NOTICES_TREE", str(tree), "no such directory")]
+    files = {p.relative_to(tree).as_posix(): p for p in tree.rglob("*") if p.is_file()}
+    want = {f["dest"]: f for f in lock.get("files", [])}
+    for dest in sorted(set(want) - set(files)):
+        out.append(Finding("NOTICES_TREE", dest, "locked but not in the tree"))
+    for dest in sorted(set(files) - set(want) - {"INDEX.json"}):
+        out.append(Finding("NOTICES_TREE", dest, "in the tree but not in the notices lock"))
+    for dest, f in sorted(want.items()):
+        if dest in files and hashlib.sha256(files[dest].read_bytes()).hexdigest() != f.get("sha256"):
+            out.append(Finding("NOTICE_DIGEST", dest, "the file does not have the locked sha256"))
+    if "INDEX.json" not in files:
+        out.append(Finding("NOTICES_TREE", "INDEX.json", "missing"))
+    else:
+        index = _load_json(files["INDEX.json"])
+        listed = {e.get("path"): e.get("sha256") for e in index.get("files", [])}
+        if listed != {d: f.get("sha256") for d, f in want.items()}:
+            out.append(Finding("NOTICES_TREE", "INDEX.json", "does not list exactly the locked files with their sha256"))
+    if wheelhouse is not None:
+        for dest, f in sorted(want.items()):
+            origin = f.get("origin") or {}
+            if origin.get("kind") != "wheel" or dest not in files:
+                continue
+            wheels = [w for w in Path(wheelhouse).glob("*.whl") if _wheel_key(w.name) == (_norm(origin["wheel"]), str(origin["version"]))]
+            if len(wheels) != 1:
+                out.append(Finding("NOTICES_TREE", dest, f"expected exactly one wheel {origin['wheel']} {origin['version']} in the wheelhouse, found {len(wheels)}"))
+                continue
+            with zipfile.ZipFile(wheels[0]) as zf:
+                if origin["member"] not in zf.namelist() or zf.read(origin["member"]) != files[dest].read_bytes():
+                    out.append(Finding("NOTICES_TREE", dest, f"is not byte for byte {origin['member']} of {wheels[0].name}"))
+    return out
+
+
+def _wheel_key(filename: str) -> Optional[Tuple[str, str]]:
+    m = re.fullmatch(r"([A-Za-z0-9_.]+)-([A-Za-z0-9_.!+]+)-.+\.whl", filename)
+    return (_norm(m.group(1)), m.group(2)) if m else None
+
+
 # --------------------------------------------------------------------------------------------- the wheels themselves
 _SECTION = re.compile(r"^%% (\S+) NOTICES AND INFORMATION BEGIN HERE\n", re.M)
-_LICENCE_FILE_NAME = re.compile(r"(^|/)(LICEN[SC]E|NOTICE|COPYING|AUTHORS|ThirdPartyNotices)[^/]*$|\.LICENSE$", re.I)
+# a licence-bearing file: any file whose name says licence, copying, notice(s), third-party, authors or copyright, anywhere in the wheel, and anything under a licenses/ or notices/ directory
+_LICENCE_FILE_NAME = re.compile(r"(^|/)(licen[sc]es?|notices?|third[-_ ]?party[^/]*)/|(^|/)[^/]*(licen[sc]e|copying|notice|third[-_ ]?party|authors|copyright)[^/]*$", re.I)
 
 
 def classify_notice(text: str) -> str:
@@ -503,7 +844,7 @@ def notice_breakdown(text: str) -> Tuple[int, Dict[str, int]]:
     return len(parts) // 2, dict(sorted(counts.items()))
 
 
-def check_wheelhouse(matrix: dict, wheelhouse: Path) -> List[Finding]:
+def check_wheelhouse(matrix: dict, wheelhouse: Path, root: Path = ROOT) -> List[Finding]:
     """What the matrix says about the shipped wheels against the wheels themselves (the built bundle's wheelhouse): the file and its sha256, every recorded licence file by path and sha256,
     no licence-like file the matrix does not record, every member recorded under recorded_members (by path, size in BYTES, as stored in the wheel, and sha256), and, where the matrix records a breakdown of an inlined notice file, the breakdown recomputed from the file."""
     import zipfile
@@ -546,6 +887,73 @@ def check_wheelhouse(matrix: dict, wheelhouse: Path) -> List[Finding]:
                     sections, counts = notice_breakdown(zf.read(member).decode("utf-8", "replace"))
                     if sections != notice.get("sections") or counts != notice.get("breakdown"):
                         out.append(Finding("NOTICE_BREAKDOWN_MISMATCH", at, f"{member}: the file has {sections} sections {counts}, the matrix records {notice.get('sections')} {notice.get('breakdown')}"))
+                out += _check_wheel_evidence(comp, rec, zf, at, root)
+    return out
+
+
+def _check_wheel_evidence(comp: dict, rec: dict, zf, at: str, root: Path) -> List[Finding]:
+    """The evidence items of ``comp`` against the wheel ``zf``: every shipped member of an item is in the wheel and recorded with its digest, every inlined_in file is in the wheel, and the tables
+    behind an item (the Node.js licence sections, the inlined npm packages) are exactly what the wheel's own notice files say."""
+    out: List[Finding] = []
+    names = set(zf.namelist())
+    known = {m.get("path"): m.get("sha256") for m in rec.get("recorded_members") or []}
+    known.update({lf.get("path"): lf.get("sha256") for lf in rec.get("license_files") or []})
+    for item in comp.get("third_party_evidence") or []:
+        if not isinstance(item, dict) or item.get("wheel", rec.get("name")) != rec.get("name"):
+            continue
+        iid = f"{at}/evidence {item.get('id')}"
+        for member in item.get("shipped_members") or []:
+            if member not in names:
+                out.append(Finding("EVIDENCE_MEMBER_MISSING", iid, f"{member} is not in the wheel"))
+            elif member not in known:
+                out.append(Finding("EVIDENCE_MEMBER_UNRECORDED", iid, f"{member} is named by the evidence but the matrix records no sha256 for it (recorded_members or license_files)"))
+        if item.get("inlined_in") and item["inlined_in"] not in names:
+            out.append(Finding("EVIDENCE_MEMBER_MISSING", iid, f"{item['inlined_in']} is not in the wheel"))
+        table = item.get("table")
+        if not isinstance(table, dict) or not (Path(root) / str(table.get("path", ""))).is_file():
+            continue
+        data = _load_json(Path(root) / table["path"])
+        if table.get("kind") == "node-licence-sections":
+            member = table.get("source_member")
+            if member not in names:
+                out.append(Finding("EVIDENCE_MEMBER_MISSING", iid, f"{member} is not in the wheel"))
+                continue
+            text = zf.read(member).decode("utf-8", "replace")
+            now = node_license_sections(text)
+            if hashlib.sha256(text.encode("utf-8")).hexdigest() != data.get("license_file_sha256"):
+                out.append(Finding("NODE_TABLE_MISMATCH", iid, f"{member} is not the licence file the table was made from"))
+            have = [{k: v for k, v in sec.items() if k in ("name", "location", "location_class", "section_sha256")} for sec in data.get("sections", [])]
+            if now != have:
+                out.append(Finding("NODE_TABLE_MISMATCH", iid, f"{member} lists {len(now)} components, the table records {len(have)}, or a section's text or place differs"))
+            if any(not _nonempty(sec.get("spdx")) for sec in data.get("sections", [])):
+                out.append(Finding("NODE_TABLE_MISMATCH", iid, "every section of the table states the licence its text names (spdx)"))
+        elif table.get("kind") == "npm-inlined-packages":
+            now: Dict[Tuple[str, str], Tuple[str, str]] = {}
+            for member in table.get("source_members") or []:
+                if member not in names:
+                    out.append(Finding("EVIDENCE_MEMBER_MISSING", iid, f"{member} is not in the wheel"))
+                    continue
+                for key, (kind, digest) in npm_notice_sections(zf.read(member).decode("utf-8", "replace")).items():
+                    now[(key, member.rsplit("/", 1)[-1])] = (kind, digest)
+            have_pk = {(p.get("package"), p.get("notice_file")): p for p in data.get("packages", [])}
+            for key in sorted(set(now) - set(have_pk)):
+                out.append(Finding("NPM_TABLE_MISMATCH", iid, f"{key[0]} has a notice section in {key[1]} but no row in the table"))
+            for key in sorted(set(have_pk) - set(now)):
+                out.append(Finding("NPM_TABLE_MISMATCH", iid, f"{key[0]} is in the table for {key[1]} but has no notice section in the wheel"))
+            for key in sorted(set(now) & set(have_pk)):
+                row = have_pk[key]
+                kind, digest = now[key]
+                if row.get("notice_section_sha256") != digest:
+                    out.append(Finding("NPM_TABLE_MISMATCH", iid, f"{key[0]}: the notice text in {key[1]} is not the one the table was made from"))
+                if row.get("tarball_sha512_verified") is not True:
+                    out.append(Finding("NPM_TABLE_MISMATCH", iid, f"{key[0]}: the published tarball was not verified against its registry integrity value"))
+                registry = str(row.get("registry_license"))
+                has_file = bool(row.get("licence_files_in_tarball"))
+                if kind == "none-declared":
+                    if has_file or registry in ("", "None"):
+                        out.append(Finding("NPM_LICENCE_DISAGREES", iid, f"{key[0]}: the notice holds no licence text, the table must record a declared licence and no licence file in the tarball"))
+                elif _NPM_AGREE.get(registry) != kind or not row.get("notice_text_contains_tarball_licence_file"):
+                    out.append(Finding("NPM_LICENCE_DISAGREES", iid, f"{key[0]}: the registry declares {registry!r}, the notice text reads as {kind}, or the tarball's licence file is not in the notice"))
     return out
 
 
@@ -604,6 +1012,16 @@ def run(matrix_path: Path = DEFAULT_MATRIX, root: Path = ROOT, upstream: bool = 
             findings += check_bundle_lock(matrix, json.loads(lock_path.read_text(encoding="utf-8")))
         except (OSError, ValueError, KeyError) as exc:
             findings.append(Finding("BUNDLE_LOCK_UNREADABLE", str(lock_path), f"{type(exc).__name__}: {exc}"))
+    mroot = Path(matrix_path).resolve().parent.parent          # the repository the matrix belongs to (third_party/..): where its evidence tables and notices live; ``root`` is what is scanned for installs
+    findings += check_evidence_tables(matrix, mroot)
+    notices_path = mroot / "third_party" / "notices" / "notices.lock.json"
+    if notices_path.is_file():
+        try:
+            findings += check_notices_lock(matrix, load_notices_lock(notices_path), mroot)
+        except (OSError, ValueError) as exc:
+            findings.append(Finding("NOTICES_LOCK", str(notices_path), f"{type(exc).__name__}: {exc}"))
+    elif any(c.get("third_party_evidence") for c in matrix["components"]) or any(c.get("shipped_wheels") for c in matrix["components"]):
+        findings.append(Finding("NOTICES_LOCK", str(notices_path), "the matrix records shipped wheels but third_party/notices/notices.lock.json does not exist"))
     if upstream:
         findings += verify_upstream(matrix, fetch)
     return findings
@@ -614,11 +1032,14 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--matrix", type=Path, default=DEFAULT_MATRIX)
     ap.add_argument("--root", type=Path, default=ROOT)
     ap.add_argument("--wheelhouse", type=Path, help="a built bundle's wheelhouse: check the recorded wheels, licence files and notice breakdowns against the wheels themselves")
+    ap.add_argument("--notices", type=Path, help="a built bundle's THIRD_PARTY_NOTICES directory: check it against third_party/notices/notices.lock.json (and, with --wheelhouse, against the shipped wheels)")
     ap.add_argument("--verify-upstream", action="store_true", help="re-fetch each licence file at its pinned tag and compare hashes (network)")
     args = ap.parse_args(argv[1:])
     findings = run(args.matrix, args.root, args.verify_upstream)
     if args.wheelhouse:
-        findings += check_wheelhouse(load_matrix(args.matrix), args.wheelhouse)
+        findings += check_wheelhouse(load_matrix(args.matrix), args.wheelhouse, args.root)
+    if args.notices:
+        findings += check_notices_tree(load_notices_lock(args.root / "third_party" / "notices" / "notices.lock.json"), args.notices, args.wheelhouse)
     for finding in findings:
         print(finding)
     if findings:

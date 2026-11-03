@@ -69,9 +69,9 @@ def test_selenium_manager_crates_with_mpl_keep_selenium_out_of_the_redistributab
     assert rank == chk.REVIEW and any("MPL-2.0" in w for w in why)
 
 
-def test_robot_framework_report_assets_without_a_stated_licence_are_recorded_as_unverified():
+def test_the_one_robot_framework_asset_without_a_licence_text_in_any_primary_source_is_still_recorded_as_unverified():
     rank, why = chk.effective_rank(comp(REAL, "robotframework"), POLICY)
-    assert rank == chk.UNVERIFIED and sum("unverified" in w for w in why) == 3          # jquery.min.js, jquery.tablesorter.min.js, libdoc.html
+    assert rank == chk.UNVERIFIED and sum("unverified" in w for w in why) == 1 and "tablesorter" in " ".join(why)     # jquery.min.js and libdoc.html are now identified with their licence texts
 
 
 def test_the_playwright_pin_in_the_package_is_the_pin_in_the_matrix():
@@ -471,18 +471,19 @@ def test_the_playwright_entry_describes_the_node_runtime_the_inlined_npm_package
         assert needle in text, needle
     paths = {lf["path"] for lf in pw["shipped_wheels"][0]["license_files"]}
     assert {"playwright/driver/LICENSE", "playwright/driver/package/NOTICE", "playwright/driver/package/lib/utilsBundle.js.LICENSE", "playwright/driver/package/lib/webp_codec.LICENSE"} <= paths
-    assert any(d["spdx"] == "unverified" for d in pw["bundled_deps"])          # the components nobody classified one by one are not claimed
+    assert [d["name"].split(" ")[0] for d in pw["bundled_deps"] if d["spdx"] == "unverified"] == ["proxy-agent-negotiate@1.1.0"]          # the one component without a licence text is not claimed
 
 
-def test_the_robot_assets_of_unestablished_licence_are_recorded_unverified_with_their_exact_paths():
+def test_the_robot_assets_are_identified_and_the_one_without_a_licence_text_is_recorded_unverified_with_its_exact_path():
     rb = comp(REAL, "robotframework")
     unverified = [d for d in rb["bundled_deps"] if d["spdx"] == "unverified"]
-    assert len(unverified) == 3
+    assert len(unverified) == 1
     joined = json.dumps(unverified)
-    assert "robot/htmldata/lib/jquery.min.js" in joined and "robot/htmldata/lib/jquery.tablesorter.min.js" in joined and "robot/htmldata/libdoc/libdoc.html" in joined and "UNVERIFIED" in joined
-    assert "Handlebars" in joined
-    assert all(re.search(r"sha256 [0-9a-f]{64}", d["name"]) for d in rb["bundled_deps"])
-    assert "PRIVATE STAGING ONLY" in rb["redistribution"]["reason"] and "UNVERIFIED" in rb["redistribution"]["reason"]
+    assert "robot/htmldata/lib/jquery.tablesorter.min.js" in joined and "UNVERIFIED" in joined and unverified[0]["evidence"] == "rf-tablesorter-2.30.5"
+    by_name = {d["name"].split(" ")[0] + " " + d["name"].split(" ")[1]: d for d in rb["bundled_deps"]}
+    assert by_name["jQuery 3.5.1"]["spdx"] == "MIT" and by_name["Handlebars 4.7.9"]["spdx"] == "MIT"
+    assert all(re.search(r"sha256 [0-9a-f]{64}", d["name"]) for d in rb["bundled_deps"] if "robot/htmldata" in d["name"] and "(sha256" in d["name"])
+    assert "PRIVATE STAGING ONLY" in rb["redistribution"]["reason"] and "tablesorter" in rb["redistribution"]["reason"] and rb["redistribution"]["public_distribution_blockers"] == ["rf-tablesorter-2.30.5"]
 
 
 def test_pyyaml_is_no_longer_described_as_never_shipped_and_typing_extensions_is_listed():
@@ -600,11 +601,16 @@ def test_the_breakdown_of_the_inlined_npm_notices_is_recorded_and_is_not_only_mi
         assert needle in text, needle
 
 
-def test_minimatch_and_the_package_without_a_licence_text_are_separate_unverified_owner_decision_entries():
-    deps = {d["name"].split(" ")[0]: d for d in comp(REAL, "playwright-python")["bundled_deps"]}
-    for name in ("minimatch@10.2.5", "proxy-agent-negotiate@1.1.0"):
-        assert deps[name]["spdx"] == "unverified" and "owner decision" in deps[name]["note"] and "UNVERIFIED" in deps[name]["note"]
-    assert "Blue Oak" in deps["minimatch@10.2.5"]["note"] and "no license text found" in deps["proxy-agent-negotiate@1.1.0"]["note"]
+def test_minimatch_is_verified_with_its_text_and_the_package_without_a_licence_text_stays_an_unverified_owner_decision_entry():
+    pw = comp(REAL, "playwright-python")
+    deps = {d["name"].split(" ")[0]: d for d in pw["bundled_deps"]}
+    assert deps["minimatch@10.2.5"]["spdx"] == "BlueOak-1.0.0" and deps["minimatch@10.2.5"]["evidence"] == "pw-minimatch" and "Blue Oak" in deps["minimatch@10.2.5"]["note"]
+    neg = deps["proxy-agent-negotiate@1.1.0"]
+    assert neg["spdx"] == "unverified" and "owner decision" in neg["note"] and "UNVERIFIED" in neg["note"] and neg["evidence"] == "pw-proxy-agent-negotiate"
+    items = {i["id"]: i for i in pw["third_party_evidence"]}
+    assert items["pw-minimatch"]["status"] == "verified" and items["pw-proxy-agent-negotiate"]["status"] == "declared_only"
+    assert "no license text found" in items["pw-proxy-agent-negotiate"]["licence_text_absent"] and items["pw-proxy-agent-negotiate"]["declared_spdx"] == "MIT"
+    assert len(items["pw-proxy-agent-negotiate"]["options"]) >= 3 and pw["redistribution"]["public_distribution_blockers"] == ["pw-proxy-agent-negotiate"]
     assert any(d["spdx"] == "BSD-2-Clause" and d["name"].startswith("dotenv@") for d in comp(REAL, "playwright-python")["bundled_deps"])
 
 
@@ -705,8 +711,11 @@ def test_the_sizes_in_the_prose_are_the_recorded_byte_sizes_of_the_wheel_members
     members = {m["path"]: m for m in robot_record()["recorded_members"]}
     libdoc = members["robot/htmldata/libdoc/libdoc.html"]
     assert libdoc["size"] == 196359                                      # the member's size in the wheel; 195645 was the number of characters after decoding it
-    dep = next(d for d in comp(REAL, "robotframework")["bundled_deps"] if "libdoc.html" in d["name"])
-    assert f"{libdoc['size']} bytes" in dep["name"] and libdoc["sha256"] in dep["name"] and "195645" not in json.dumps(REAL)
+    dep = next(d for d in comp(REAL, "robotframework")["bundled_deps"] if d["name"].startswith("Handlebars") and "libdoc.html" in d["name"])
+    assert libdoc["sha256"] in dep["name"] and "195645" not in json.dumps(REAL)
+    tablesorter = members["robot/htmldata/lib/jquery.tablesorter.min.js"]
+    item = next(i for i in comp(REAL, "robotframework")["third_party_evidence"] if i["id"] == "rf-tablesorter-2.30.5")
+    assert f"({tablesorter['size']} bytes)" in item["identified_by"] and f"({tablesorter['size'] - 1} bytes" in item["identified_by"]
     node = playwright_record()["recorded_members"][0]
     assert node["path"] == "playwright/driver/node" and f"{node['size']} bytes" in json.dumps(comp(REAL, "playwright-python")["notices"])
     for d in comp(REAL, "robotframework")["bundled_deps"]:
