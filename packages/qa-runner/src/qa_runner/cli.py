@@ -203,6 +203,7 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
         raise PlanError("BAD_RUN_ID", "a run id is 1 to 40 characters: letters, digits, '.', '_' and '-', starting with a letter or digit")
     up = verified_bootstrap()
     _refuse_a_run_the_path_policy_would_end_inconclusive(any(lane.engine == K.ENGINE_ROBOT for lane in frozen.lanes))
+    _refuse_a_browser_that_is_not_the_pinned_build(any(lane.engine == K.ENGINE_PLAYWRIGHT for lane in frozen.lanes), err)
     reserved = _reserve(target, run_id)
     cancel = CancelToken()
     previous = {}
@@ -238,6 +239,20 @@ def _refuse_a_run_the_path_policy_would_end_inconclusive(has_robot_lane: bool) -
     check = check_path_policy(robot=has_robot_lane)          # only the Robot lane's command line carries these paths
     if check.status == "FAIL":
         raise EnvironmentFault("ADAPTER_PATH_POLICY", f"{check.detail}. To fix: {check.remedy}. Nothing was started and no evidence directory was made.")
+
+
+def _refuse_a_browser_that_is_not_the_pinned_build(has_browser_lane: bool, err: Optional[TextIO] = None) -> None:
+    """The browser check of ``doctor`` (the Chromium tree against ``browser.lock.json``), made before anything starts when the plan has a browser lane: a browser that is missing or is not the
+    pinned build is an environment fault (exit 3) and the browser is not launched. A plan without a browser lane (Robot only) does not need the browser and is not checked. Outside a bundle
+    install there is no pin and the check passes (and says so in ``doctor``). The tree is checked at this moment; a change made after it is not caught."""
+    if not has_browser_lane:
+        return
+    from .doctor import check_browser_pin
+    check = check_browser_pin()
+    if check.status == "FAIL":
+        raise EnvironmentFault("BROWSER_PIN", f"{check.detail}. To fix: {check.remedy}. Nothing was started and no evidence directory was made.")
+    if check.status == "WARN" and err is not None:
+        print("browser pin: not checked (not a bundle install)", file=err)          # a source checkout, or an installation that lost both its pin and INSTALL.json: say so, once
 
 
 def _verify_in_a_new_process(bundle_dir: Path, plan_digest: str, expected_exit: int, run_exit: int, out: TextIO) -> int:

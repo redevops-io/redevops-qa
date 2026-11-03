@@ -71,7 +71,7 @@ interpreter, the guard script or a `TMPDIR` under a refused path (the paths that
   only checks that `--require-signed-anchor` refuses the unsigned demo bundle (exit 5, `ANCHOR_SIGNATURE_REQUIRED`), which authenticates nothing.
 * `verify` is a recomputation by the same code the run used, in a separate process; it is not an independent implementation of the verdicts. "Independent" in the output means independent of the engine's own status.
 * Two assertions of the browser lane (`A-SAVED`, `A-URL`) are about what the browser shows and have no independent probe; the output says so.
-* One platform, one Python minor, two engines: Linux x86_64, CPython 3.12, Playwright Chromium and Robot Framework. Chromium is downloaded by the bundle's browser step and is not hashed by the bundle. The Robot lane's
+* One platform, one Python minor, two engines: Linux x86_64, CPython 3.12, Playwright Chromium and Robot Framework. Chromium is downloaded by the bundle's browser step and checked against the pin `browser.lock.json` (archives by sha256 before unpacking, the unpacked tree file by file; the operating system libraries and the download host are not covered). The Robot lane's
   traffic does not pass the egress gateway.
 * The bundle is source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source; the harness it carries is plain AGPL-3.0-or-later, and the third-party wheels keep their own licences
   (see the bundle's README).

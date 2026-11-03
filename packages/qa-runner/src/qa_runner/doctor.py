@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from . import browser_pin
 from . import constants as K
 from .deps import verified_bootstrap
 from .errors import EnvironmentFault
@@ -231,6 +232,82 @@ def check_playwright(run: Callable[..., subprocess.CompletedProcess] = subproces
     return Check("chromium", "OK", f"playwright {have}, {done.stdout.strip()} launches headless")
 
 
+def browsers_directory(env: Optional[Dict[str, str]] = None) -> Path:
+    """The directory Playwright will look for its browsers in: ``PLAYWRIGHT_BROWSERS_PATH`` if set (the launcher of a bundle install sets it to ``<prefix>/browsers``), else
+    ``$XDG_CACHE_HOME/ms-playwright`` or ``~/.cache/ms-playwright`` on Linux. ``0`` (browsers inside the package) is returned as the package's ``.local-browsers`` directory."""
+    env = os.environ if env is None else env
+    given = env.get("PLAYWRIGHT_BROWSERS_PATH")
+    if given == "0":
+        spec = importlib.util.find_spec("playwright")
+        return Path(spec.origin).parent / "driver" / "package" / ".local-browsers" if spec and spec.origin else Path(".local-browsers")
+    if given:
+        return Path(given)
+    return Path(env.get("XDG_CACHE_HOME") or (Path(env.get("HOME") or Path.home()) / ".cache")) / "ms-playwright"
+
+
+def _playwright_registry() -> Optional[Path]:
+    spec = importlib.util.find_spec("playwright")
+    if spec is None or not spec.origin:
+        return None
+    return Path(spec.origin).parent / "driver" / "package" / "browsers.json"
+
+
+def check_browser_pin(prefix: Optional[str] = None, browsers: Optional[Path] = None, registry: Optional[Path] = None, playwright_version: Optional[str] = None) -> Check:
+    """In a bundle install, the browser Playwright will launch is exactly the one ``browser.lock.json`` pins: the revision the installed Playwright expects is the pinned one, and every
+    directory and file of the three Chromium install directories has the pinned mode, size and sha256, with nothing added and nothing missing. A missing browser says so ('not installed':
+    the browser step was not run); a tree that differs is a FAIL and the browser is not launched. Not covered: the operating system libraries Chromium loads (apt, ``--with-deps``),
+    anything outside the install directories, and any change made after this check. Outside a bundle install there is no lock to compare with and the check says it did not run."""
+    lock_path = _share(prefix) / browser_pin.LOCK_NAME
+    install_json = Path(prefix or sys.prefix).parent / "INSTALL.json"           # written by install.sh beside the virtual environment: this is a bundle installation
+    bundle_install = os.path.lexists(install_json)
+    if not lock_path.is_file():
+        if bundle_install:
+            return Check("browser build", "FAIL", f"this is a bundle installation ({install_json.parent}) but {lock_path} is missing or is not a file: the browser cannot be checked against its pin, "
+                         "and a browser that is not checked is not started", "reinstall the bundle into a new directory")
+        return Check("browser build", "WARN", f"not checked: no share/redevops-qa/{browser_pin.LOCK_NAME} under this Python's prefix, so this is not a bundle install (a source checkout or a development "
+                     "environment). The browser pin applies to bundle installs only: the Chromium that a run here launches is not compared with anything")
+    try:
+        lock = browser_pin.load_lock(lock_path)
+    except browser_pin.LockError as exc:
+        return Check("browser build", "FAIL", f"{browser_pin.LOCK_NAME} cannot be used: {exc}", "reinstall the bundle into a new directory")
+    if bundle_install:
+        try:
+            recorded = json.loads(install_json.read_text(encoding="utf-8")).get("browser_lock_sha256")
+        except (OSError, ValueError, AttributeError):
+            recorded = None
+        if recorded is not None and recorded != lock.digest:
+            return Check("browser build", "FAIL", f"{lock_path} is not the browser pin install.sh recorded in INSTALL.json (sha256 {lock.digest}, recorded {recorded}): the pin was changed after the install",
+                         "reinstall the bundle into a new directory")
+    have = playwright_version if playwright_version is not None else _version("playwright")
+    if have != lock.playwright_version:
+        return Check("browser build", "FAIL", f"the browser pin is for playwright {lock.playwright_version}; this environment has {have or 'no playwright'}", "reinstall the bundle into a new directory")
+    reg = registry if registry is not None else _playwright_registry()
+    try:
+        reg_digest = hashlib.sha256(reg.read_bytes()).hexdigest() if reg is not None else None
+    except OSError:
+        reg_digest = None
+    if reg_digest != lock.browsers_json_sha256:
+        return Check("browser build", "FAIL", f"the browser revision the installed Playwright expects (its browsers.json, sha256 {reg_digest or 'unreadable'}) is not the pinned one "
+                     f"(revision {lock.revision}, sha256 {lock.browsers_json_sha256})", "reinstall the bundle into a new directory")
+    if browsers is None and bundle_install and not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        return Check("browser build", "FAIL", "PLAYWRIGHT_BROWSERS_PATH is not set: the lane children of a run get a temporary HOME and would look for the browser there, not in the directory this check "
+                     "would read, so no browser could be launched from the one that is checked", f"run through the launcher {install_json.parent}/bin/redevops-qa, which sets PLAYWRIGHT_BROWSERS_PATH to "
+                     f"{install_json.parent}/browsers")
+    where = browsers if browsers is not None else browsers_directory()
+    problems = browser_pin.verify_tree(where, lock)
+    absent = [p for p in problems if p.code == "NOT_INSTALLED"]
+    if len(absent) == len(lock.archives):
+        return Check("browser build", "FAIL", f"not installed: none of {', '.join(lock.dirs())} is in {where} (the browser step has not been run, or Playwright looks somewhere else: "
+                     "the launcher bin/redevops-qa sets PLAYWRIGHT_BROWSERS_PATH to <installation>/browsers)",
+                     "run the browser step from the bundle directory: ./install-browser.sh --prefix <the installation directory> (add --with-deps once per machine)")
+    if problems:
+        return Check("browser build", "FAIL", f"the browser in {where} is not the pinned build: " + browser_pin.summarise(problems, 4),
+                     f"do not use this browser: remove {where}/{{{','.join(lock.dirs())}}} and run ./install-browser.sh --prefix <the installation directory> again (it downloads the pinned archives "
+                     "and checks them before unpacking); the browser lane is not started against this tree")
+    return Check("browser build", "OK", f"Chromium {lock.browser_version} (Playwright revision {lock.revision}) in {where}: {len(lock.files)} files in {len(lock.archives)} install directories have the pinned "
+                 f"mode, size and sha256 and nothing else is there (pin {lock.digest[:12]}). Not covered: the operating system libraries it loads, anything outside those directories, and changes after this check")
+
+
 def check_robot() -> Check:
     have = _version("robotframework")
     if have is None:
@@ -297,7 +374,18 @@ def check_workdir() -> Check:
 def run_doctor(engines: Sequence[str] = (K.ENGINE_PLAYWRIGHT,), *, include: Optional[Sequence[Callable[[], Check]]] = None) -> List[Check]:
     checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, lambda: check_path_policy(robot=K.ENGINE_ROBOT in engines), check_first_party_modules, check_pins, check_pinned_files]
     if K.ENGINE_PLAYWRIGHT in engines:
-        checks.append(check_playwright)
+        # The browser is checked against the pin first and is only launched if that check did not fail: launching a tree that differs from the pin would run the changed files.
+        verdict: Dict[str, Check] = {}
+
+        def browser_build() -> Check:
+            verdict["pin"] = check_browser_pin()
+            return verdict["pin"]
+
+        def launch() -> Check:
+            if verdict["pin"].status == "FAIL":
+                return Check("chromium", "FAIL", "not launched: the browser build check above failed, and a browser that is not the pinned one is not started", verdict["pin"].remedy)
+            return check_playwright()
+        checks += [browser_build, launch]
     if K.ENGINE_ROBOT in engines:
         checks.append(check_robot)
     checks += [check_fixture_app, check_egress_gateway]
