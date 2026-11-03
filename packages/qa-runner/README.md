@@ -39,6 +39,8 @@ redevops-qa report BUNDLE [--format text|json|html] [-o FILE] [--anchor sha256:H
 redevops-qa inspect BUNDLE [--anchor sha256:HEX] [--plan-digest sha256:HEX]
 ```
 
+On a host where the Robot lane's kernel layers cannot be provided (macOS, Windows, a kernel without Landlock network rules, an emulated `amd64` container) `demo` and any plan whose Robot lane says `origin-only` are refused before anything starts; `redevops-qa doctor` names the reason, and `examples/robot-plan-not-enforced.json` is the Robot plan for such hosts (no limit on that lane's traffic; the report says so). Nothing falls back to it by itself.
+
 `python -m qa_runner ...` is the same command from a checkout (`PYTHONPATH` set to the `src` directories of the packages; the tests and the CI job show how).
 
 **`doctor`** reports Python, platform, the temporary directory, the pinned dependencies (commits, tree digests and vector files against `pins.toml`),
@@ -123,7 +125,7 @@ loads code at run time). The suite runs under the kit supervisor with `QA_BASE_U
   hand-written record, one from another run or one that does not belong to the report next to it is unusable evidence (`EVIDENCE_UNUSABLE`).
 * **A Robot lane's egress is limited by kernel layers, or by nothing, and the plan says which.** `"egress": "origin-only"` asks for the layers of the section Egress below (the same one-origin
   allow-list as the browser lane's); the lane does not start if they cannot be installed. `"egress": "not-enforced"` asks for nothing: a Robot library then opens its own sockets, the lane's
-  egress profile says so and so does the report. A browser lane must use `origin-only`.
+  egress profile says so and so does the report (the limitation `egress-not-enforced-robot`). A browser lane must use `origin-only`.
 * **Same supervision as the browser lane:** the Robot lane runs in a child process too (the same deadline, cancel, process-group kill, and a parent-death watchdog), and the engine runs
   under its own supervisor inside it.
 * **A suite that records a value it did not observe is caught outside the record.** Three things hold it: the pinned hashes of the suite and library (above); the target's own request
@@ -179,32 +181,52 @@ native status that says so; its assertions are `INCONCLUSIVE`; the run is never 
   not hold and none is used. The lane child installs two layers on itself BEFORE it starts the engine (`qa_runner.netfence`; `prctl`, `seccomp` and the Landlock calls through `ctypes`: no helper
   program, no privilege), and everything the engine starts inherits them: (1) a seccomp filter with a supervising thread of the lane child lets `connect` through only to the plan's allow-list (one
   loopback address and port; anything else is refused with `EACCES` and recorded), allows only TCP over IPv4 and local stream sockets as socket kinds (UDP, raw, packet, netlink, IPv6, SCTP, MPTCP and
-  the rest are refused), refuses `connect` to a local socket path, TCP Fast Open (and `sendto` with an address, which no experiment isolates: UDP and datagram sockets are already refused at creation), `io_uring`, `ptrace`, `process_vm_*` and `pidfd_getfd`; (2) Landlock limits TCP `connect` to the allowed port, in the kernel,
-  after the supervisor's decision. The layers are installed with `PR_SET_NO_NEW_PRIVS`, cannot be removed by the process that carries them, and are followed by a self-test (a listener that is not
-  allowed must refuse this very thread, a UDP socket must be refused): if either layer is unavailable or the self-test fails, the engine is not started (`NATIVE_UNAVAILABLE`, `egress-unavailable`, exit
-  status 3), and `run`/`demo` refuse before anything starts ("Nothing was started and no evidence directory was made"). There is no weaker mode.
-  The lane's `egress-profile.json` is the allow-list (as for the browser lane), `egress-log.jsonl` is the audit file (the layers installed and what the self-test measured, then every decision the
-  supervisor took), and the report carries the limitation `egress-layers-robot` (JSON, text and HTML), which `verify` requires, with the same text, from a plan whose Robot lane says `origin-only`.
+  the rest are refused), refuses `listen` (nothing in the lane accepts an inbound connection), `connect` to a local socket path and TCP Fast Open (measured below) and, not measured by an experiment of their own,
+  `sendto` with an address (UDP and datagram sockets are already refused at creation), `io_uring` setup, `ptrace`, `process_vm_*` and `pidfd_getfd` (a container's own filter may refuse some of them first);
+  (2) Landlock limits TCP `connect` to the allowed port, in the kernel, after the supervisor's decision, and refuses every TCP `bind` (the implicit bind of a `connect` is not a `bind` call and works).
+  The lane child also marks itself not dumpable (`PR_SET_DUMPABLE`) and a subreaper: see "The record and the supervisor" below. The layers are installed with `PR_SET_NO_NEW_PRIVS`, cannot be removed by the
+  process that carries them, and are followed by a self-test (a listener that is not allowed must refuse this very thread, a UDP socket must be refused). If either layer is unavailable or the self-test
+  fails, the engine is not started (`NATIVE_UNAVAILABLE`, `egress-unavailable`, exit status 3), and `run`/`demo` refuse before anything starts ("Nothing was started and no evidence directory was made").
+  There is no weaker mode and no automatic fallback.
+  The lane's `egress-profile.json` is the allow-list (as for the browser lane), `egress-log.jsonl` is the audit file (the layers installed and what the self-test measured, then every refusal and the
+  allowed connects up to a cap; what is not written is counted in a closing `summary` record, and a refusal is never what is dropped), and the report carries the limitation `egress-layers-robot` (JSON, text and
+  HTML), which `verify` requires, with the same text, from a plan whose Robot lane says `origin-only`.
   **A refused attempt ends the lane as an engine error** (`NATIVE_ERROR`, `egress-denied`; `egress-fence-lost` if the supervisor was lost), whatever Robot itself said: the lane carries no verdict, the run is
   INCONCLUSIVE (exit status 3), and `verify` rejects a bundle whose log records a refusal while the lane is reported as completed (`EGRESS_DENIAL_NOT_REFLECTED`), a status of `egress-denied` without a
   refusal in the log, a log whose layers or allow-list are not the plan's, an allowed connect outside the allow-list, or a malformed log.
-  **What the layers do not stop** is part of the report's statement and of the matrix below: a second thread that changes the address of a `connect` between the supervisor's look and the kernel's can
-  reach another address on the allowed PORT (measured: it does, with the seccomp layer alone, and never with Landlock); files, pipes, FIFOs and processes reachable without a socket are not confined; a caller with `CAP_SYS_PTRACE`
-  can reach the supervisor and a kernel bug defeats everything; names do not resolve over the network (UDP is refused), only `/etc/hosts` resolves and its address is checked like any other. This is not
-  a sandbox of the library: the library allowlist remains a guard, not a sandbox.
+  **What the layers do not stop** is part of the report's statement and of the matrix below:
+  * **Against a hostile library the allow-list is enforced at the level of the PORT, not of the address.** The supervisor reads the address of a `connect` from the caller's memory and the kernel then reads it
+    again, so a second thread (or a process that shares the memory) that changes the address between the two can reach ANOTHER IPv4 ADDRESS on the allowed port. Landlock keeps it to that port. Measured: about a fifth
+    of the attempts of such a library did (aarch64 Docker, development measurement); the CI experiment counts them and asserts that the unfenced control and Landlock alone reach another address and that
+    the audit log shows a clean `127.0.0.1` allowed connect for each, whichever address it reached. The address half of the allow-list holds for honest code and for code that does not race it (measured: `127.0.0.2` on
+    the allowed port, from one thread, is refused). It was not closed because the ways to close it are not usable: connecting on the caller's behalf needs `pidfd_getfd`, which Docker's default profile refuses
+    (measured on Docker Desktop), and replacing the caller's socket (`SECCOMP_IOCTL_NOTIF_ADDFD`) loses the options and the blocking mode the caller set on it.
+  * Files, pipes, FIFOs and processes reachable without a socket are not confined; a TCP simultaneous open is not excluded; names do not resolve over the network (UDP is refused), only `/etc/hosts` resolves
+    and its address is checked like any other.
+  * A caller with `CAP_SYS_PTRACE`, and a kernel bug, defeat the layers. This is not a sandbox of the library: the library allowlist remains a guard, not a sandbox.
+
+  **The record and the supervisor.** The supervisor is a thread of the lane child; the engine is a separate child process. (a) The lane child is not dumpable, so a same-user engine cannot read or write
+  its memory through `/proc` or attach to it, with or without a Yama policy on the host (the experiment checks the dumpable bit itself, which a Yama policy would hide); the ENGINE stays dumpable, because the
+  supervisor needs to read its address argument, and the dependency on the host's ptrace policy is therefore only that of `CAP_SYS_PTRACE`. (b) The lane child is a subreaper and ends every process that is its
+  descendant, in whatever session or group, BEFORE it writes the lane's result; so a process the library detaches (`setsid`) cannot rewrite the result files (measured: it could, 3 times of 3, before this was
+  added). (c) The log also reaches the runner over the lane child's standard output, which nothing the engine started can reach; that copy replaces the one in the output directory and the refusals in it decide
+  the lane's status, so a rewritten file cannot hide a refusal even from a process that survives (a lane whose child sent no log, or a malformed one, is an engine error). (d) A process of the same user that
+  signals the lane child can stop (`SIGSTOP`) or kill it and with it the supervisor: every connect then fails or waits (no connection is made) until the lane's deadline ends it. That is a denial of service that fails
+  closed, not an opening. A supervisor that fails while it decides closes the notification descriptor, so a waiting call fails at once, and the lane ends `egress-fence-lost`.
 
 ### Egress matrix by engine
 
 | | Playwright Chromium (browser lane) | Robot Framework (Robot lane, `origin-only`) |
 |---|---|---|
 | What limits the traffic | the egress gateway (the browser's explicit proxy; loopback not bypassed; no name resolution, QUIC or WebRTC traffic outside it) and the adapter's in-browser request gate | the kernel layers of `qa_runner.netfence` (seccomp user notification, Landlock) on the lane process and everything it starts |
-| Policy | the plan's `origin-only` allow-list: one http loopback origin | the same allow-list: one IPv4 loopback address and port |
+| Policy | the plan's `origin-only` allow-list: one http loopback origin | the same allow-list: one IPv4 loopback address and port; **against a hostile library only the port is enforced** (see above) |
 | Default | deny | deny |
+| Inbound | not applicable | `listen` refused, TCP `bind` refused (measured) |
 | Fails closed when the protection is unavailable | yes: the gateway or the launch configuration cannot be provided, or the gateway is lost during the lane | yes: the layers cannot be installed or fail their self-test (the lane is not started), or the supervisor is lost during the lane |
-| Refusals recorded | `gateway-log.jsonl`, `browser-guard-log.jsonl` | `egress-log.jsonl` |
-| A refusal changes the lane's result | the lane's request is refused; the page may fail | the lane ends as an engine error (`egress-denied`), never a pass |
+| Refusals recorded | `gateway-log.jsonl`, `browser-guard-log.jsonl` | `egress-log.jsonl` (refusals never dropped; allowed connects up to a cap) |
+| A refusal changes the lane's result | the lane's request is refused; the page may fail | the lane ends as an engine error (`egress-denied`), never a pass, whatever the library does to the lane's files |
 | Measured by | the runner egress job (`tests/egress`), a hostile page on loopback | the Robot egress job (`tests/robot_egress`), a hostile Robot library on loopback |
-| Does not stop | the browser lane has no other network path; see "What is not shown" below | the race on the address of `connect` (another address on the allowed port), anything reachable without a socket (files, pipes, processes), `CAP_SYS_PTRACE`, kernel bugs; the aarch64 table is exercised in development only |
+| Does not stop | the browser lane has no other network path; see "What is not shown" below | another address on the allowed port (race), anything reachable without a socket (files, pipes, processes), a TCP simultaneous open, `CAP_SYS_PTRACE`, kernel bugs; a stopped or killed supervisor ends in no connection, not an open network |
 
 Measured by the Robot egress experiments (a hostile library inside the real lane child, hostile LOOPBACK listeners that count what reaches them; nothing leaves this machine). `reached` and `blocked`
 are the listeners' counts, not what the library says; the same attempts run with no layer (the control: every one that can reach does) and with each layer alone:
@@ -213,26 +235,43 @@ are the listeners' counts, not what the library says; the same attempts run with
 |---|---|---|---|---|
 | direct connect to a forbidden loopback port; by IP literal in a URL; by a redirect from the allowed origin; through a proxy variable the library sets itself | reached | blocked | blocked | blocked |
 | a name resolved by a hostile resolver (UDP) to a forbidden address, then connect; the same resolver over TCP | reached | blocked | blocked (the connect; the UDP query itself reached) | blocked |
-| the allowed port on another loopback address (127.0.0.2); `0.0.0.0` | reached | blocked | reached | blocked |
+| the allowed port on another loopback address (127.0.0.2), from one thread; `0.0.0.0` | reached | blocked | reached | blocked |
+| the same, with the address flipped by a second process while `connect` runs (race) | reached | may reach (counted, not asserted) | reached (asserted) | may reach (counted, not asserted; the log shows the allowed address) |
+| the allowed port flipped to a forbidden PORT by a second process | reached | may reach (not asserted) | blocked (asserted) | blocked (asserted) |
 | IPv6 loopback (TCP) | reached | blocked | blocked | blocked |
-| UDP datagram; a unix-domain datagram to a path; a unix-domain stream connect | reached | blocked | reached | blocked |
+| UDP datagram (IPv4 and IPv6); a unix-domain datagram to a path (also from `socketpair`); a unix-domain stream connect | reached | blocked | reached | blocked |
 | raw socket (not asserted: it needs root to succeed even with no layer) | root only | refused | not covered | refused |
 | TCP Fast Open (data sent with the connection attempt), by `sendto` and by `sendmsg` | reached | blocked | reached | blocked |
+| `listen` after `bind` on every address (inbound) | reached | blocked | blocked | blocked |
+| `listen` on a socket that was never bound (the kernel picks the port: no `bind` call) | reached | blocked | reached | blocked |
+| an MPTCP or SCTP stream socket (not asserted with no layer or with Landlock alone: the kernel may not offer them) | depends | refused | not covered | refused |
 | `curl`, `python`, `bash` (`/dev/tcp`) started by the library; `ctypes` `connect`; a raw `syscall`; a thread; a module that connects when it is imported | reached | blocked | blocked | blocked |
-| `io_uring` | depends on the host | refused (not asserted: a container's own filter may refuse first) | not covered | refused |
-| the address of `connect` flipped by a second process while it is called | reached | NOT stopped: it reached the forbidden port in the measurements made while writing this (a race: not asserted either way) | blocked | blocked (asserted: Landlock holds the port) |
+| `io_uring` setup | depends on the host | refused (a container's own filter may refuse first, so no audit record is required) | not covered | refused |
+| a `connect` whose address is not memory | refused by the kernel | refused, recorded, the supervisor goes on | refused by the kernel | refused, recorded, the supervisor goes on |
+| the lane child's `/proc/<pid>/mem` and dumpable bit, seen from the engine | depends on the host's ptrace policy | not exposed | not exposed | not exposed |
+| a process left behind in a session of its own | survives (asserted) | ended before the result is written | ended before the result is written | ended before the result is written |
 | the allowed origin, by the library's normal route | works | works | works | works |
 
 Every refusal of the seccomp layer is also an entry of `egress-log.jsonl` (checked per attempt, with the allowed origin recorded as allowed). What is **not** shown: a kernel without Landlock network rules, an
 architecture other than the two tables, a container whose own filter blocks `seccomp` user notification or the Landlock calls (the lane does not start there; the experiments cannot make it), HTTPS, and anything
-about a library that talks to a process that is already running through the file system.
+about a library that talks to a process that is already running through the file system. Equivalent mutants, stated as such: the notification identity check (`ID_VALID`) after the supervisor read the address
+is a race that no deterministic test reaches; the `socketpair` and local-socket type rules and the `sendto`-with-address rule are belt and braces while `connect` and the socket kinds are filtered.
 
 **What was measured on the supported platform, before the layers were chosen** (GitHub-hosted `ubuntu-24.04`, x86_64, kernel 7.0.0-1017-azure; and in an `ubuntu:24.04` container on it, as root and as `nobody`):
 unprivileged user namespaces are restricted (`kernel.apparmor_restrict_unprivileged_userns=1`; `unshare -Urn` fails with `Operation not permitted`, also as root in the container), no `bwrap` is installed, so a
 network namespace around the lane is not available without root or a new program and was not used; seccomp user notification and Landlock (ABI 8) work in all three places, and Docker's default seccomp profile
 does not stop either; Docker's default profile does stop `pidfd_getfd` (measured in Docker Desktop, not on the runner), which a supervisor would need to connect on the caller's behalf, so the supervisor
 continues the call after checking the address instead (the race above, and why Landlock is the second layer). An in-process guard (a patched `socket`)
-was not built: it is bypassed by `ctypes`, raw system calls and child processes, and adds nothing over the layers above.
+was not built: it is bypassed by `ctypes`, raw system calls and child processes, and adds nothing over the layers above. `doctor` probes each layer ALONE in a throwaway process before both together (the self-test of a lane
+runs with both installed, where the seccomp layer refuses a forbidden connect first, so it cannot tell whether Landlock enforces by itself; the probe and the experiments do).
+`verify` checks the header's layers, allow-list, self-test and that the Landlock ABI is a number of at least 4; the kernel release and architecture it names, and the presence of the `egress_fence_denied` extension, are
+informational (a bundle without the extension is accepted; a bundle whose extension is present must carry the logs' count).
+
+**Hosts that are refused.** The demo and the committed examples ask for `origin-only`, so on macOS, Windows, a kernel without Landlock network rules and an emulated `amd64` container (Docker Desktop on Apple silicon
+running the `linux/amd64` platform reports Landlock ABI 0) `doctor` fails the `robot egress layers` check with the reason and `run` and `demo` exit 3 before anything starts; a native arm64 Linux container works
+but is development evidence only and nothing is claimed for it. For such hosts `examples/robot-plan-not-enforced.json` is the same plan with `"egress": "not-enforced"` (no limit on the Robot lane's traffic, and the report
+says so): `redevops-qa run examples/robot-plan-not-enforced.json --out DIR`. There is no automatic fallback. On macOS 23 offline tests of this package fail closed for the same reason (the doubled lanes install the
+real layers): run the suite on Linux or in the Linux container the CI job uses.
 * **What is tested** (the runner egress CI job, `tests/egress`, real Chromium; the same tests ran on macOS arm64 while they were written, which is development evidence only): a hostile page on the allowed
   origin tries to reach a hostile TCP origin and a UDP listener on loopback in fifteen ways (image, prefetch, iframe, script, fetch by number, by the name `localhost`, by decimal and hex spellings,
   a redirect from the allowed origin, a beacon, a WebSocket, an EventSource, a worker, `window.open`, a form post, plus WebRTC and an IPv6 literal). With the launch configuration of `qa-egress` the hostile

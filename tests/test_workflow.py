@@ -247,6 +247,22 @@ def test_the_runner_egress_job_runs_only_the_egress_tests_in_a_scrubbed_environm
     assert "-m egress" not in offline
 
 
+def test_the_runner_robot_egress_job_runs_the_hostile_library_experiments_as_the_runner_user_and_as_root_and_fails_on_skips():
+    job = WF["jobs"]["runner-robot-egress"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert job["runs-on"] == "ubuntu-24.04" and "pins" in job["needs"] and "continue-on-error" not in job and "upload-artifact" not in str(job)
+    assert "-m robot_egress packages/qa-runner/tests/robot_egress" in steps and "env -i HOME=" in steps and "tools/check_junit.py" in steps and "--junitxml" in steps
+    assert "robotframework==7.5" in steps and "playwright" not in steps.lower()
+    assert "docker run --rm" in steps and "ubuntu:24.04" in steps and "junit-robot-egress-root.xml" in steps          # the same experiments as root in a container with Docker's default options
+    assert "--privileged" not in steps and "--cap-add" not in steps and "--security-opt" not in steps
+    fetches = [s for s in job["steps"] if "repository" in s.get("with", {})]
+    assert len(fetches) == 2 and "--verify-trees --require-git" in steps
+    assert steps.count('test -z "$(git status --porcelain)"') == 2
+    assert "--expect-tests 264" in steps and "--expect-tests 228" in steps         # the number of tests of each run: a deleted or deselected experiment is not green
+    offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["runner"]["steps"])
+    assert "robot_egress" not in offline
+
+
 def test_the_runner_documentation_says_what_limits_robot_egress_and_what_it_does_not_stop_and_what_the_egress_tests_do_not_show():
     text = (ROOT / "packages" / "qa-runner" / "README.md").read_text(encoding="utf-8")
     for needle in ("Robot lane: kernel layers, not the gateway", "guard, not a sandbox", "egress-layers-robot", "egress-not-enforced-robot", "What the layers do not stop", "Egress matrix by engine",

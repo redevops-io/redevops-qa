@@ -169,7 +169,7 @@ def _freeze(args, out: TextIO, err: TextIO) -> int:
     return 0
 
 
-def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text: bool = False) -> int:
+def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text: bool = False, note: Optional[str] = None) -> int:
     from .orchestrate import RunOptions, new_run_id, run_plan
     target = Path(args.out)
     run_id = new_run_id() if args.run_id is None else args.run_id
@@ -178,6 +178,8 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
     up = verified_bootstrap()
     _refuse_a_run_the_path_policy_would_end_inconclusive(any(lane.engine == K.ENGINE_ROBOT for lane in frozen.lanes))
     _refuse_a_run_whose_robot_egress_cannot_be_limited(any(lane.engine == K.ENGINE_ROBOT and lane.egress == "origin-only" for lane in frozen.lanes))
+    if note:
+        print(note, file=err)                       # after the refusals above: a run that does not start says why and nothing else
     reserved = _reserve(target, run_id)
     cancel = CancelToken()
     previous = {}
@@ -298,9 +300,8 @@ def _run(args, out: TextIO, err: TextIO) -> int:
     data = _read_plan(args.plan)
     up = verified_bootstrap()
     frozen, kind = load_plan_or_lock(up, data)
-    if kind == "plan":
-        print("  note: the plan was frozen by this run; keep the plan digest from a separate `freeze` step to detect a changed plan", file=err)
-    return _execute(frozen, args, out, err)
+    note = "  note: the plan was frozen by this run; keep the plan digest from a separate `freeze` step to detect a changed plan" if kind == "plan" else None
+    return _execute(frozen, args, out, err, note=note)
 
 
 def _demo(args, out: TextIO, err: TextIO) -> int:

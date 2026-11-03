@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
-"""The hostile LOOPBACK world of the Robot egress experiments: listeners that count what reaches them (the ground truth the experiments read), a resolver that answers every name with
+"""The hostile LOOPBACK world of the Robot egress experiments: listeners that count what reaches them (the count the experiments read), a resolver that answers every name with
 127.0.0.1, and an 'allowed origin' that answers /ok and redirects /redirect. Everything binds to the loopback interface of this machine and nothing here connects anywhere else."""
 from __future__ import annotations
 
@@ -127,10 +127,12 @@ class World:
         self.origin_thread.start()
         self.allowed_port = self.origin.server_address[1]
         self.shadow: Optional[_Listener] = None
+        self.shadow2: Optional[_Listener] = None
         try:
             self.shadow = _Listener(socket.AF_INET, "127.0.0.2", self.allowed_port)      # the allowed PORT on another loopback address
+            self.shadow2 = _Listener(socket.AF_INET, "127.0.0.3", self.allowed_port, quick=True)          # and on a third one, for the race between two addresses
         except OSError:
-            self.shadow = None
+            self.shadow, self.shadow2 = self.shadow, None
 
     @property
     def ports(self) -> Dict[str, int]:
@@ -141,12 +143,12 @@ class World:
     def hits(self, key: str) -> int:
         """How many connections or datagrams reached the listener of this experiment."""
         special = {"udp": self.udp, "udp6": self.udp6, "resolver_udp": self.resolver, "ipv6": self.ipv6, "unix_stream": self.unix_stream, "unix_dgram": self.unix_dgram,
-                   "unix_dgram_pair": self.unix_dgram_pair, "shadow": self.shadow}
+                   "unix_dgram_pair": self.unix_dgram_pair, "shadow": self.shadow, "shadow2": self.shadow2}
         listener = special[key] if key in special else self.tcp[key]
         return 0 if listener is None else len(listener.hits)
 
     def close(self) -> None:
-        for l in list(self.tcp.values()) + [self.udp, self.udp6, self.resolver, self.ipv6, self.unix_stream, self.unix_dgram, self.unix_dgram_pair] + ([self.shadow] if self.shadow else []):
+        for l in list(self.tcp.values()) + [self.udp, self.udp6, self.resolver, self.ipv6, self.unix_stream, self.unix_dgram, self.unix_dgram_pair] + [l for l in (self.shadow, self.shadow2) if l]:
             l.close()
         self.origin.shutdown()
         self.origin.server_close()

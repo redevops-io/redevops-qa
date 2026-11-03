@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from qa_runner import constants as K, egresslog
 from qa_runner.egress import policy_config
-from qa_runner.lane_robot import _read_outcome
+from qa_runner.lane_robot import _read_outcome, apply_pipe_record
 from qa_runner.procs import child_env, run_child
 from qa_runner.safe_read import Budget
 
@@ -39,16 +39,18 @@ class LaneRun:
     log_header: Optional[Dict[str, Any]]
     log_events: List[Dict[str, Any]]
     log_problems: List[str]
+    control_survivor_alive: Any = None
+    from_files: Any = None                                  # the outcome as the files say it (before the parent applies the record the child sent)
 
 
-def run_hostile(tmp: Path, world: World, *, profile: str, layers: str = "-", race_attempts: int = 1500, deadline_s: int = 150) -> LaneRun:
+def run_hostile(tmp: Path, world: World, *, profile: str, layers: str = "-", race_attempts: int = 1500, deadline_s: int = 150, lose: bool = False) -> LaneRun:
     suite = tmp / "suite"
     suite.mkdir(parents=True)
     for name in FILES:
         shutil.copy(HERE / "hostile_suite" / name, suite / name)
     results_path = tmp / "results.json"
     (suite / "world.json").write_text(json.dumps({"ports": world.ports, "allowed_port": world.allowed_port, "unix_stream_path": world.unix_stream_path, "unix_dgram_path": world.unix_dgram_path, "unix_dgram_pair_path": world.unix_dgram_pair_path,
-                                                  "results_path": str(results_path), "race_attempts": race_attempts}), encoding="utf-8")
+                                                  "results_path": str(results_path), "race_attempts": race_attempts, "out_dir": str(tmp / "work" / "lanes" / "robot" / "out")}), encoding="utf-8")
     digests = {n: "sha256:" + hashlib.sha256((suite / n).read_bytes()).hexdigest() for n in (*FILES, "world.json")}
     origin = f"http://127.0.0.1:{world.allowed_port}"
     work = tmp / "work"
@@ -61,10 +63,13 @@ def run_hostile(tmp: Path, world: World, *, profile: str, layers: str = "-", rac
            "egress": profile, "egress_policy": policy_config("origin-only", origin) if profile == "origin-only" else None}
     from qa_evidence.canon import dumps_canonical
     (lane_dir / "input.json").write_bytes(dumps_canonical(cfg))
-    proc = run_child([sys.executable, "-s", str(HERE / "driver.py"), str(lane_dir / "input.json"), layers], cwd=str(lane_dir), env=child_env(str(home)), deadline_s=deadline_s + 20, kill_grace_s=12.0)
+    proc = run_child([sys.executable, "-s", str(HERE / "driver.py"), str(lane_dir / "input.json"), layers] + (["lose"] if lose else []), cwd=str(lane_dir), env=child_env(str(home)), deadline_s=deadline_s + 20, kill_grace_s=12.0)
     outcome, _ = _read_outcome(Fl(), out, Budget(64 * 1024 * 1024, root=str(work)))
+    from_files = outcome
+    if outcome is not None and proc.exit_code == 0 and profile == "origin-only":
+        outcome, _ = apply_pipe_record(Fl(), outcome, proc.stdout)         # what the parent does with the child's standard output
     results = json.loads(results_path.read_text()) if results_path.exists() else {}
     header, events, problems = None, [], []
     if outcome is not None and "lanes/robot/egress-log.jsonl" in outcome.files:
         header, events, problems = egresslog.parse(outcome.files["lanes/robot/egress-log.jsonl"][0])
-    return LaneRun(world, proc.exit_code, proc.stderr.decode("utf-8", "replace")[-3000:], results, outcome, header, events, problems)
+    return LaneRun(world, proc.exit_code, proc.stderr.decode("utf-8", "replace")[-3000:], results, outcome, header, events, problems, from_files=from_files)

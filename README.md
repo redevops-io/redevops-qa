@@ -43,7 +43,7 @@ The Robot Framework adapter is in [packages/qa-robot](packages/qa-robot/README.m
 The Appium adapters are in [packages/qa-appium](packages/qa-appium/README.md).
 The portable evidence bundle (layout, run-report schema, offline verifier, reader) is in [packages/qa-evidence](packages/qa-evidence/README.md).
 The deterministic fixture web app with seeded defects, the target of the end-to-end tests, is in [packages/qa-fixture-app](packages/qa-fixture-app/README.md).
-The `redevops-qa` command (`doctor`, `freeze`, `run`, `verify`, `report`, `inspect`, `demo`; Playwright Chromium and Robot Framework lanes) is in [packages/qa-runner](packages/qa-runner/README.md); its section "What verification does and does not prove" says what `verify` shows and what unkeyed hashes cannot.
+The `redevops-qa` command (`doctor`, `freeze`, `run`, `verify`, `report`, `inspect`, `demo`; Playwright Chromium and Robot Framework lanes) is in [packages/qa-runner](packages/qa-runner/README.md); its section "What verification does and does not prove" says what `verify` shows and what unkeyed hashes cannot, and its section "Egress matrix by engine" says what limits the network traffic of the browser lane and of the Robot lane, what the experiments measured, and what is not stopped.
 The engine capability manifest (what each engine has been shown to do, with its evidence) is [qa-capabilities.json](qa-capabilities.json)
 with its schema in [schemas](schemas/qa-capabilities.schema.json); the generated matrix is [docs/QA_CAPABILITIES.md](docs/QA_CAPABILITIES.md).
 `python tools/check_capabilities.py` checks it (schema, pins, evidence, agreement with the adapters, freshness against `main`).

@@ -11,7 +11,11 @@ LOG_NAME = "egress-log.jsonl"
 LAYER_SECCOMP = "seccomp-user-notification"
 LAYER_LANDLOCK = "landlock-tcp-connect"
 ALL_LAYERS = (LAYER_SECCOMP, LAYER_LANDLOCK)
-MAX_EVENTS = 5000
+#: what a run records: every refusal up to MAX_DENY_RECORDS and allowed connects up to MAX_ALLOW_RECORDS; what is not written is counted in the closing ``summary`` record. A refusal is never the thing dropped first:
+#: the first one is always written (the allowed records stop at their own, lower, cap)
+MAX_ALLOW_RECORDS = 1000
+MAX_DENY_RECORDS = 5000
+SUMMARY_KEYS = frozenset({"event", "allow_omitted", "deny_omitted"})
 HEADER_KEYS = frozenset({"event", "layers", "arch", "kernel", "landlock_abi", "allowed", "selftest"})
 UNAVAILABLE_KEYS = frozenset({"event", "reason", "message", "facts"})
 EVENT_KEYS = frozenset({"seq", "layer", "syscall", "verdict", "reason", "family", "address", "port", "detail"})
@@ -50,6 +54,15 @@ def parse(data: bytes) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], 
     if not rows:
         return None, [], problems + ["the file is empty"]
     header, events = rows[0], rows[1:]
+    summary = None
+    if events and events[-1].get("event") == "summary":
+        summary = events[-1]
+        if set(summary) != SUMMARY_KEYS or any(type(summary[k]) is not int or summary[k] < 0 for k in ("allow_omitted", "deny_omitted")):
+            problems.append("the closing summary record is not of the shape the runner writes")
+            events = events[:-1]
+            summary = None
+        elif summary["allow_omitted"] + summary["deny_omitted"] == 0:
+            problems.append("a summary record that omits nothing")
     if header.get("event") == "mechanism":
         if set(header) != HEADER_KEYS:
             problems.append("the first line does not have the fields of a mechanism record")
@@ -63,9 +76,10 @@ def parse(data: bytes) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], 
             problems.append("a lane that was not started has decisions")
     else:
         problems.append("the first line is neither a mechanism nor an unavailable record")
-    if len(events) > MAX_EVENTS + 1:
+    decisions = events[:-1] if summary is not None else events
+    if len(decisions) > MAX_ALLOW_RECORDS + MAX_DENY_RECORDS:
         problems.append("more records than a run writes")
-    for n, e in enumerate(events, 1):
+    for n, e in enumerate(decisions, 1):
         if not set(e) <= EVENT_KEYS or e.get("seq") != n or e.get("verdict") not in VERDICTS or not isinstance(e.get("syscall"), str) or not isinstance(e.get("reason"), str):
             problems.append(f"record {n} is not a decision record in sequence")
             break
@@ -79,5 +93,10 @@ def parse(data: bytes) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], 
 
 
 def denied(events: List[Mapping[str, Any]]) -> int:
-    """The refusals (and a lost supervisor) in a list of events."""
-    return sum(1 for e in events if e.get("verdict") in ("deny", "lost"))
+    """The refusals (and a lost supervisor) in a list of events, those the closing summary says were not written included."""
+    return sum(1 for e in events if e.get("verdict") in ("deny", "lost")) + sum(e["deny_omitted"] for e in events if e.get("event") == "summary" and isinstance(e.get("deny_omitted"), int))
+
+
+def refusals(events: List[Mapping[str, Any]]) -> int:
+    """The refusals only (a lost supervisor is not one), those the closing summary says were not written included: the number the report and the lane's outcome carry."""
+    return sum(1 for e in events if e.get("verdict") == "deny") + sum(e["deny_omitted"] for e in events if e.get("event") == "summary" and isinstance(e.get("deny_omitted"), int))

@@ -136,7 +136,8 @@ def test_the_two_profiles_give_two_different_plan_digests(up):
 
 def test_the_statement_of_the_layers_does_not_claim_more_than_the_experiments_show():
     text = K.robot_egress_layers_text(["robot"])
-    for must in ("What this does not stop", "second thread", "CAP_SYS_PTRACE", "guard, not a sandbox", "does not start if they cannot be installed", "egress-denied", "not by the egress gateway"):
+    for must in ("What this does not stop", "second thread", "CAP_SYS_PTRACE", "guard, not a sandbox", "does not start if the layers cannot be installed", "egress-denied", "not by the egress gateway",
+                 "enforced at the level of the PORT", "listen()", "refuses every TCP bind", "descriptor the engine cannot reach", "detaches are ended", "simultaneous open", "stop or kill the supervisor"):
         assert must in text, must
     for must_not in ("sandbox is", "secure", "tamper", "all traffic", "NOT enforced"):
         assert must_not not in text, must_not
@@ -197,3 +198,128 @@ def test_run_doctor_has_the_check_for_a_plan_with_a_robot_lane_and_only_then(mon
         monkeypatch.setattr(doctor, name, lambda *a, _n=name, **k: doctor.Check(_n, "OK", ""))
     assert "robot egress layers" in [c.name for c in doctor.run_doctor((K.ENGINE_PLAYWRIGHT, K.ENGINE_ROBOT), robot_egress=False)] and seen == [False]
     assert "robot egress layers" not in [c.name for c in doctor.run_doctor((K.ENGINE_PLAYWRIGHT,))]
+
+
+# ---- the audit record never drops a refusal; the self-test; the pipe --------------------------------------------------------------------------------
+def _fence():
+    return netfence.Fence("x86_64", netfence.allowed_endpoints(policy_config("origin-only", ORIGIN)), netfence.ALL_LAYERS, {"kernel": "k", "landlock_abi": 8})
+
+
+def _allow(f):
+    f._record(verdict="allow", syscall="connect", family="AF_INET", address="127.0.0.1", port=41234, reason="in-allow-list")
+
+
+def _deny(f):
+    f._record(verdict="deny", syscall="connect", family="AF_INET", address="127.0.0.1", port=1, reason="not-in-allow-list")
+
+
+def test_a_refusal_is_written_after_the_allowed_connects_have_used_their_room_and_the_rest_is_counted():
+    f = _fence()
+    for _ in range(egresslog.MAX_ALLOW_RECORDS + 100):
+        _allow(f)
+    _deny(f)                                                         # the refusal that comes after thousands of allowed connects is still in the file
+    rows = f.events()
+    assert sum(1 for e in rows if e.get("verdict") == "allow") == egresslog.MAX_ALLOW_RECORDS and rows[-2]["verdict"] == "deny"
+    assert rows[-1] == {"event": "summary", "allow_omitted": 100, "deny_omitted": 0} and f.denied == 1
+    header, events, problems = egresslog.parse(_file(f.header() | {"selftest": {}}, *rows))
+    assert not problems and egresslog.denied(events) == 1 and egresslog.refusals(events) == 1
+
+
+def test_refusals_beyond_their_own_cap_are_counted_in_the_summary_and_the_count_is_the_total():
+    f = _fence()
+    for _ in range(egresslog.MAX_DENY_RECORDS + 7):
+        _deny(f)
+    rows = f.events()
+    assert len(rows) == egresslog.MAX_DENY_RECORDS + 1 and rows[-1]["deny_omitted"] == 7 and f.denied == egresslog.MAX_DENY_RECORDS + 7
+    header, events, problems = egresslog.parse(_file(f.header(), *rows))
+    assert not problems and egresslog.refusals(events) == egresslog.MAX_DENY_RECORDS + 7
+
+
+def test_a_summary_that_is_not_what_the_runner_writes_is_a_problem():
+    row = {"seq": 1, "layer": "l", "syscall": "connect", "verdict": "deny", "reason": "r"}
+    for summary in ({"event": "summary", "allow_omitted": 0, "deny_omitted": 0}, {"event": "summary", "allow_omitted": -1, "deny_omitted": 1}, {"event": "summary", "allow_omitted": 1}):
+        assert egresslog.parse(_file(HEADER, row, summary))[2]
+    assert not egresslog.parse(_file(HEADER, row, {"event": "summary", "allow_omitted": 3, "deny_omitted": 0}))[2]
+
+
+class _FakeSocket:
+    """A socket for the self-test: ``refuse_tcp`` and ``refuse_udp`` say what the (pretend) layers do."""
+
+    def __init__(self, refuse_tcp, refuse_udp):
+        self.refuse_tcp, self.refuse_udp = refuse_tcp, refuse_udp
+
+    def __call__(self, family, kind):
+        if kind == 2 and self.refuse_udp:
+            raise PermissionError(13, "refused")
+        me = self
+        return type("S", (), {"settimeout": lambda self, t: None, "close": lambda self: None,
+                               "connect": lambda self, a: (_ for _ in ()).throw(PermissionError(13, "refused")) if me.refuse_tcp else None})()
+
+
+def test_the_self_test_passes_only_when_both_the_forbidden_connect_and_the_udp_socket_are_refused():
+    f = _fence()
+    layers = (netfence.LAYER_SECCOMP, netfence.LAYER_LANDLOCK)
+    assert netfence._selftest(f, ("127.0.0.1", 1), layers, _FakeSocket(True, True)) == {"forbidden_tcp_refused": True, "udp_refused": True}
+    for tcp, udp in ((False, True), (True, False), (False, False)):
+        with pytest.raises(netfence.FenceUnavailable) as exc:
+            netfence._selftest(f, ("127.0.0.1", 1), layers, _FakeSocket(tcp, udp))
+        assert exc.value.reason == "self-test-failed"
+    assert netfence._selftest(f, ("127.0.0.1", 1), (netfence.LAYER_LANDLOCK,), _FakeSocket(True, False)) == {"forbidden_tcp_refused": True}        # no seccomp layer: no UDP check
+
+
+def test_a_probe_with_one_check_that_fails_or_with_none_is_not_ok():
+    assert netfence.all_ok({"a": True, "b": True}) is True
+    assert netfence.all_ok({"a": True, "b": False}) is False and netfence.all_ok({}) is False and netfence.all_ok({"a": "yes"}) is False
+
+
+def _outcome(status="NATIVE_PASS", raw="PASS", log=b"", extra=None):
+    from qa_runner.bundle import LaneOutcome
+    files = {"lanes/robot/egress-log.jsonl": (log, "log"), "lanes/robot/observations.json": (b"{}", "observation"), **(extra or {})}
+    return LaneOutcome(lane_id="robot", engine_name=K.ENGINE_ROBOT, engine_version="7.5", native_status=status, raw_status=raw, exit_code=0, files=files, counts={"passed": 1, "failed": 0, "errored": 0, "skipped": 0})
+
+
+def _fl():
+    from types import SimpleNamespace
+    return SimpleNamespace(lane_id="robot")
+
+
+DENY_ROW = {"seq": 1, "layer": egresslog.LAYER_SECCOMP, "syscall": "connect", "verdict": "deny", "reason": "not-in-allow-list", "family": "AF_INET", "address": "127.0.0.1", "port": 1}
+
+
+def test_the_log_the_child_sent_over_its_standard_output_decides_the_lane_s_status_not_the_files():
+    from qa_runner.lane_robot import apply_pipe_record, egress_frame
+    lying = _outcome(log=_file(HEADER))                                      # the files say: completed, no refusal, a log without one
+    out, rest = apply_pipe_record(_fl(), lying, b"progress\n" + egress_frame(_file(HEADER, DENY_ROW)))
+    assert (out.native_status, out.raw_status, out.egress["fence_denied"]) == ("NATIVE_ERROR", "egress-denied", 1) and out.counts is None and rest == b"progress\n"
+    assert egresslog.refusals(egresslog.parse(out.files["lanes/robot/egress-log.jsonl"][0])[1]) == 1 and "lanes/robot/observations.json" not in out.files
+    lost = {"seq": 1, "layer": "l", "syscall": "supervisor", "verdict": "lost", "reason": "RuntimeError"}
+    assert apply_pipe_record(_fl(), lying, egress_frame(_file(HEADER, lost)))[0].raw_status == "egress-fence-lost"
+
+
+def test_a_log_that_is_missing_or_malformed_on_the_pipe_is_an_engine_error_and_a_clean_one_changes_nothing_but_the_count():
+    from qa_runner.lane_robot import apply_pipe_record, egress_frame
+    for stdout, raw in ((b"", "egress-record-missing"), (b"qa-egress-log !!!notbase64\n", "egress-record-missing"), (egress_frame(b"not json\n"), "egress-record-malformed")):
+        out, _ = apply_pipe_record(_fl(), _outcome(log=_file(HEADER)), stdout)
+        assert (out.native_status, out.raw_status) == ("NATIVE_ERROR", raw)
+    clean, _ = apply_pipe_record(_fl(), _outcome(log=_file(HEADER)), egress_frame(_file(HEADER)))
+    assert (clean.native_status, clean.raw_status, clean.egress) == ("NATIVE_PASS", "PASS", {"fence_denied": 0})
+    gone = {"event": "unavailable", "reason": "x", "message": "m", "facts": {}}
+    out, _ = apply_pipe_record(_fl(), _outcome("NATIVE_UNAVAILABLE", "egress-unavailable", _file(gone)), egress_frame(_file(gone)))
+    assert out.raw_status == "egress-unavailable"
+
+
+def test_the_probe_judges_each_layer_alone_and_both_and_a_layer_that_does_not_enforce_by_itself_fails_it(monkeypatch):
+    seen = []
+
+    def one(which, timeout_s):
+        seen.append(which)
+        ok = {"ok": True, "facts": {"kernel": "k"}, "checks": {"x": True}, "layers": ["l"], "selftest": {}}
+        return {"ok": False, "reason": "layer-check-failed", "checks": {"other_port_refused": False}, "facts": {}} if which == "landlock" and bad else ok
+    monkeypatch.setattr(netfence, "_probe_one", one)
+    bad = True
+    r = netfence.probe()
+    assert r["ok"] is False and seen == ["landlock"] and "landlock" in r["message"] and list(r["per_set"]) == ["landlock"]        # stops at the first layer that fails on its own
+    seen.clear()
+    bad = False
+    r = netfence.probe()
+    assert r["ok"] is True and seen == ["landlock", "seccomp", "both"] and set(r["per_set"]) == {"landlock", "seccomp", "both"}

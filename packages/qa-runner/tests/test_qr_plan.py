@@ -198,6 +198,12 @@ def test_the_robot_example_file_is_the_robot_plan():
     assert ROBOT_EXAMPLE.read_bytes() == (json.dumps(robot_plan(), indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
+def test_the_not_enforced_robot_example_file_is_the_robot_plan_with_that_profile_and_has_the_old_plan_digest(up):
+    path = ROBOT_EXAMPLE.with_name("robot-plan-not-enforced.json")
+    assert path.read_bytes() == (json.dumps(robot_plan("not-enforced"), indent=2, sort_keys=True) + "\n").encode("utf-8")
+    assert freeze_plan(up, json.loads(path.read_text(encoding="utf-8"))).plan_digest == "sha256:e38f4b06a17f5e3f6619fb974537a65e4789f6eed09132dbc8d98c228761d6b5"        # the digest the Robot plan had before the layers
+
+
 def test_the_robot_plan_freezes_with_the_suite_files_and_the_program_hash_pinned(up):
     frozen = freeze_plan(up, robot_plan())
     lane = frozen.lane("robot")

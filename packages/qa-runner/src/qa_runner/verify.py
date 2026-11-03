@@ -321,9 +321,11 @@ def _check_robot_egress(frozen: FrozenPlan, files: Mapping[str, bytes], report: 
         if problems:
             v.add("EGRESS_LOG_MALFORMED", path, safe_text("; ".join(problems[:3]), 200))
             continue
+        if f"lanes/{lid}/egress-profile.json" not in files:
+            continue                                             # not kept (the evidence budget) and listed as such, or EXPECTED_FILE_MISSING (_check_required)
         origin = lane_origin(fl, files)
         if origin is None:
-            v.add("EGRESS_PROFILE_MISSING", f"lanes/{lid}/egress-profile.json", "the egress profile is missing, malformed, or not exactly the one the plan's profile gives for the origin it names")
+            v.add("EGRESS_PROFILE_MISSING", f"lanes/{lid}/egress-profile.json", "the egress profile is malformed, or not exactly the one the plan's profile gives for the origin it names")
             continue
         allowed = [f"127.0.0.1/32:{origin.rsplit(':', 1)[1]}"]
         if header.get("event") == "unavailable":
@@ -334,23 +336,24 @@ def _check_robot_egress(frozen: FrozenPlan, files: Mapping[str, bytes], report: 
             v.add("EGRESS_LOG_MALFORMED", path, "the lane is reported unavailable (egress-unavailable) but its log says the layers were installed")
             continue
         if header.get("layers") != list(egresslog.ALL_LAYERS) or header.get("allowed") != allowed or header["selftest"].get("forbidden_tcp_refused") is not True \
-                or header["selftest"].get("udp_refused") is not True:
+                or header["selftest"].get("udp_refused") is not True or type(header.get("landlock_abi")) is not int or header["landlock_abi"] < 4:
             v.add("EGRESS_MECHANISM_WRONG", path, "the log does not show both layers installed around the allow-list of the egress profile with a self-test that passed")
         for e in events:
-            if e["verdict"] == "allow" and not (e["syscall"] == "connect" and e.get("family") == "AF_INET" and e.get("address") == "127.0.0.1" and f"127.0.0.1/32:{e.get('port')}" in allowed):
+            if e.get("verdict") == "allow" and not (e["syscall"] == "connect" and e.get("family") == "AF_INET" and e.get("address") == "127.0.0.1" and f"127.0.0.1/32:{e.get('port')}" in allowed):
                 v.add("EGRESS_ALLOW_OUTSIDE_POLICY", path, f"record {e['seq']} allows something that is not the allow-list's address and port")
                 break
         refused = egresslog.denied(events)
-        total += refused
+        total += egresslog.refusals(events)
         if refused and native["status"] in ("NATIVE_PASS", "NATIVE_FAIL"):
             v.add("EGRESS_DENIAL_NOT_REFLECTED", path, f"the log records {refused} refused attempt(s) but the lane is reported as completed ({native['status']}): a refusal ends the lane as an engine error")
         if native["raw_status"] in EGRESS_RAW and (native["status"] != "NATIVE_ERROR" or not refused):
             v.add("EGRESS_DENIAL_NOT_IN_LOG", path, "the lane is reported as ended by the egress layers but its log records no refusal")
-        if native["raw_status"] == "egress-fence-lost" and not any(e["verdict"] == "lost" for e in events):
+        if native["raw_status"] == "egress-fence-lost" and not any(e.get("verdict") == "lost" for e in events):
             v.add("EGRESS_DENIAL_NOT_IN_LOG", path, "the lane is reported as having lost its egress supervisor but its log does not say so")
     reported = (report.get("extensions") or {}).get("egress_fence_denied")
-    ran = any(fl.engine == K.ENGINE_ROBOT and fl.egress == "origin-only" and f"lanes/{fl.lane_id}/{egresslog.LOG_NAME}" in files for fl in frozen.lanes)
-    if reported is not None and (not ran or reported != total):
+    fenced = [fl for fl in frozen.lanes if fl.engine == K.ENGINE_ROBOT and fl.egress == "origin-only"]
+    complete = all(f"lanes/{fl.lane_id}/{egresslog.LOG_NAME}" in files for fl in fenced)          # a log the evidence budget did not keep cannot be counted (its absence is judged by _check_required)
+    if reported is not None and fenced and complete and reported != total:
         v.add("REPORT_FIELD_MISMATCH", "extensions.egress_fence_denied", "the number of refused attempts in the report is not the number in the lanes' egress logs")
 
 
