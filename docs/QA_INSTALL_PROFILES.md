@@ -14,7 +14,7 @@ A profile is **verified** only when a CI job runs that exact profile, step by st
 | docker-compose | planned | The main branch of this repository ships no Compose file, no Dockerfile and no runner service. A Compose packaging exists only as unmerged work and its files have been validated statically, never started; a Compose profile will be offered only when one is merged and run in CI. |
 | kubernetes-helm | planned | This repository ships no Helm chart and no Kubernetes manifests for the runner, so there is nothing to test; the cluster checks in qa-checks inspect other people's manifests and are not a deployment of this runtime. |
 
-Independent verifier: offered by `local-python-qa` only. The independent verifier is installed and run only by the profile local-python-qa (`redevops-qa verify`, Playwright Chromium and Robot Framework, Linux x86_64); no other profile installs one, and an engine's own pass or fail is not a verdict.
+Re-verification in a separate process: offered by `local-python-qa` only. Re-verification of a run's evidence in a separate process (`redevops-qa verify`: the same code the run used, so not independent of the harness and the libraries, and the hash chain it checks is unkeyed) is installed and run only by the profile local-python-qa (Playwright Chromium and Robot Framework, Linux x86_64); no other profile installs it, and an engine's own pass or fail is not a verdict.
 
 ## Profiles
 
@@ -313,7 +313,7 @@ Not offered: No iOS session has ever been run: the adapter reports UNAVAILABLE f
 
 ReDevOps QA in a local Python environment: the pinned bundle, the Playwright Chromium and Robot Framework lanes, and the verifier. Status: **experimental**.
 
-Python 3.12 (`python3.12`); pinned pip packages: .
+Python 3.12 (`python3.12`); pinned pip packages: none of its own (every wheel is pinned by hash in the bundle's requirements.lock).
 
 Prerequisites:
 
@@ -378,7 +378,7 @@ redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install-browser.sh --prefix '{i
 redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/uninstall.sh --prefix '{install_dir}'
 ```
 
-Evidence: The demo writes one evidence bundle, {evidence_dir}/profile-demo, and the check step re-verifies it; no JUnit file is involved. Files: .
+Evidence: The demo writes one evidence bundle, {evidence_dir}/profile-demo, and the check step re-verifies it; no JUnit file is involved.
 
 Uninstall: uninstall.sh removes the installation directory (virtual environment, browser directory, launcher) and refuses a directory it did not make. The evidence directory and the operating system packages installed by --with-deps stay.
 

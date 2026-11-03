@@ -304,3 +304,28 @@ def test_a_first_party_wheel_without_the_family_licence_texts_is_found(mini, tmp
     resum(bad)
     found = [f for f in cb.check_bundle(bad, allow_test_target=True)]
     assert [f.code for f in found] == ["WHEEL_LICENCE"] and "LICENSE-COMMONS-CLAUSE" in found[0].message
+
+
+# ------------------------------------------------------------------------------------------------------ what the manifest says about the third-party wheels
+def test_the_manifest_says_third_party_wheels_are_private_staging_only_and_describes_what_the_playwright_wheel_contains(mini):
+    lic = json.loads((mini / "BUNDLE.json").read_text(encoding="utf-8"))["licences"]
+    assert "PRIVATE STAGING ONLY" in lic["third_party_staging"] and "owner decision" in lic["third_party_staging"]
+    note = lic["third_party_notes"]["playwright"]
+    assert "Node.js runtime binary" in note and "npm packages" in note and "libwebp" in note and "does not describe them" in note
+    assert "Node.js" in (mini / "README.md").read_text(encoding="utf-8") and "private staging only" in (mini / "README.md").read_text(encoding="utf-8")
+
+
+def test_a_manifest_that_drops_the_staging_caveat_or_the_node_note_is_found(copy):
+    path = copy / "BUNDLE.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["licences"]["third_party_staging"] = "shipped"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    resum(copy)
+    assert "LICENCES" in codes(copy)
+    doc["licences"]["third_party_staging"] = "private staging only; public distribution requires an owner decision"
+    doc["wheels"].append({"filename": "playwright-1-py3-none-any.whl", "name": "playwright", "version": "1", "sha256": "0" * 64, "kind": "third-party", "license": "Apache-2.0"})
+    doc["licences"]["third_party_notes"] = {}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    resum(copy)
+    found = [f for f in cb.check_bundle(copy, allow_test_target=True) if f.code == "LICENCES"]
+    assert any("Node.js runtime" in f.message for f in found)

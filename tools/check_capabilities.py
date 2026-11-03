@@ -406,7 +406,9 @@ def _code(text: Any) -> str:
 
 def evidence_link(ev: Dict[str, Any]) -> str:
     if ev["kind"] == "ci-job":
-        return f"[CI run {ev['run_id']}]({ev['run_url']}) (whole run green), [job {ev['job_id']}]({ev['url']}) ({_cell(ev['job_name'])}; {_cell(ev['tests'])})"
+        name = _cell(ev['job_name'])
+        name += ")" * max(0, name.count("(") - name.count(")"))          # a job name is a prefix of the real name and may stop inside a parenthesis
+        return f"[CI run {ev['run_id']}]({ev['run_url']}) (whole run green), [job {ev['job_id']}]({ev['url']}) ({name}; {_cell(ev['tests'])})"
     return f"[{_cell(ev['path'])}]({_relative_from_docs(ev['path'])})"
 
 

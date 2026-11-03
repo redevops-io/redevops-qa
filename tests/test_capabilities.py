@@ -719,3 +719,16 @@ def test_the_generated_page_has_the_product_section_with_its_caveats():
     text = (ROOT / "docs" / "QA_CAPABILITIES.md").read_text(encoding="utf-8")
     assert "## Product capabilities (the `redevops-qa` command)" in text and "not an independent implementation" in text
     assert "get their rows once a run on the main branch exists" in text
+
+
+def test_the_evidence_line_of_the_generated_page_balances_the_parenthesis_of_a_job_name_that_stops_inside_one():
+    ev = dict(row(REAL, "qa-verify-recompute")["evidence"][1])
+    ev["job_name"] = "runner (Python"
+    line = chk.evidence_link(ev)
+    assert line.count("(") == line.count(")") and "(runner (Python)" in line
+    ev["job_name"] = "runner end to end"
+    assert "(runner end to end;" in chk.evidence_link(ev)
+    text = (ROOT / "docs" / "QA_CAPABILITIES.md").read_text(encoding="utf-8")
+    for l in text.splitlines():
+        if "CI run" in l and "job " in l:
+            assert l.split("[job ", 1)[1].split(": ", 1)[0].count("(") == l.split("[job ", 1)[1].split(": ", 1)[0].count(")"), l[:160]

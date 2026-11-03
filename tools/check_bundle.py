@@ -29,7 +29,7 @@ FAMILY_LICENCE_FILES = ("LICENSE.md", "LICENSE", "LICENSE-COMMONS-CLAUSE")
 FORBIDDEN = ("pip install agent-harness", "pip install agent_harness", "tamper-proof", "tamper proof", "tamperproof", "reproducible build", "bit-for-bit", "soc 2", "soc2", "cis benchmark",
              "audited", "qa demo site")
 #: phrases that must be there
-REQUIRED_TEXT = ("AGPL-3.0-or-later with the Commons Clause", "not open source", "plain AGPL-3.0-or-later", "downloaded", "not hashed")
+REQUIRED_TEXT = ("AGPL-3.0-or-later with the Commons Clause", "not open source", "plain AGPL-3.0-or-later", "downloaded", "not hashed", "Node.js", "private staging only")
 
 
 class Finding(NamedTuple):
@@ -108,6 +108,12 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
     lic = manifest.get("licences") or {}
     if "agent_harness" not in lic or "runtime_contracts" not in lic or "redevops_qa_packages" not in lic or "third_party" not in lic:
         out.append(Finding("LICENCES", "BUNDLE.json", "the licence record names the family packages, runtime-contracts, agent-harness and the third-party wheels separately"))
+    if "private staging only" not in str(lic.get("third_party_staging", "")).lower() or "owner decision" not in str(lic.get("third_party_staging", "")):
+        out.append(Finding("LICENCES", "BUNDLE.json", "the licence record says the third-party wheels are private staging only and that public distribution requires an owner decision"))
+    if any(w.get("name") == "playwright" for w in manifest.get("wheels") or []):
+        note = str((lic.get("third_party_notes") or {}).get("playwright", ""))
+        if "Node.js" not in note or "npm" not in note:
+            out.append(Finding("LICENCES", "BUNDLE.json", "the Playwright wheel contains a Node.js runtime and inlined npm packages; the licence record must say so"))
     # --- wheels and the lock
     entries = manifest.get("wheels") or []
     on_disk = {p.name for p in (root / "wheelhouse").iterdir()}

@@ -994,5 +994,23 @@ def test_the_runner_takes_only_the_parameters_the_profile_declares_and_needs_no_
 
 def test_the_generated_page_names_the_one_profile_that_installs_the_verifier():
     text = (ROOT / "docs" / "QA_INSTALL_PROFILES.md").read_text(encoding="utf-8")
-    assert "Independent verifier: offered by `local-python-qa` only." in text and "installs from a bundle archive instead" in text
+    assert "Re-verification in a separate process: offered by `local-python-qa` only." in text and "installs from a bundle archive instead" in text
+    assert "Independent verifier" not in text and "not independent of the harness and the libraries" in text and "unkeyed" in text
     assert "linux-x86_64 | experimental" in text and "No bundle is published" in text
+
+
+def test_the_generated_page_renders_no_empty_list_and_no_unbalanced_parenthesis():
+    text = (ROOT / "docs" / "QA_INSTALL_PROFILES.md").read_text(encoding="utf-8")
+    assert "pinned pip packages: ." not in text and "Files: ." not in text and "Files: ," not in text
+    assert "none of its own (every wheel is pinned by hash" in text
+    for line in text.splitlines():
+        assert line.count("(") == line.count(")") or "```" in line or line.startswith(("#", "python", "git", "tar", "redevops", "{", "pytest")) or "`" in line, line[:120]
+
+
+def test_the_page_generator_leaves_out_the_files_sentence_for_a_profile_without_evidence_files_and_keeps_it_for_the_others():
+    prof = json.loads(json.dumps(PROFILES))
+    text = chk.render_docs(prof)
+    assert text.count("Files: `") == 3                      # robot, selenium, appium-android write JUnit files; the bundle profile does not
+    q = profile(prof, "local-python-qa")
+    q["pip_pins"] = [{"name": "x", "version": "1"}]
+    assert "pinned pip packages: `x==1`." in chk.render_docs(prof)

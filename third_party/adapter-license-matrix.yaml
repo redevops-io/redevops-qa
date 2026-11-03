@@ -21,6 +21,11 @@
 #   excluded_by_default Not shipped, not installed and not downloaded by default (commercial SDKs, Apple toolchains, anything
 #                       whose licence the policy blocks).
 #   unverified          No claim is made either way.
+#   staged_unmodified   Shipped UNMODIFIED inside the pinned bundle (bundle/, built by tools/build_bundle.py) as the wheel named under
+#                       `shipped_wheels`, with the licence and notice files that wheel carries. PRIVATE STAGING ONLY: public
+#                       distribution requires an owner decision (redistribution.public_distribution = owner_decision_required).
+#                       tools/check_adapter_licenses.py requires every wheel of bundle/third-party.lock.json to appear here with the
+#                       same name, version, file name and sha256, and refuses a shipped wheel under any other status.
 #
 # Adapter manifests, contracts and the frozen qa/v1 goldens are not touched by this file.
 schema: redevops-qa/adapter-license-matrix
@@ -37,7 +42,7 @@ policy:
   blocked_spdx: [GPL-2.0-only, SSPL-1.0, BUSL-1.1, Elastic-2.0, CC-BY-NC-4.0]
   blocked_prefixes: ["LicenseRef-Proprietary", "LicenseRef-Commons-Clause"]
   allowed_exceptions: [LLVM-exception]
-  # Distribution names that CI and the adapter packages may install without being adapter frameworks (not shipped).
+  # Distribution names that CI and the adapter packages may install without being adapter frameworks. (pyyaml is also shipped in the bundle: see pyyaml-shipped.)
   ci_tooling: [pytest, pyyaml, jsonschema]
 components:
   # ------------------------------------------------------------------------------------------------ Selenium
@@ -94,17 +99,27 @@ components:
     license_file_sha256: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
     notices:
       - {file: robotframework-7.5.dist-info/AUTHORS.rst, content: "authors list shipped inside the wheel"}
+      - {file: robotframework-7.5.dist-info/LICENSE.txt, content: "the Apache-2.0 text shipped inside the wheel"}
     artifacts:
       - {ecosystem: pypi, name: robotframework, version: "7.5", file: robotframework-7.5-py3-none-any.whl, sha256: "5a194db36524604fafa1da89adebc837db9a95adf15ffd746e09ce98251e6c68"}
     bundled_deps_check: inspected
     bundled_deps:
-      - {name: "jQuery Highlight plugin (robot/htmldata/lib)", spdx: MIT, note: "file header: 'Licensed under MIT license'"}
-      - {name: "jQuery Templates Plugin 1.0.0pre (robot/htmldata/lib)", spdx: "MIT OR GPL-2.0-only", note: "file header: 'Dual licensed under the MIT or GPL Version 2 licenses'; the MIT alternative would be chosen"}
-      - {name: "JSXCompressor (robot/htmldata/lib)", spdx: "Apache-2.0 OR LGPL-3.0-only", note: "file header: 'Dual licensed under the Apache License Version 2.0, or LGPL Version 3 licenses'"}
-      - {name: "jQuery 3.5.1 (robot/htmldata/lib)", spdx: unverified, note: "header names only 'jquery.org/license'; not compared with the jQuery upstream tag"}
-      - {name: "jQuery tablesorter (robot/htmldata/lib)", spdx: unverified, note: "minified file with no licence header"}
+      - {name: "jQuery Highlight plugin (robot/htmldata/lib/jquery.highlight.min.js, sha256 595f2a0621a75c7dc18e5076ce7bca1064600ccc974cbd8229be6ef263243f33)", spdx: MIT, note: "file header: 'Licensed under MIT license'"}
+      - {name: "jQuery Templates Plugin 1.0.0pre (robot/htmldata/lib/jquery.tmpl.min.js, sha256 58fe3741dce607dc6a2abbaddda4f489f9be856f26c20c67a820131018ae153f)", spdx: "MIT OR GPL-2.0-only", note: "file header: 'Dual licensed under the MIT or GPL Version 2 licenses'; the MIT alternative would be chosen"}
+      - {name: "JSXCompressor (robot/htmldata/lib/jsxcompressor.min.js, sha256 b8269afbdc3549e56fe693b04928ace2141bf7df455e0700588a596185de8780)", spdx: "Apache-2.0 OR LGPL-3.0-only", note: "file header: 'Dual licensed under the Apache License Version 2.0, or LGPL Version 3 licenses'"}
+      - {name: "jQuery 3.5.1 (robot/htmldata/lib/jquery.min.js, sha256 f7f6a5894f1d19ddad6fa392b2ece2c5e578cbf7da4ea805b6885eb6985b6e3d)", spdx: unverified, note: "UNVERIFIED: the file header names only '(c) JS Foundation and other contributors | jquery.org/license' and no licence identifier; the wheel carries no licence file for it, and nothing was compared with the jQuery upstream tag"}
+      - {name: "jQuery tablesorter 2.30.5 (robot/htmldata/lib/jquery.tablesorter.min.js, sha256 f56f5424a8bc15c1e9c9f0bd0aa70b61d8094a692b2a7f92192a07e547406913)", spdx: unverified, note: "UNVERIFIED: a minified file with no licence header (the version string 2.30.5 is the only identification inside it); the wheel carries no licence file for it"}
     trademark: {status: verified, note: "the wheel's package description states that the Robot Framework trademark is owned by the Robot Framework Foundation; repository rule: the name identifies the integration only, no logos, no use in a ReDevOps product name"}
-    redistribution: {status: optional_extra, default_enabled: false, reason: "two of the bundled report assets have no licence stated in the file; the operator installs the pinned wheel"}
+    redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified wheel is shipped in the pinned bundle with its LICENSE.txt and AUTHORS.rst; the licences of two bundled report assets (robot/htmldata/lib/jquery.min.js and jquery.tablesorter.min.js) are UNVERIFIED, and two others are dual licensed (an alternative would be chosen)"}
+    shipped_wheels:
+      - name: robotframework
+        version: "7.5"
+        file: robotframework-7.5-py3-none-any.whl
+        sha256: "5a194db36524604fafa1da89adebc837db9a95adf15ffd746e09ce98251e6c68"
+        license_declared: "Apache License 2.0"
+        license_files:
+          - {path: "robotframework-7.5.dist-info/AUTHORS.rst", sha256: "c04d39b62cdd0be5f397f78eedf3b6dbb19573ea11900c7e826342f73c6989d1"}
+          - {path: "robotframework-7.5.dist-info/LICENSE.txt", sha256: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"}
     verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; wheel downloaded from the package registry and the headers of its bundled report assets read", checked_on: "2026-10-31"}
   - id: robotframework-seleniumlibrary
     name: SeleniumLibrary for Robot Framework (considered, not on the allowlist)
@@ -286,14 +301,41 @@ components:
     spdx: Apache-2.0
     license_url: https://github.com/microsoft/playwright-python/blob/v1.64.1/LICENSE
     license_file_sha256: "7fab1461b41970ff376f1c9303a637076bfaaeb71cd12dd3a1c44aaf59a1a2b9"
-    notices: []
+    notices:
+      - {file: "playwright-1.64.1.dist-info/licenses/LICENSE", content: "the Apache-2.0 text of Playwright for Python"}
+      - {file: "playwright/driver/package/LICENSE", content: "the Apache-2.0 text of the Playwright driver package"}
+      - {file: "playwright/driver/package/NOTICE", content: "Microsoft notice: the driver contains code derived from the Puppeteer project (Apache-2.0)"}
+      - {file: "playwright/driver/package/ThirdPartyNotices.txt", content: "states that bundled third-party software sits inside individual files under lib/ with sidecar .LICENSE files"}
+      - {file: "playwright/driver/package/lib/utilsBundle.js.LICENSE", content: "notices and licence texts of 79 npm packages inlined into lib/utilsBundle.js (only the identifiers MIT and ISC occur in it; not classified package by package)"}
+      - {file: "playwright/driver/package/lib/serverRegistry.js.LICENSE", content: "notices of 2 npm packages inlined into lib/serverRegistry.js (chokidar, readdirp: MIT)"}
+      - {file: "playwright/driver/package/lib/webp_codec.LICENSE", content: "libwebp (BSD 3-Clause) and Emscripten glue notices for the bundled WebP codec"}
+      - {file: "playwright/driver/LICENSE", content: "the Node.js licence file of the Node.js runtime binary playwright/driver/node (126879696 bytes), which lists 44 components compiled in or bundled (V8, OpenSSL, ICU, c-ares, libuv, zlib, ...)"}
     artifacts:
       - {ecosystem: pypi, name: playwright, version: "1.64.1"}
-    bundled_deps_check: not_inspected
-    bundled_deps: []
+    bundled_deps_check: inspected
+    bundled_deps:
+      - {name: "Node.js runtime binary (playwright/driver/node; licence file playwright/driver/LICENSE)", spdx: MIT, note: "the wheel contains a Node.js executable; driver/LICENSE lists 44 components compiled in or bundled with it (V8, OpenSSL, ICU, c-ares, libuv, zlib and others) under their own licences; those are not classified here and ICU's text mentions GPL only as an autoconf-style exception for build scripts"}
+      - {name: "Node.js components listed in playwright/driver/LICENSE (44 names)", spdx: unverified, note: "UNVERIFIED as a set: each carries its own text in driver/LICENSE; nobody classified them one by one against the policy"}
+      - {name: "79 npm packages inlined in playwright/driver/package/lib/utilsBundle.js and 2 in serverRegistry.js (sidecar .LICENSE files)", spdx: unverified, note: "UNVERIFIED as a set: the sidecar files carry each package's notice and text; the identifiers MIT and ISC occur in them; not classified package by package"}
+      - {name: "libwebp and Emscripten glue (playwright/driver/package/lib/webp_codec.wasm, webp_codec.js; notice lib/webp_codec.LICENSE)", spdx: BSD-3-Clause, note: "the notice file names libwebp as BSD 3-Clause; the Emscripten glue's licence is in the same file and was not classified"}
     trademark: {status: unverified, note: "not checked"}
-    redistribution: {status: optional_extra, default_enabled: false, reason: "the platform wheels were not unpacked, so what they bundle is not known; the operator installs the pinned version"}
-    verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; the registry entry for the pinned version lists its dependencies", checked_on: "2026-10-31"}
+    redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified manylinux1_x86_64 wheel is shipped in the pinned bundle; it contains a Node.js runtime binary, the Playwright driver with inlined npm packages and libwebp, under the notice files listed here, whose licences are not classified one by one"}
+    shipped_wheels:
+      - name: playwright
+        version: "1.64.1"
+        file: playwright-1.64.1-py3-none-manylinux1_x86_64.whl
+        sha256: "577b8d88778c245cfbd145ae17cf53044f084b1b46c55c69081d4069d56057e2"
+        license_declared: "Apache-2.0"
+        license_files:
+          - {path: "playwright/driver/LICENSE", sha256: "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"}
+          - {path: "playwright/driver/package/LICENSE", sha256: "45873d00a0dd243596deb4aa23b2493b3d1f0671921bf2538ea431d7380220eb"}
+          - {path: "playwright/driver/package/NOTICE", sha256: "6d602191187b35b9b01d2cffa01c8469c2c8d9de8a96f1bf868e0f264f51c81d"}
+          - {path: "playwright/driver/package/ThirdPartyNotices.txt", sha256: "a549d329bad8806fe279f0ecae0fc0270dec7e7c2dc8ec10f90e394f7c32b144"}
+          - {path: "playwright/driver/package/lib/serverRegistry.js.LICENSE", sha256: "3098a6efcbc11752cbdf6075fa65480f5470f78c8d981fab9c0796dc9a41cefe"}
+          - {path: "playwright/driver/package/lib/utilsBundle.js.LICENSE", sha256: "1362b7f413c08083af537384162ab69a323d019fe26e0a2cd78536fafd6b9cbf"}
+          - {path: "playwright/driver/package/lib/webp_codec.LICENSE", sha256: "995c7ee35aceb7666829b7a501ca89c0864e12b493c1174b155774ab1e03d831"}
+          - {path: "playwright-1.64.1.dist-info/licenses/LICENSE", sha256: "7fab1461b41970ff376f1c9303a637076bfaaeb71cd12dd3a1c44aaf59a1a2b9"}
+    verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; the registry entry for the pinned version lists its dependencies; the shipped linux x86_64 wheel was unpacked and its licence and notice files and bundled components read (the wheel file names, sizes and sha256 are recorded above)", checked_on: "2026-10-31"}
   - id: playwright-python-direct-deps
     name: Playwright for Python direct dependencies
     kind: dependency_group
@@ -302,10 +344,68 @@ components:
     members:
       - {name: pyee, version_constraint: ">=13,<15", spdx: MIT}
       - {name: greenlet, version_constraint: ">=3.1.1,<4.0.0", spdx: "MIT AND PSF-2.0"}
-    notices: []
+    notices:
+      - {file: "pyee-14.0.0.dist-info/licenses/LICENSE", content: "the MIT text of pyee"}
+      - {file: "greenlet-3.5.6.dist-info/licenses/LICENSE", content: "the MIT text of greenlet"}
+      - {file: "greenlet-3.5.6.dist-info/licenses/LICENSE.PSF", content: "the PSF text for the parts of greenlet derived from stackless Python"}
     trademark: {status: unverified, note: "not checked"}
-    redistribution: {status: optional_extra, default_enabled: false, reason: "not shipped"}
-    verification: {status: registry-metadata, method: "licence field of each package's registry entry for its latest version on the check date, which is outside the declared range for pyee", checked_on: "2026-10-31"}
+    redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified pyee 14.0.0 and greenlet 3.5.6 wheels are shipped in the pinned bundle with the licence files they carry"}
+    shipped_wheels:
+      - name: pyee
+        version: "14.0.0"
+        file: pyee-14.0.0-py3-none-any.whl
+        sha256: "3ac2d3229a9677f7de2c33d7f52fe25b638a46b19c413fea2edc8c6d0a644e4d"
+        license_declared: "MIT"
+        license_files:
+          - {path: "pyee-14.0.0.dist-info/licenses/LICENSE", sha256: "1ff556ca206b107f10e1c562ae454d3292e0296c3510eb90eb7f114caee32a66"}
+      - name: greenlet
+        version: "3.5.6"
+        file: greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl
+        sha256: "975736b002ed080d124cf81a79cb7e05cb26d6b3f5c7a7b651c0fcce70353aa1"
+        license_declared: "MIT AND PSF-2.0"
+        license_files:
+          - {path: "greenlet-3.5.6.dist-info/licenses/LICENSE", sha256: "769831d6e5dfaf2c20802faccff1fafb4c2025dd8f6253dfa47fcad59d4d0979"}
+          - {path: "greenlet-3.5.6.dist-info/licenses/LICENSE.PSF", sha256: "e5ff3c23c110e494cd7d736c10fd96d462457bafeca310840db6527298c7d46b"}
+    verification: {status: wheel-inspected, method: "the licence metadata and the licence files were read from the shipped wheels themselves (file names, sha256 and licence file paths recorded in shipped_wheels); no upstream tag was compared", checked_on: "2026-11-03"}
+  - id: typing-extensions-shipped
+    name: typing_extensions (a dependency of pyee, shipped in the bundle)
+    kind: dependency_group
+    adapter: qa-playwright
+    requires: [playwright-python]
+    members:
+      - {name: typing-extensions, version_constraint: "==4.16.0", spdx: PSF-2.0}
+    notices:
+      - {file: "typing_extensions-4.16.0.dist-info/licenses/LICENSE", content: "the PSF-2.0 text shipped inside the wheel"}
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified wheel is shipped in the pinned bundle with its LICENSE"}
+    shipped_wheels:
+      - name: typing-extensions
+        version: "4.16.0"
+        file: typing_extensions-4.16.0-py3-none-any.whl
+        sha256: "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+        license_declared: "PSF-2.0"
+        license_files:
+          - {path: "typing_extensions-4.16.0.dist-info/licenses/LICENSE", sha256: "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf"}
+    verification: {status: wheel-inspected, method: "the licence metadata and the licence file were read from the shipped wheel itself; no upstream tag was compared", checked_on: "2026-11-03"}
+  - id: pyyaml-shipped
+    name: PyYAML (a dependency of qa-checks, shipped in the bundle)
+    kind: dependency_group
+    adapter: qa-checks
+    members:
+      - {name: pyyaml, version_constraint: "==6.0.3", spdx: MIT, note: "also test tooling in CI (ci-pyyaml); here it is the runtime dependency of redevops-qa-checks that the bundle ships"}
+    notices:
+      - {file: "pyyaml-6.0.3.dist-info/licenses/LICENSE", content: "the MIT text shipped inside the wheel"}
+    trademark: {status: unverified, note: "not checked"}
+    redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified cp312 manylinux wheel is shipped in the pinned bundle with its LICENSE"}
+    shipped_wheels:
+      - name: pyyaml
+        version: "6.0.3"
+        file: pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+        sha256: "ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc"
+        license_declared: "MIT"
+        license_files:
+          - {path: "pyyaml-6.0.3.dist-info/licenses/LICENSE", sha256: "8d3928f9dc4490fd635707cb88eb26bd764102a7282954307d3e5167a577e8a4"}
+    verification: {status: wheel-inspected, method: "the licence metadata and the licence file were read from the shipped wheel itself; no upstream tag was compared", checked_on: "2026-11-03"}
   # ------------------------------------------------------------------------------------------------ CI tooling (never shipped)
   - id: ci-pytest
     name: pytest
@@ -322,10 +422,10 @@ components:
     kind: ci_tool
     adapter: all
     members:
-      - {name: pyyaml, version_constraint: ">=6,<7", spdx: MIT, note: "test tooling, never shipped"}
+      - {name: pyyaml, version_constraint: ">=6,<7", spdx: MIT, note: "test tooling in CI; the same project is ALSO shipped in the bundle as a runtime dependency (pyyaml-shipped)"}
     notices: []
     trademark: {status: unverified, note: "not checked"}
-    redistribution: {status: excluded_by_default, default_enabled: false, reason: "test tooling installed in CI only"}
+    redistribution: {status: excluded_by_default, default_enabled: false, reason: "the CI use of PyYAML is test tooling installed in CI only; the bundle's runtime copy is the separate entry pyyaml-shipped"}
     verification: {status: registry-metadata, method: "licence field of the package's registry entry for its latest version on the check date", checked_on: "2026-10-31"}
   - id: ci-jsonschema
     name: jsonschema

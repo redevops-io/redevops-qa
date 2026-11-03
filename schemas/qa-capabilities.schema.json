@@ -178,7 +178,7 @@
       "properties": {
         "matrix_component": {"$ref": "#/$defs/slug"},
         "spdx": {"type": "string", "minLength": 1},
-        "redistribution": {"enum": ["redistributable", "optional_extra", "excluded_by_default", "unverified"]}
+        "redistribution": {"enum": ["redistributable", "optional_extra", "staged_unmodified", "excluded_by_default", "unverified"]}
       }
     },
     "engine": {

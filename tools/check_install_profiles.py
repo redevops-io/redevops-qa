@@ -432,8 +432,8 @@ def render_docs(profiles: Dict[str, Any]) -> str:
         t = profiles["targets"][name]
         L.append(f"| {name} | {t['status']} | {caps._cell(t['disabled_reason'] or '')} |")
     v = profiles["verifier"]
-    L += ["", ("Independent verifier: offered by " + ", ".join(f"`{p['id']}`" for p in profiles["profiles"] if p.get("verifier") and p["status"] != "planned") + " only. " if v["supported"]
-               else "Independent verifier: not offered. ") + v["reason"], "", "## Profiles", "",
+    L += ["", ("Re-verification in a separate process: offered by " + ", ".join(f"`{p['id']}`" for p in profiles["profiles"] if p.get("verifier") and p["status"] != "planned") + " only. " if v["supported"]
+               else "Re-verification in a separate process: not offered. ") + v["reason"], "", "## Profiles", "",
           "| Profile | Engines | Status | Hosts |", "|---|---|---|---|"]
     for p in profiles["profiles"]:
         hosts = "; ".join(f"{h['os_arch']} ({h['status']})" for h in p["hosts"]) or "none"
@@ -443,7 +443,7 @@ def render_docs(profiles: Dict[str, Any]) -> str:
         if p["status"] == "planned":
             L += ["", f"Not offered: {p['disabled_reason']}"]
             continue
-        L += ["", f"Python {p['python']['version']} (`{p['python']['executable']}`); pinned pip packages: " + ", ".join(f"`{x['name']}=={x['version']}`" for x in p["pip_pins"]) + ".",
+        L += ["", f"Python {p['python']['version']} (`{p['python']['executable']}`); pinned pip packages: " + (", ".join(f"`{x['name']}=={x['version']}`" for x in p["pip_pins"]) if p["pip_pins"] else "none of its own (every wheel is pinned by hash in the bundle's requirements.lock)") + ".",
               "", "Prerequisites:", ""] + [f"* {x}" for x in p["prerequisites"]]
         L += ["", "Hosts:", "", "| Host | Status | Prerequisites | Verified by |", "|---|---|---|---|"]
         for h in p["hosts"]:
@@ -458,7 +458,7 @@ def render_docs(profiles: Dict[str, Any]) -> str:
                 L.append(f"# {s['title']}" + (" (manual: not run by CI)" if s.get("manual") else ""))
                 L.append(gen.display(_fill(s["argv"], p, src["pinned_commit"]), {k: v for k, v in s.get("env", {}).items()}))
             L.append("```")
-        L += ["", f"Evidence: {p['evidence']['description']} Files: " + ", ".join(f"`{f}`" for f in p["evidence"]["files"] + p["evidence"]["manual_files"]) + ".",
+        L += ["", f"Evidence: {p['evidence']['description']}" + (" Files: " + ", ".join(f"`{f}`" for f in p["evidence"]["files"] + p["evidence"]["manual_files"]) + "." if p["evidence"]["files"] + p["evidence"]["manual_files"] else ""),
               "", f"Uninstall: {p['uninstall_note']}", "", "Limitations:", ""] + [f"* {x}" for x in p["limitations"]]
     return "\n".join(L).rstrip("\n") + "\n"
 

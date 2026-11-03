@@ -203,7 +203,7 @@
           {
             "matrix_component": "playwright-python",
             "spdx": "Apache-2.0",
-            "redistribution": "optional_extra"
+            "redistribution": "staged_unmodified"
           }
         ]
       },
@@ -511,7 +511,7 @@
           {
             "matrix_component": "robotframework",
             "spdx": "Apache-2.0",
-            "redistribution": "optional_extra"
+            "redistribution": "staged_unmodified"
           }
         ]
       },

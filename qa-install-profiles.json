@@ -19,7 +19,7 @@
   },
   "verifier": {
     "supported": true,
-    "reason": "The independent verifier is installed and run only by the profile local-python-qa (`redevops-qa verify`, Playwright Chromium and Robot Framework, Linux x86_64); no other profile installs one, and an engine's own pass or fail is not a verdict."
+    "reason": "Re-verification of a run's evidence in a separate process (`redevops-qa verify`: the same code the run used, so not independent of the harness and the libraries, and the hash chain it checks is unkeyed) is installed and run only by the profile local-python-qa (Playwright Chromium and Robot Framework, Linux x86_64); no other profile installs it, and an engine's own pass or fail is not a verdict."
   },
   "targets": {
     "local-python": {
