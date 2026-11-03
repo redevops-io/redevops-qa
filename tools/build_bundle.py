@@ -48,6 +48,7 @@ LOCK_SCHEMA = "redevops-qa/bundle-third-party-lock"
 #: the repository packages that are part of the bundle (Selenium and Appium are outside the release claim and are not shipped)
 FIRST_PARTY = ("qa-adapter-kit", "qa-bridge", "qa-checks", "qa-egress", "qa-evidence", "qa-fixture-app", "qa-playwright", "qa-robot", "qa-runner")
 PINNED_DIST = "redevops-qa-pinned-upstreams"
+PINNED_FILES = "pinned-files.json"      # beside pins.toml: the sha256 of every file of the pinned trees as shipped (doctor compares the installed trees with it)
 #: the one target a bundle is built for. A test bundle may name another target; the release bundle never does.
 TARGET = {"python": "3.12", "python_tag": "cp312", "platform": "linux-x86_64"}
 PIP_PLATFORMS = ("manylinux_2_28_x86_64", "manylinux_2_27_x86_64", "manylinux_2_26_x86_64", "manylinux_2_24_x86_64", "manylinux_2_17_x86_64", "manylinux2014_x86_64",
@@ -256,6 +257,9 @@ def build_pinned_wheel(pins_file: Path, trees: Dict[str, tuple], deps, version: 
         rels |= {f for f in LICENCE_FILES.get(repo, ()) if (tree / f).is_file()}
         for rel in sorted(rels):
             files[f"{data_root}/{dep.source_path}/{rel}"] = (tree / rel).read_bytes()
+    tree_root = f"{data_root}/"
+    listing = {k[len(tree_root):]: sha256_bytes(v) for k, v in sorted(files.items()) if k.startswith(tree_root + ".pinned/")}
+    files[f"{data_root}/{PINNED_FILES}"] = (json.dumps({"schema": "redevops-qa/pinned-files", "schema_version": "1.0", "files": listing}, indent=2, sort_keys=True) + "\n").encode()
     metadata = (f"Metadata-Version: 2.1\nName: {PINNED_DIST}\nVersion: {version}\nSummary: The pinned upstream source trees (runtime-contracts, agent-harness) that redevops-qa verifies "
                 "against pins.toml, laid out under share/redevops-qa\nLicense: Two licences, not one: runtime-contracts is AGPL-3.0-or-later with the Commons Clause; agent-harness is "
                 "AGPL-3.0-or-later. Their licence files are inside this wheel next to the trees.\nRequires-Python: >=3.11\n").encode()
@@ -291,6 +295,8 @@ def build_first_party(root: Path, packages: Sequence[str], epoch: int, work: Pat
     for pkg in packages:
         src = work / "src" / pkg
         shutil.copytree(root / "packages" / pkg, src, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "build", "dist", "*.egg-info", "tests", ".pytest_cache"))
+        for name in LICENCE_FILES["redevops-qa"]:                     # the family licence texts: each wheel carries them in its dist-info (license-files in its pyproject)
+            shutil.copyfile(root / name, src / name)
         for p in [src, *src.rglob("*")]:
             os.utime(p, (epoch, epoch), follow_symlinks=False)
         run([str(py), "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", "--wheel-dir", str(raw), str(src)], child_env(work / "home", epoch), cwd=work, what=f"wheel of {pkg}")

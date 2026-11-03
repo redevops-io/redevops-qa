@@ -4,7 +4,8 @@ version = "0.1.0.dev0"
 description = "Robot Framework suite adapter for ReDevOps QA: strict output.xml import, an allowlist of libraries and no library installation"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
+license = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause"
+license-files = ["LICENSE*"]      # the family licence texts; tools/build_bundle.py copies them next to this file before it builds the wheel
 # The shared adapter kit (packages/qa-adapter-kit) is imported from the repository. Robot Framework is an optional, pinned extra that only
 # the suite process imports (the adapter itself never does); it is listed in third_party/adapter-license-matrix.yaml.
 dependencies = []
@@ -14,7 +15,7 @@ robot = ["robotframework==7.5"]
 dev = ["pytest>=8"]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

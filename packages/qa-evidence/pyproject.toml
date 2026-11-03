@@ -4,7 +4,8 @@ version = "0.1.0.dev0"
 description = "Portable, offline-verifiable evidence bundle for ReDevOps QA runs: layout, report schema, reader and verifier"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
+license = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause"
+license-files = ["LICENSE*"]      # the family licence texts; tools/build_bundle.py copies them next to this file before it builds the wheel
 # Standard library only: no framework, no pinned harness tree and no contracts package is imported by this package.
 dependencies = []
 
@@ -15,7 +16,7 @@ dev = ["pytest>=8"]
 redevops-qa-evidence = "qa_evidence.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

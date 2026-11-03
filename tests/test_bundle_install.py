@@ -301,3 +301,98 @@ def test_the_scripts_are_executable_in_the_directory_and_in_the_archive(bundles,
     with tarfile.open(tmp_path / "b.tar") as tf:
         modes = {m.name.split("/", 1)[1]: m.mode for m in tf.getmembers() if m.isfile()}
     assert all(modes[s] == 0o755 for s in bb.SCRIPTS) and modes["README.md"] == 0o644
+
+
+# ------------------------------------------------------------------------------------------------ the launcher does not read the caller's Python environment
+def _evil_copy(box, marker="EVIL CODE RUNNING"):
+    evil = box / "evil"
+    (evil / "redevops_qa_testpkg").mkdir(parents=True)
+    (evil / "redevops_qa_testpkg" / "__init__.py").write_text(f"def main():\n    print({marker!r})\n    return 0\n")
+    return evil
+
+
+def test_a_pythonpath_with_another_copy_of_a_package_is_not_loaded_by_the_launcher(bundles, box):
+    prefix = box / "qa"
+    assert run_script(bundles["v1"], "install.sh", ["--prefix", str(prefix)], box / "home").returncode == 0
+    evil = _evil_copy(box)
+    env = {**clean_env(box / "home"), "PYTHONPATH": str(evil), "PYTHONHOME": "/nonexistent", "PYTHONSTARTUP": str(evil / "x.py")}
+    done = subprocess.run([str(prefix / "bin" / "redevops-qa")], capture_output=True, text=True, env=env, cwd=str(box / "home"))
+    assert done.returncode == 0 and "EVIL" not in done.stdout + done.stderr and done.stdout.startswith("testpkg 1.0 ok"), done.stdout + done.stderr
+    # the control: the same PYTHONPATH DOES replace the package when the console script is run directly, so the test above proves the launcher and not luck
+    direct = subprocess.run([str(prefix / "venv" / "bin" / "redevops-qa")], capture_output=True, text=True, env={**clean_env(box / "home"), "PYTHONPATH": str(evil)}, cwd=str(box / "home"))
+    assert "EVIL CODE RUNNING" in direct.stdout
+
+
+def test_the_launcher_runs_the_entry_script_of_this_installation_with_python_e_and_s(bundles, box):
+    prefix = box / "qa"
+    assert run_script(bundles["v1"], "install.sh", ["--prefix", str(prefix)], box / "home").returncode == 0
+    text = (prefix / "bin" / "redevops-qa").read_text()
+    assert f"exec '{prefix}/venv/bin/python' -E -s '{prefix}/venv/bin/redevops-qa' \"$@\"" in text
+    assert (prefix / "venv" / "bin" / "redevops-qa").is_file() and "unset PYTHONPATH PYTHONHOME" in text
+
+
+# ------------------------------------------------------------------------------------------------ uninstall validates INSTALL.json
+def _fake_install(box, doc):
+    victim = box / "victim"
+    (victim / "venv").mkdir(parents=True)
+    (victim / "venv" / "important.txt").write_text("keep")
+    (victim / "bin").mkdir()
+    (victim / "INSTALL.json").write_text(json.dumps(doc))
+    return victim
+
+
+@pytest.mark.parametrize("label,doc", [
+    ("an empty object", {}),
+    ("a foreign schema", {"schema": "something/else", "schema_version": "1.0"}),
+    ("the right schema but the wrong entries", {"schema": "redevops-qa/install", "schema_version": "1.0", "entries": ["venv"], "bundle": "redevops-qa-bundle-x", "bundle_json_sha256": "0" * 64,
+                                                 "python": "3.12.3", "prefix": "x"}),
+    ("a list", []),
+])
+def test_uninstall_refuses_a_directory_whose_install_json_is_not_what_install_writes_and_removes_nothing(bundles, box, label, doc):
+    victim = _fake_install(box, doc)
+    done = run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(victim)], box / "home")
+    assert done.returncode == 5 and "not what install.sh writes" in done.stderr, (label, done.stderr)
+    assert (victim / "venv" / "important.txt").read_text() == "keep" and (victim / "INSTALL.json").is_file()
+
+
+def test_uninstall_refuses_an_install_json_that_names_another_directory_and_a_directory_without_a_venv(bundles, box):
+    one, two = box / "one", box / "two"
+    assert run_script(bundles["v1"], "install.sh", ["--prefix", str(one)], box / "home").returncode == 0
+    two.mkdir()
+    for name in ("INSTALL.json", "bin", "venv"):
+        subprocess.run(["cp", "-R", str(one / name), str(two / name)], check=True)
+    done = run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(two)], box / "home")
+    assert done.returncode == 5 and "not what install.sh writes" in done.stderr and (two / "venv").is_dir()      # copied from another installation: the recorded prefix is not this one
+    doc = json.loads((one / "INSTALL.json").read_text())
+    assert doc["prefix"] == str(one.resolve()) and doc["schema"] == "redevops-qa/install"
+    (one / "venv" / "pyvenv.cfg").unlink()
+    done = run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(one)], box / "home")
+    assert done.returncode == 5 and "no virtual environment" in done.stderr and (one / "venv").is_dir()
+
+
+def test_a_symbolic_link_is_refused_by_install_and_by_uninstall_and_nothing_is_left_or_removed(bundles, box):
+    real = box / "real"
+    assert run_script(bundles["v1"], "install.sh", ["--prefix", str(real)], box / "home").returncode == 0
+    link = box / "link"
+    link.symlink_to(real)
+    done = run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(link)], box / "home")
+    assert done.returncode == 5 and "symbolic link" in done.stderr and (real / "venv").is_dir() and link.is_symlink()
+    done = run_script(bundles["v1"], "install.sh", ["--prefix", str(link)], box / "home")
+    assert done.returncode == 5 and "symbolic link" in done.stderr
+    assert run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(real)], box / "home").returncode == 0 and not real.exists()
+
+
+# ------------------------------------------------------------------------------------------------ SHA256SUMS: no duplicate, empty or malformed line
+@pytest.mark.parametrize("label,edit", [
+    ("a duplicated line", lambda lines: lines + [lines[1]]),
+    ("an empty line", lambda lines: lines[:2] + [""] + lines[2:]),
+    ("an upper-case digest", lambda lines: [lines[0].replace(lines[0][:64], lines[0][:64].upper(), 1)] + lines[1:]),
+    ("a line without a path", lambda lines: lines + ["0" * 64 + "  "]),
+    ("a path outside the bundle", lambda lines: lines + ["0" * 64 + "  ../x"]),
+])
+def test_sha256sums_with_a_duplicate_empty_or_malformed_line_is_refused_before_anything_is_created(bundles, box, label, edit):
+    bundle = fresh_copy(bundles["v1"], box)
+    lines = (bundle / "SHA256SUMS").read_text().splitlines()
+    (bundle / "SHA256SUMS").write_text("\n".join(edit(lines)) + "\n")
+    done = run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home")
+    assert done.returncode == 4 and "does not accept" in done.stderr and not (box / "qa").exists(), (label, done.stderr)

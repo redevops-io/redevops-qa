@@ -35,7 +35,7 @@ def host_target(python: str = "") -> Dict[str, str]:
     return {"python": python or f"{major}.{minor}", "python_tag": f"cp{major}{minor}", "platform": sys.platform.replace("darwin", "macos") + "-" + machine}
 
 
-def make_wheel(directory: Path, version: str, *, name: str = "redevops_qa_testpkg", marker: str = "ok") -> Path:
+def make_wheel(directory: Path, version: str, *, name: str = "redevops_qa_testpkg", marker: str = "ok", licences: bool = True) -> Path:
     dist = f"{name}-{version}"
     files = {
         f"{name}/__init__.py": (f"import os, sys\n\ndef main():\n    print('testpkg {version} {marker}', os.environ.get('PLAYWRIGHT_BROWSERS_PATH', 'unset'))\n    return 0\n").encode(),
@@ -44,6 +44,9 @@ def make_wheel(directory: Path, version: str, *, name: str = "redevops_qa_testpk
         f"{dist}.dist-info/entry_points.txt": f"[console_scripts]\nredevops-qa = {name}:main\n".encode(),
         f"{dist}.dist-info/top_level.txt": f"{name}\n".encode(),
     }
+    if licences:
+        for lic in ("LICENSE.md", "LICENSE", "LICENSE-COMMONS-CLAUSE"):
+            files[f"{dist}.dist-info/licenses/{lic}"] = f"licence text {lic}\n".encode()
     files[f"{dist}.dist-info/RECORD"] = ("\n".join(bb.record_line(n, d) for n, d in sorted(files.items())) + f"\n{dist}.dist-info/RECORD,,\n").encode()
     out = directory / f"{dist}-py3-none-any.whl"
     bb.write_wheel(out, files, 1_700_000_000)

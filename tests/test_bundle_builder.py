@@ -270,3 +270,37 @@ def test_the_host_target_matches_what_the_install_script_computes(tmp_path):
     out = subprocess.run([sys.executable, "-I", "-c", script], capture_output=True, text=True, check=True).stdout.split()
     assert out == [host_target()["python"], host_target()["platform"]]
     assert "platform.machine().lower().replace(\"amd64\", \"x86_64\").replace(\"aarch64\", \"arm64\")" in (ROOT / "bundle" / "install.sh").read_text(encoding="utf-8")
+
+
+# ------------------------------------------------------------------------------------------------------------- the family licence travels in every first-party wheel
+def test_every_first_party_package_declares_the_licence_files_and_a_backend_that_reads_them():
+    import tomllib
+    for pkg in bb.FIRST_PARTY:
+        data = tomllib.loads((ROOT / "packages" / pkg / "pyproject.toml").read_text(encoding="utf-8"))
+        assert data["project"]["license"] == "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" and data["project"]["license-files"] == ["LICENSE*"], pkg
+        assert int(data["build-system"]["requires"][0].split(">=")[1]) >= 77, pkg                  # license-files and an SPDX string need setuptools 77 or newer
+
+
+def test_the_builder_puts_the_family_licence_texts_next_to_each_package_before_it_builds():
+    src = (ROOT / "tools" / "build_bundle.py").read_text(encoding="utf-8")
+    assert 'for name in LICENCE_FILES["redevops-qa"]:' in src and "shutil.copyfile(root / name, src / name)" in src
+    assert all((ROOT / n).is_file() for n in bb.LICENCE_FILES["redevops-qa"])
+
+
+def test_a_first_party_wheel_without_the_family_licence_texts_is_found(mini, tmp_path):
+    bad = tmp_path / mini.name
+    shutil.copytree(mini, bad)
+    wheel = next((bad / "wheelhouse").glob("*.whl"))
+    make_wheel(tmp_path, "1.0", licences=False)
+    wheel.write_bytes(next(tmp_path.glob("*.whl")).read_bytes())
+    # keep every other record consistent so that only the licence finding remains
+    import hashlib as h
+    digest = h.sha256(wheel.read_bytes()).hexdigest()
+    old = json.loads((bad / "BUNDLE.json").read_text())
+    old["wheels"][0]["sha256"] = digest
+    (bad / "BUNDLE.json").write_text(json.dumps(old, indent=2, sort_keys=True) + "\n")
+    lock = (bad / "requirements.lock").read_text()
+    (bad / "requirements.lock").write_text(re.sub(r"--hash=sha256:[0-9a-f]{64}", "--hash=sha256:" + digest, lock))
+    resum(bad)
+    found = [f for f in cb.check_bundle(bad, allow_test_target=True)]
+    assert [f.code for f in found] == ["WHEEL_LICENCE"] and "LICENSE-COMMONS-CLAUSE" in found[0].message

@@ -2,7 +2,9 @@
 """The wheel that carries the pinned upstream trees: built from the trees the jobs fetch (``.pinned``), installed by real pip, and verified against pins.toml in a clean
 interpreter exactly as ``redevops-qa doctor`` does. Needs the two pinned trees on disk (the CI job that runs this file fetches them; a missing tree is a failure)."""
 import hashlib
+import json
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -10,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from bundle_helpers import ROOT, bb
+from bundle_helpers import ROOT, bb, cb
 
 PINS_FILE = ROOT / "pins.toml"
 BRIDGE_SRC = ROOT / "packages" / "qa-bridge" / "src"
@@ -125,3 +127,38 @@ def test_building_the_wheel_twice_gives_the_same_bytes(built, tmp_path):
     pins, deps, _pinmod, trees, wheel = built
     again = bb.build_pinned_wheel(PINS_FILE, trees, deps, "0.1.0.dev0", 1_700_000_000, tmp_path)
     assert again.read_bytes() == wheel.read_bytes()
+
+
+def test_the_wheel_lists_every_pinned_file_with_its_sha256_and_doctor_covers_licence_and_pyproject(installed, tmp_path):
+    from qa_runner import doctor
+    listing = json.loads((installed / "pinned-files.json").read_text())["files"]
+    assert listing and all(k.startswith(".pinned/") for k in listing)
+    assert any(k.endswith("/LICENSE") for k in listing) and any(k.endswith("/pyproject.toml") for k in listing)
+    prefix = installed.parent.parent
+    assert doctor.check_pinned_files(str(prefix)).status == "OK"
+    copy = tmp_path / "prefix"
+    shutil.copytree(prefix, copy)
+    share = copy / "share" / "redevops-qa" / ".pinned" / set_name()
+    for rel in ("agent-harness/LICENSE", "runtime-contracts/pyproject.toml"):
+        target = share / rel
+        original = target.read_bytes()
+        target.write_bytes(original + b"\n# changed\n")
+        found = doctor.check_pinned_files(str(copy))
+        assert found.status == "FAIL" and rel in found.detail, rel
+        target.write_bytes(original)
+    assert doctor.check_pinned_files(str(copy)).status == "OK"
+
+
+def test_the_checker_finds_a_pinned_file_that_the_listing_does_not_describe(built, tmp_path):
+    import hashlib as h
+    import zipfile as z
+    pins, _d, _p, _t, wheel = built
+    pin_info = {"pins_toml_sha256": h.sha256(PINS_FILE.read_bytes()).hexdigest()}
+    assert cb._check_pinned_wheel(wheel, pin_info) == []
+    with z.ZipFile(wheel) as src:
+        entries = {i.filename: src.read(i.filename) for i in src.infolist()}
+    victim = next(n for n in entries if n.endswith("/LICENSE") and "/agent-harness/" in n)
+    entries[victim] += b"changed"
+    bad = tmp_path / wheel.name
+    bb.write_wheel(bad, entries, 1_700_000_000)
+    assert any("pinned-files.json does not list exactly" in f.message for f in cb._check_pinned_wheel(bad, pin_info))

@@ -24,6 +24,7 @@ from typing import Dict, List, NamedTuple, Sequence
 
 REQUIRED_FILES = ("BUNDLE.json", "README.md", "SHA256SUMS", "requirements.lock", "install.sh", "install-browser.sh", "uninstall.sh")
 PINNED_DIST = "redevops_qa_pinned_upstreams"
+FAMILY_LICENCE_FILES = ("LICENSE.md", "LICENSE", "LICENSE-COMMONS-CLAUSE")
 #: text a bundle must never carry (case-insensitive): a command that names the other project on the package index, and claims that are not made
 FORBIDDEN = ("pip install agent-harness", "pip install agent_harness", "tamper-proof", "tamper proof", "tamperproof", "reproducible build", "bit-for-bit", "soc 2", "soc2", "cis benchmark",
              "audited", "qa demo site")
@@ -147,6 +148,10 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
             out.append(Finding("LOCK_DIGEST", fn, "requirements.lock has no --hash that is this file's sha256"))
         try:
             with zipfile.ZipFile(path) as zf:
+                if w.get("kind") == "first-party":
+                    have = {n.rsplit("/", 1)[-1] for n in zf.namelist() if "/licenses/" in n and ".dist-info/" in n}
+                    if not set(FAMILY_LICENCE_FILES) <= have:
+                        out.append(Finding("WHEEL_LICENCE", fn, f"a first-party wheel carries the family licence texts in its dist-info/licenses ({', '.join(FAMILY_LICENCE_FILES)}); missing: {', '.join(sorted(set(FAMILY_LICENCE_FILES) - have))}"))
                 meta = [n for n in zf.namelist() if re.fullmatch(r"[^/]+\.dist-info/METADATA", n)]
                 if len(meta) != 1:
                     out.append(Finding("WHEEL_METADATA", fn, "exactly one dist-info/METADATA is expected"))
@@ -196,6 +201,15 @@ def _check_pinned_wheel(path: Path, pins: dict) -> List[Finding]:
                 return [Finding("PINNED_WHEEL", path.name, "exactly one share/redevops-qa/pins.toml is expected")]
             if hashlib.sha256(zf.read(pins_entries[0])).hexdigest() != pins.get("pins_toml_sha256"):
                 out.append(Finding("PINNED_WHEEL", path.name, "pins.toml inside is not the one the manifest records"))
+            base = pins_entries[0][: -len("pins.toml")]
+            try:
+                listing = json.loads(zf.read(base + "pinned-files.json"))["files"]
+            except (KeyError, ValueError):
+                out.append(Finding("PINNED_WHEEL", path.name, "pinned-files.json is missing or unreadable"))
+            else:
+                actual = {n[len(base):]: hashlib.sha256(zf.read(n)).hexdigest() for n in names if n.startswith(base + ".pinned/")}
+                if listing != actual:
+                    out.append(Finding("PINNED_WHEEL", path.name, "pinned-files.json does not list exactly the files of the pinned trees with their sha256"))
             for part in ("runtime-contracts", "agent-harness"):
                 if not any(f"/share/redevops-qa/.pinned/" in n and f"/{part}/" in n for n in names):
                     out.append(Finding("PINNED_WHEEL", path.name, f"no pinned tree of {part}"))

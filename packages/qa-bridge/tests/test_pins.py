@@ -379,3 +379,19 @@ def test_without_an_installed_file_the_search_walks_up_as_before_and_the_environ
     other = tmp_path / "other.toml"
     monkeypatch.setenv(pins_mod.PINS_FILE_ENV, str(other))
     assert pins_mod.find_pins_file(checkout_module) == other
+
+
+def test_an_installed_bridge_whose_pins_file_is_missing_fails_closed_and_does_not_look_further_up(tmp_path, monkeypatch):
+    import sys
+    checkout, _prefix, _, _ = _layout(tmp_path)
+    venv = checkout / ".venv"                               # inside a checkout that holds a pins.toml of its own: the installed bridge must not use it
+    module = venv / "lib" / "python3.12" / "site-packages" / "redevops_qa_bridge" / "pins.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("")
+    (venv / "pins.toml").write_text("a stray file in the prefix directory")
+    monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
+    monkeypatch.setattr(sys, "prefix", str(venv))
+    with pytest.raises(PinsInvalid, match="share/redevops-qa/pins.toml is missing"):
+        pins_mod.find_pins_file(module)
+    monkeypatch.setenv(pins_mod.PINS_FILE_ENV, str(tmp_path / "chosen.toml"))
+    assert pins_mod.find_pins_file(module) == tmp_path / "chosen.toml"                  # an explicit choice is still an explicit choice

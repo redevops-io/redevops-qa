@@ -36,7 +36,7 @@ Prerequisites:
 
 * Python 3.12 available as `python3.12` (the packages require 3.11 or newer; 3.12 is the version the steps were run with).
 * git, and network access to https://github.com/redevops-io/redevops-qa (a public repository).
-* Network access to a Python package index for the pinned packages and for the build backend (setuptools 68 or newer, not pinned here).
+* Network access to a Python package index for the pinned packages and for the build backend (setuptools 77 or newer, not pinned here).
 * All commands are run from one working directory, the one that contains the checkout, using a POSIX shell.
 
 Hosts:
@@ -125,7 +125,7 @@ Prerequisites:
 
 * Python 3.12 available as `python3.12` (the packages require 3.11 or newer; 3.12 is the version the steps were run with).
 * git, and network access to https://github.com/redevops-io/redevops-qa (a public repository).
-* Network access to a Python package index for the pinned packages and for the build backend (setuptools 68 or newer, not pinned here).
+* Network access to a Python package index for the pinned packages and for the build backend (setuptools 77 or newer, not pinned here).
 * All commands are run from one working directory, the one that contains the checkout, using a POSIX shell.
 * Google Chrome and a matching ChromeDriver installed on the host, with their absolute paths given as chrome_binary and chromedriver_path; the steps never download a browser or a driver.
 
@@ -216,7 +216,7 @@ Prerequisites:
 
 * Python 3.12 available as `python3.12` (the packages require 3.11 or newer; 3.12 is the version the steps were run with).
 * git, and network access to https://github.com/redevops-io/redevops-qa (a public repository).
-* Network access to a Python package index for the pinned packages and for the build backend (setuptools 68 or newer, not pinned here).
+* Network access to a Python package index for the pinned packages and for the build backend (setuptools 77 or newer, not pinned here).
 * All commands are run from one working directory, the one that contains the checkout, using a POSIX shell.
 * For the manual device step only: an Appium 3.9.0 server with the UiAutomator2 8.7.3 driver listening on 127.0.0.1:4723, an Android SDK with platform tools, and an emulator or device attached, all provided by you. None of these is bundled, downloaded or installed by these steps, and a running server is not a UI session.
 
