@@ -3,7 +3,7 @@
 
 What a clean result means: every listed file exists with the listed size and sha256, nothing else is present, the manifest and the report
 are canonical, valid and consistent with each other, and the accounting adds up. That is INTERNAL CONSISTENCY. Because the hashes are
-unkeyed, it does not show that nobody rewrote the whole bundle; only the external anchor check can, and this module reports that check's
+unkeyed, it does not show that nobody rewrote the whole bundle; only the external anchor check (or, outside this module, a signature of the manifest digest checked by the runner) can, and this module reports the anchor check's
 state (``AnchorResult``) separately and never folds it into ``ok``.
 """
 from __future__ import annotations

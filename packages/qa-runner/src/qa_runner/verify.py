@@ -29,6 +29,7 @@ from qa_evidence.report import engine_verifier_disagreements
 from qa_evidence.sources import SourceError
 from qa_evidence.verify import verify_bundle, verify_source
 
+from . import anchor_sig as asig
 from . import constants as K
 from .bundle import extra_limitations, finalize_results
 from .corroborate import BundleBlobs, plain_json, lane_origin, record_contradicts_itself
@@ -62,7 +63,9 @@ class Verification:
     recomputed: int = 0
     agreeing: int = 0
     run_exit_code: int = K.EXIT_INCONCLUSIVE
-    unavailable: bool = False                        # the verifier itself could not run here (a pinned dependency, git): nothing was verified, which is not a verdict about the bundle
+    unavailable: bool = False                        # the verifier itself could not run here (a pinned dependency, git, the OpenSSH client for a supplied signature): nothing is accepted, which is not a verdict about the bundle
+    signature: asig.SignatureResult = field(default_factory=lambda: asig.SignatureResult(asig.ABSENT))
+    signature_statement: Optional[Dict[str, str]] = None           # run id, manifest digest and plan digest the signature was checked against (rebuilt from the bundle)
 
     def add(self, code: str, where: str, message: str) -> None:
         self.findings.append(Finding(code, where, message))
@@ -83,6 +86,8 @@ class Verification:
             return "not-verified"
         if not self.accepted:
             return "rejected"
+        if self.signature.state == asig.VERIFIED:
+            return "signed-anchor-verified"          # only a valid signature by the supplied key makes this; a matching --anchor value alone never does
         return "matches-supplied-anchor" if self.qe.anchor.matches else "internal-consistency-only"
 
     def to_json(self) -> Dict[str, Any]:
@@ -91,8 +96,20 @@ class Verification:
                 "exit_code": self.exit_code, "run_outcome": self.outcome if self.accepted else None,          # a rejected bundle's own claim is not shown as a result
                 "engine_verifier_disagreements": self.disagreements if self.accepted else [],
                 "recomputed_assertions": self.recomputed, "agreeing_assertions": self.agreeing,
-                "anchor": _anchor_json(q.anchor) if q is not None else None, "plan": q.plan.to_json() if q is not None and q.plan is not None else None,
+                "anchor": _anchor_json(q.anchor) if q is not None else None, "anchor_signature": self.signature_json(), "plan": q.plan.to_json() if q is not None and q.plan is not None else None,
                 "findings": [f.to_json() for f in self.findings], "notes": list(self.notes)}
+
+
+    def signature_json(self) -> Dict[str, Any]:
+        """The state of the optional signature check. ``verified`` is reported only for an accepted bundle: a rejected one is not described as signed."""
+        state = self.signature.state if (self.accepted or self.signature.state != asig.VERIFIED) else asig.INVALID
+        return {"state": state, "namespace": asig.NAMESPACE, "key_fingerprint": self.signature.fingerprint if state == asig.VERIFIED else None,
+                "statement": self.signature_statement if state == asig.VERIFIED else None,
+                "notice": self.signature_notice() if state == asig.VERIFIED else (self.signature.message or asig.ABSENT_NOTICE)}
+
+    def signature_notice(self) -> str:
+        s = self.signature_statement or {}
+        return asig.TRUST_STATEMENT.format(run_id=safe_text(s.get("run_id", "?"), 64), plan_digest=safe_text(s.get("plan_digest", "?"), 80), fingerprint=safe_text(self.signature.fingerprint or "?", 60))
 
 
 def _anchor_json(anchor: Any) -> Dict[str, Any]:
@@ -473,16 +490,18 @@ def _check_file_set(frozen: FrozenPlan, files: Mapping[str, bytes], v: Verificat
 
 
 def verify_location(location: str, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, require_anchor: bool = False,
-                    require_plan_digest: bool = False, up: Optional[Upstreams] = None, snapshot_seconds: Optional[float] = None) -> Verification:
+                    require_plan_digest: bool = False, up: Optional[Upstreams] = None, snapshot_seconds: Optional[float] = None,
+                    anchor_sig: Optional[str] = None, anchor_pub: Optional[str] = None, require_signed_anchor: bool = False) -> Verification:
     """Verify the bundle at ``location``: ONE snapshot is taken by a child process that is killed at the deadline (``isolated``), and everything below is computed from that snapshot, never from the
     files again (a writer that changes them while the verification runs cannot make two checks see two different bundles). Raises ``isolated.IsolatedReadError`` when no snapshot can be taken."""
     from . import isolated
     return verify_snapshot(isolated.snapshot_bundle(location, deadline_s=snapshot_seconds), anchor=anchor, plan_digest=plan_digest, require_anchor=require_anchor,
-                           require_plan_digest=require_plan_digest, up=up)
+                           require_plan_digest=require_plan_digest, up=up, anchor_sig=anchor_sig, anchor_pub=anchor_pub, require_signed_anchor=require_signed_anchor)
 
 
 def verify_snapshot(snapshot: Any, *, anchor: Optional[str] = None, plan_digest: Optional[str] = None, require_anchor: bool = False,
-                    require_plan_digest: bool = False, up: Optional[Upstreams] = None) -> Verification:
+                    require_plan_digest: bool = False, up: Optional[Upstreams] = None, anchor_sig: Optional[str] = None, anchor_pub: Optional[str] = None,
+                    require_signed_anchor: bool = False) -> Verification:
     v = Verification()
     qe = verify_source(snapshot, anchor=anchor, plan_digest=plan_digest)[0]
     v.qe = qe
@@ -518,18 +537,60 @@ def verify_snapshot(snapshot: Any, *, anchor: Optional[str] = None, plan_digest:
             v.add("VERIFY_INCOMPLETE", "", f"the bundle could not be read in full ({type(exc).__name__}); nothing is accepted")
         except Exception as exc:            # a bundle crafted to crash the verifier is rejected, never an 'internal error' that a caller could read as a fault of its own
             v.add("VERIFY_INCOMPLETE", "", f"the verification could not be completed ({type(exc).__name__}); nothing is accepted")
+    _check_signed_anchor(snapshot, qe, v, anchor_sig, anchor_pub, require_signed_anchor)
     return v
+
+
+def _check_signed_anchor(snapshot: Any, qe: Any, v: Verification, sig_path: Optional[str], pub_path: Optional[str], required: bool) -> None:
+    """The optional signed anchor. The statement is REBUILT here from the bundle this verification just read (the manifest digest it recomputed, the run id and plan digest of its report); nothing is
+    taken from a statement file, from the signature's own claims or from a key that travels with the bundle. A signature file that was named and cannot be used is ``invalid``, never ``absent``: removing
+    or damaging it must not turn a signed run into an unsigned one that passes."""
+    if sig_path is None:
+        if required:
+            v.add("ANCHOR_SIGNATURE_REQUIRED", "anchor_signature", "a signature of the manifest digest was required and none was supplied: " + asig.ABSENT_NOTICE)
+        return
+    statement = None
+    try:
+        if qe is None or not qe.complete or qe.manifest_digest is None:
+            raise asig.AnchorSigError(asig.INVALID, "the bundle's manifest and report were not both read and validated, so no statement can be rebuilt from it")
+        report = loads_strict(snapshot.files["report.json"])
+        fields = {"run_id": report["run_id"], "manifest_digest": qe.manifest_digest, "plan_digest": report["plan_digest"]}
+        statement = asig.statement_bytes(**fields)
+    except asig.AnchorSigError as exc:
+        v.signature = asig.SignatureResult(exc.state, None, exc.message)
+    except (BuildError, SourceError, CanonError, KeyError, TypeError):
+        v.signature = asig.SignatureResult(asig.INVALID, None, "the bundle's report cannot be read, so no statement can be rebuilt from it")
+    if statement is not None:
+        if pub_path is None:
+            v.signature = asig.SignatureResult(asig.INVALID, None, "no public key was supplied to check the signature against")
+        else:
+            v.signature = asig.verify_signature(statement, sig_path, pub_path)
+            if v.signature.state == asig.VERIFIED:
+                v.signature_statement = fields
+    if v.signature.state == asig.UNAVAILABLE:
+        if not v.findings:
+            v.unavailable = True          # nothing else is wrong with the bundle: the verifier could not answer, exit 7. A bundle that is already rejected for another finding stays REJECTED (exit 5, the stronger statement)
+        v.add("ANCHOR_SIGNATURE_UNAVAILABLE", "anchor_signature", safe_text(v.signature.message, 300))
+    elif v.signature.state != asig.VERIFIED:
+        v.add("ANCHOR_SIGNATURE_INVALID", "anchor_signature", safe_text(v.signature.message, 300))
 
 
 def render_text(location: str, v: Verification) -> str:
     t = lambda x, n=300: safe_text(x, n)         # noqa: E731
-    head = "ACCEPTED (internally consistent)" if v.accepted else ("NOT VERIFIED: the verifier cannot run here" if v.unavailable else f"REJECTED, {len(v.findings)} finding(s)")
+    signed = v.accepted and v.signature.state == asig.VERIFIED
+    head = ("ACCEPTED (internally consistent; the manifest digest carries a valid signature, see the signed anchor line)" if signed else "ACCEPTED (internally consistent)") if v.accepted else ("NOT VERIFIED: the verifier cannot run here" if v.unavailable else f"REJECTED, {len(v.findings)} finding(s)")
     lines = [f"verify {t(location)}: " + head]
     if v.qe is not None:
         lines.append(f"  recomputation: {v.recomputed} assertion(s) recomputed from the bundle alone, {v.agreeing} agree with the report")
-        lines.append(f"  external anchor: {v.qe.anchor.notice}")
+        if signed and v.qe.anchor.state == "absent":
+            lines.append("  external anchor: no digest was supplied with --anchor; the signed anchor line below is the only thing here that covers the manifest digest")
+        else:
+            lines.append(f"  external anchor: {v.qe.anchor.notice}")
         if v.qe.plan is not None:
-            lines.append(f"  frozen assertion set: {v.qe.plan.notice}")
+            if signed and v.qe.plan.state == "absent":
+                lines.append("  frozen assertion set: no plan digest was supplied with --plan-digest; the plan digest of this bundle's report is part of the signed statement (the signed anchor line below)")
+            else:
+                lines.append(f"  frozen assertion set: {v.qe.plan.notice}")
     if v.accepted and v.outcome is not None:
         lines.append(f"  recorded run outcome: {t(v.outcome['outcome'])} ({t(v.outcome['reason_code'])})")
     for d in (v.disagreements if v.accepted else []):
@@ -538,7 +599,15 @@ def render_text(location: str, v: Verification) -> str:
         lines.append(f"  note: {t(n)}")
     for f in v.findings:
         lines.append(f"  {t(f.code)} {t(f.where, 120)}: {t(f.message)}")
-    if v.accepted and not v.qe.anchor.matches:
+    if v.signature.state != asig.ABSENT:
+        if v.accepted and v.signature.state == asig.VERIFIED:
+            lines.append("  signed anchor: VERIFIED. " + t(v.signature_notice(), 700))
+        else:
+            why = "the bundle is rejected" if v.signature.state == asig.VERIFIED else v.signature.state
+            lines.append(f"  signed anchor: NOT verified ({t(why, 40)}); the manifest digest is not covered by a valid signature")
+    if v.accepted and v.signature.state == asig.VERIFIED:
+        lines.append("  assurance: signed anchor verified against the supplied public key. Without a signature or a manifest digest published elsewhere (--anchor), a bundle rewritten from start to finish would verify as internal consistency only.")
+    elif v.accepted and not v.qe.anchor.matches:
         lines.append("  assurance: internal consistency only. Nothing here shows the bundle was not rewritten from start to finish; only a manifest digest published elsewhere (--anchor) does.")
     lines.append("  This does not show that the application under test is correct.")
     return "\n".join(lines) + "\n"

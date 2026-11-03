@@ -532,6 +532,69 @@ def test_a_job_with_the_experimental_channel_a_condition_or_no_required_check_wa
         job["continue-on-error"] = True
     assert "no condition" in joined(job_problems(workflow_mutation=tolerant))
 
+    def run_step_conditional(job, wf):
+        next(s for s in job["steps"] if "tools/run_install_profile.py" in str(s.get("run", "")))["if"] = "always()"
+    assert "no condition" in joined(job_problems(workflow_mutation=run_step_conditional))
+
+    def upload_on_success_only(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = "success()"
+    assert "no condition" in joined(job_problems(workflow_mutation=upload_on_success_only))
+
+    def tolerant_upload(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["continue-on-error"] = True
+    assert "no condition" in joined(job_problems(workflow_mutation=tolerant_upload))
+
+
+@pytest.mark.parametrize("condition", ["always() && false", "failure()", "${{ always() }}", "always() || true", "success()", "ALWAYS()", "", True, None])
+def test_only_the_exact_text_always_qualifies_an_evidence_upload(condition):
+    step = {"uses": "actions/upload-artifact@v4", "with": {"name": "x", "path": "y"}}
+    if condition is not None:
+        step["if"] = condition
+    assert chk.keeps_evidence(step) is False
+
+
+@pytest.mark.parametrize("step", [
+    {"uses": "actions/checkout@v4", "if": "always()"},
+    {"uses": "evil/actions/upload-artifact@v4", "if": "always()"},
+    {"run": "echo hi", "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "run": "echo hi", "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "shell": "bash", "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "continue-on-error": True, "if": "always()"},
+    {"uses": "actions/upload-artifact@v4", "continue-on-error": False, "if": "always()"},
+])
+def test_a_step_that_is_not_a_plain_upload_never_qualifies_even_with_always(step):
+    assert chk.keeps_evidence(step) is False
+
+
+def test_a_plain_upload_with_always_qualifies():
+    assert chk.keeps_evidence({"uses": "actions/upload-artifact@v4", "if": "always()", "with": {"name": "x"}}) is True
+
+
+def test_the_job_check_refuses_the_look_alike_conditions_on_an_evidence_upload():
+    for condition in ("always() && false", "failure()", "${{ always() }}"):
+        def look_alike(job, wf, condition=condition):
+            next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = condition
+        assert "no condition" in joined(job_problems(workflow_mutation=look_alike)), condition
+
+    def non_upload(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-python"))["if"] = "always()"
+    assert "no condition" in joined(job_problems(workflow_mutation=non_upload))
+
+
+def test_the_selenium_profile_evidence_upload_still_fails_when_its_path_is_missing_and_expires():
+    uploads = [s for s in WORKFLOW["jobs"]["profile-local-python-selenium"]["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact")]
+    assert len(uploads) == 1 and uploads[0]["with"]["if-no-files-found"] == "error" and uploads[0]["with"]["retention-days"] == 14
+
+
+def test_the_evidence_upload_of_a_profile_job_may_run_always_so_that_a_failed_run_keeps_its_evidence():
+    def upload_always(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = "always()"
+    assert "no condition" not in joined(job_problems(workflow_mutation=upload_always))
+    sel = WORKFLOW["jobs"]["profile-local-python-selenium"]["steps"]
+    uploads = [s for s in sel if str(s.get("uses", "")).startswith("actions/upload-artifact")]
+    assert [u["if"] for u in uploads] == ["always()"] and uploads[0]["with"]["name"] == "evidence-local-python-selenium"
+    assert not [s for s in sel if "if" in s and s not in uploads]            # every other step, the profile's own included, is unconditional
+
     def unmarked(job, wf):
         job["name"] = "install profile local-python-robot (clean venv)"
     assert "NOT a required check until proven" in joined(job_problems(workflow_mutation=unmarked))
@@ -564,7 +627,7 @@ def test_the_workflow_has_one_job_per_offered_profile_and_never_makes_them_a_dep
             assert job["needs"] == "bundle" and "--phases source,install,smoke,check" in text and "--phases uninstall" in text and "required check" in job["name"]
             assert not {"if", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "if" in s or "continue-on-error" in s]
             continue
-        assert not {"if", "needs", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "if" in s or "continue-on-error" in s]
+        assert not {"if", "needs", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "continue-on-error" in s or ("if" in s and not chk.keeps_evidence(s))]
         assert "required check" in job["name"] and "--phases install,smoke,check" in text and "--phases uninstall" in text
         assert job["runs-on"] == "ubuntu-24.04"
     other = WORKFLOW["jobs"]["install-profiles"]

@@ -286,10 +286,10 @@ def test_install_browser_refuses_a_directory_that_is_not_an_installation(bundles
     assert run_script(bundles["v1"], "install-browser.sh", [], box / "home").returncode == 2
 
 
-def test_install_browser_downloads_into_the_prefix_through_the_pinned_playwright(bundles):
+def test_install_browser_puts_the_verified_archives_into_the_prefix_and_runs_playwright_only_for_the_system_libraries(bundles):
     text = (bundles["v1"] / "install-browser.sh").read_text(encoding="utf-8")
-    assert 'PLAYWRIGHT_BROWSERS_PATH="$prefix/browsers"' in text and '-m playwright install $deps chromium' in text
-    assert "not part of the bundle, not hashed by it" in text
+    assert 'browsers="$prefix/browsers"' in text and 'export PLAYWRIGHT_BROWSERS_PATH="$browsers"' in text and "-m playwright install-deps chromium" in text
+    assert "-m playwright install " not in text and "not hashed" not in text
 
 
 def test_the_scripts_are_executable_in_the_directory_and_in_the_archive(bundles, tmp_path):

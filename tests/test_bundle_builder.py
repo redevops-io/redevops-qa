@@ -88,7 +88,7 @@ def test_the_requirements_lock_pins_every_wheel_by_name_version_and_hash():
 
 def test_the_readme_template_renders_with_every_placeholder_and_refuses_an_unknown_one():
     template = (ROOT / "bundle" / "README.md").read_text(encoding="utf-8")
-    assert set(re.findall(r"\{\{([a-z_]+)\}\}", template)) <= {"bundle_name", "bundle_version", "python", "platform", "python_tag", "wheel_count", "commit"}
+    assert set(re.findall(r"\{\{([a-z_]+)\}\}", template)) <= {"bundle_name", "bundle_version", "python", "platform", "python_tag", "wheel_count", "commit", "playwright_version", "chromium_revision", "chromium_version", "browser_files"}
     with pytest.raises(bb.BuildError, match="no value"):
         bb.render_readme("{{nothing}}", {})
 
@@ -222,7 +222,7 @@ def test_calling_the_bundle_open_source_is_found_but_not_open_source_is_fine(cop
     assert "FORBIDDEN_TEXT" in codes(copy)
 
 
-@pytest.mark.parametrize("phrase", ["AGPL-3.0-or-later with the Commons Clause", "plain AGPL-3.0-or-later", "not hashed", "not open source"])
+@pytest.mark.parametrize("phrase", ["AGPL-3.0-or-later with the Commons Clause", "plain AGPL-3.0-or-later", "browser.lock.json", "Not covered", "not open source"])
 def test_the_readme_must_state_the_licences_and_the_browser_limit(copy, phrase):
     readme = copy / "README.md"
     readme.write_text(readme.read_text(encoding="utf-8").replace(phrase, "REDACTED"), encoding="utf-8")
@@ -230,10 +230,13 @@ def test_the_readme_must_state_the_licences_and_the_browser_limit(copy, phrase):
     assert "README_MISSING_TEXT" in codes(copy)
 
 
-def test_a_manifest_that_claims_a_hashed_browser_is_found(copy):
+@pytest.mark.parametrize("edit", [lambda b: b.update({"shipped_in_bundle": True}), lambda b: b.update({"pinned_by_this_bundle": False}), lambda b: b.update({"fetched_at_install": False}),
+                                 lambda b: b.update({"lock_sha256": "0" * 64}), lambda b: b.update({"revision": "1"}), lambda b: b.update({"archives": []}), lambda b: b.update({"tree_sha256": "0" * 64})],
+                         ids=["shipped", "not pinned", "not fetched", "lock digest", "revision", "archives", "tree digest"])
+def test_a_manifest_whose_browser_record_is_not_what_the_lock_says_is_found(copy, edit):
     path = copy / "BUNDLE.json"
     doc = json.loads(path.read_text(encoding="utf-8"))
-    doc["browser"]["hashed_by_this_bundle"] = True
+    edit(doc["browser"])
     path.write_text(json.dumps(doc), encoding="utf-8")
     resum(copy)
     assert "BROWSER_RECORD" in codes(copy)
@@ -246,7 +249,7 @@ def test_the_manifest_states_the_mixed_licence_and_the_scope(mini):
     assert "AGPL-3.0-or-later with the Commons Clause" in lic["runtime_contracts"] and "not open source" in lic["runtime_contracts"]
     assert lic["agent_harness"].startswith("AGPL-3.0-or-later (plain") and "Commons Clause" in lic["agent_harness"] and "without" in lic["agent_harness"]
     assert "No other Python minor or platform is claimed" in doc["scope"]
-    assert doc["browser"]["fetched_at_install"] is True and doc["browser"]["hashed_by_this_bundle"] is False
+    assert doc["browser"]["fetched_at_install"] is True and doc["browser"]["shipped_in_bundle"] is False and doc["browser"]["pinned_by_this_bundle"] is True
     assert "not a replaced bundle" in doc["integrity"]
 
 

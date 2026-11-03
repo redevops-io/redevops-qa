@@ -65,9 +65,13 @@ interpreter, the guard script or a `TMPDIR` under a refused path (the paths that
 * A verified run means that frozen assertions were evaluated over recorded observations; it does not show that an application is correct. The target here is a fixture app written to have two known defects.
 * The hash chain inside an evidence bundle is unkeyed. Someone who can rewrite a whole bundle can rewrite its digests too. The anchor above is a value printed in a CI log and kept as an artifact of a finished run; a match
   shows that a bundle is the one the value was taken from, and nothing in the tool authenticates where the value came from.
+* The demo is not signed: no key is held in CI. `redevops-qa verify` can also check an optional detached OpenSSH signature of the manifest digest against ONE Ed25519 public key you supply (`--anchor-sig`, `--anchor-pub`;
+  `redevops-qa anchor statement` and `anchor sign` produce it with a key you hold; see `packages/qa-runner/README.md`). That shows the manifest digest was signed by the holder of the matching private key and that a bundle
+  rewritten after signing does not verify; it does not show who holds that key, that the key was not exposed, when the signature was made, or that the run was executed on an uncompromised host. The `demo-verify` job
+  only checks that `--require-signed-anchor` refuses the unsigned demo bundle (exit 5, `ANCHOR_SIGNATURE_REQUIRED`), which authenticates nothing.
 * `verify` is a recomputation by the same code the run used, in a separate process; it is not an independent implementation of the verdicts. "Independent" in the output means independent of the engine's own status.
 * Two assertions of the browser lane (`A-SAVED`, `A-URL`) are about what the browser shows and have no independent probe; the output says so.
-* One platform, one Python minor, two engines: Linux x86_64, CPython 3.12, Playwright Chromium and Robot Framework. Chromium is downloaded by the bundle's browser step and is not hashed by the bundle. The Robot lane's
+* One platform, one Python minor, two engines: Linux x86_64, CPython 3.12, Playwright Chromium and Robot Framework. Chromium is downloaded by the bundle's browser step and checked against the pin `browser.lock.json` (archives by sha256 before unpacking, the unpacked tree file by file; the operating system libraries and the download host are not covered). The Robot lane's
   traffic does not pass the egress gateway.
 * The bundle is source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source; the harness it carries is plain AGPL-3.0-or-later, and the third-party wheels keep their own licences
   (see the bundle's README).

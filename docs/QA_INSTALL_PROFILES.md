@@ -320,7 +320,7 @@ Prerequisites:
 * Python 3.12 available as `python3.12` with the `venv` module (Debian and Ubuntu: the `python3.12-venv` package). The bundle is built for CPython 3.12 and install.sh refuses any other minor.
 * The bundle archive and its `.tar.sha256` file in one directory (`bundle_dir`): built from a checkout of https://github.com/redevops-io/redevops-qa with `python tools/build_bundle.py build --out DIR`, or taken from a workflow run. No bundle is published. Compare the sha256 of the archive with a value you obtained from somewhere its producer does not control.
 * bash, tar, and root or sudo for the browser step's `--with-deps` (it installs the operating system libraries Chromium needs with apt).
-* Network access to the Playwright download host for Chromium (the browser is not in the bundle and is not hashed by it). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.
+* Network access to the Playwright download host for Chromium (the browser is not in the bundle; its archives are checked against sha256 values pinned in the bundle before they are unpacked). Nothing else is downloaded by these steps: the wheels are installed from the bundle with `--no-index --require-hashes`.
 * All commands are run from one working directory, using a POSIX shell.
 
 Hosts:
@@ -351,7 +351,7 @@ tar xf '{bundle_dir}/redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64.tar'
 ```text
 # Install into a new directory: checks the Python minor, the platform and every file of the bundle, then pip install --no-index --require-hashes from the wheelhouse
 redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install.sh --prefix '{install_dir}' --python python3.12
-# The separate browser step: downloads Chromium (not part of the bundle, not hashed by it) and the operating system libraries it needs
+# The separate browser step: downloads Chromium (not part of the bundle; the archives and the unpacked tree are checked against the bundle's pin) and the operating system libraries it needs (not covered by the pin)
 redevops-qa-bundle-0.1.0.dev0-cp312-linux-x86_64/install-browser.sh --prefix '{install_dir}' --with-deps
 ```
 
@@ -386,7 +386,7 @@ Limitations:
 
 * CPython 3.12 on Linux x86_64 only. Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.
 * No bundle is published and no release exists: the archive comes from a build of the repository or from a workflow run, and its digest is only as trustworthy as the place you obtained it from.
-* Chromium is downloaded when the browser step runs; the bundle records the build the pinned Playwright expects and does not hash or ship the browser.
+* Chromium is downloaded when the browser step runs and is not shipped in the bundle; the bundle pins the sha256 of the archives and the mode, size and sha256 of every file of the unpacked tree, the step refuses an archive that does not match, and doctor checks the installed tree. Not covered: the operating system libraries of --with-deps, and the availability of the download host.
 * The runner in this release runs plans against the bundled fixture app only; the Robot lane's egress is not enforced (a Robot library opens its own sockets).
-* `verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite shows that a bundle is the one it was taken from. A verified run does not show that the application under test is correct.
+* `verify` recomputes the verdicts from the evidence bundle in a separate process with the same code the run used; the hash chain inside a bundle is unkeyed, so only a manifest digest (the anchor) obtained from somewhere the producer cannot rewrite, or a signature of it by a key the producer does not hold (optional), shows that a bundle is the one it was taken from or signed. A verified run does not show that the application under test is correct.
 * The agent-harness and runtime-contracts trees are installed from the bundle at the commits pins.toml names; the name `agent-harness` on the public package index belongs to an unrelated project and is never installed.

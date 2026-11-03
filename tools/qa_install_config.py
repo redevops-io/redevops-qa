@@ -212,7 +212,7 @@ def generate(selection: Any, capabilities: Dict[str, Any], profiles: Dict[str, A
                                               "device worker the operator provides")
     if profile.get("verifier"):
         _warn(warnings, "VERIFIER_INCLUDED", "this profile installs and runs `redevops-qa verify`, which recomputes the verdicts from a run's evidence bundle in a separate process; it is not an independent "
-                                             "implementation of the harness, the chain inside a bundle is unkeyed (only an anchor obtained elsewhere helps), and a verified run does not show that the application is correct")
+                                             "implementation of the harness, the chain inside a bundle is unkeyed (only an anchor obtained elsewhere, or an optional signature by a key the producer does not hold, helps), and a verified run does not show that the application is correct")
     else:
         _warn(warnings, "NATIVE_RESULT_IS_NOT_A_VERDICT", "the engine's own pass or fail is not an independent verdict; no verifier is installed")
     # the configuration
