@@ -37,7 +37,7 @@ def hostile_lane(up, tmp_path, page):
         home = tmp_path / "home"
         home.mkdir()
         # a child process, as the orchestrator starts it: a lane whose navigation times out leaves its browser worker behind in a process that goes on to start another browser
-        done = subprocess.run([sys.executable, "-s", "-m", "qa_runner.lane_browser", str(inp)], env=child_env(str(home)), cwd=str(tmp_path), capture_output=True, text=True, timeout=180)
+        done = subprocess.run([sys.executable, "-s", "-X", "faulthandler", "-m", "qa_runner.lane_browser", str(inp)], env=child_env(str(home)), cwd=str(tmp_path), capture_output=True, text=True, timeout=180)
         assert done.returncode in (0, 3), done.stderr[-800:]
         doc = json.loads((out / "lane-result.json").read_text())
         return doc, world.snapshot(), world.a_port, world.b_port, out
