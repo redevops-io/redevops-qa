@@ -286,3 +286,18 @@ def test_a_bundle_installation_without_playwright_browsers_path_is_a_failure_tha
     box.fake.install(box.browsers)
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(box.browsers))
     assert doctor.check_browser_pin(registry=box.registry, playwright_version="1.0.0").status == "OK"
+
+
+# ------------------------------------------------------------------------------------------------------------------------ a skipped check is said so
+def test_run_and_demo_say_once_that_the_browser_pin_was_not_checked_when_it_was_not(monkeypatch, tmp_path):
+    """A source checkout, or an installation that lost both its lock and INSTALL.json: doctor warns, and run and demo say so on stderr before the browser lane starts (one line)."""
+    monkeypatch.setattr(doctor, "_share", lambda prefix=None: tmp_path / "no-share")          # the real check, with no pin to find
+    for argv in (("run", str(plan_file(tmp_path, {K.ENGINE_PLAYWRIGHT})), "--out", str(tmp_path / "e1")), ("run", str(plan_file(tmp_path, {K.ENGINE_PLAYWRIGHT, K.ENGINE_ROBOT})), "--out", str(tmp_path / "e2")),
+                 ("demo", "--out", str(tmp_path / "e3"))):
+        reached, code, _out, err = reaches_run_plan(monkeypatch, tmp_path, *argv)
+        assert reached == [1] and err.count("browser pin: not checked (not a bundle install)") == 1, argv
+    reached, code, out, err = reaches_run_plan(monkeypatch, tmp_path, "run", str(plan_file(tmp_path, {K.ENGINE_ROBOT})), "--out", str(tmp_path / "e4"))
+    assert reached == [1] and "browser pin" not in err + out                                      # a Robot-only plan does not need the browser: no check, no line
+    monkeypatch.setattr(doctor, "check_browser_pin", lambda: doctor.Check("browser build", "OK", "matches"))
+    reached, code, out, err = reaches_run_plan(monkeypatch, tmp_path, "run", str(plan_file(tmp_path, {K.ENGINE_PLAYWRIGHT})), "--out", str(tmp_path / "e5"))
+    assert reached == [1] and "browser pin" not in err + out                                      # a checked browser says nothing extra

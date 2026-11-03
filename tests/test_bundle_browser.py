@@ -297,18 +297,16 @@ def test_a_symbolic_link_as_the_browsers_directory_is_refused(w, fake, tmp_path)
 # ------------------------------------------------------------------------------------------------------------------------------ the checker and the builder
 # ------------------------------------------------------------------------------------------------------------------------------ signals sent to the script alone
 def children_of(pid):
-    out = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split()
+    """The download process of the script: its child whose command line is the `browser_pin ... stage` step (not an early short-lived child such as `cmp` or `pin dirs`)."""
+    out = subprocess.run(["pgrep", "-P", str(pid), "-f", "qa_runner.browser_pin stage"], capture_output=True, text=True).stdout.split()
     return [int(x) for x in out]
 
 
 def alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    # a zombie is not running
+    """Still that process: a pid that was recycled for another program is not the download process."""
+    command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout
     state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
-    return bool(state) and not state.startswith("Z")
+    return "qa_runner.browser_pin stage" in command and bool(state) and not state.startswith("Z")
 
 
 @pytest.mark.parametrize("sig_name,code", [("SIGTERM", 143), ("SIGINT", 130), ("SIGHUP", 129)])
@@ -382,6 +380,29 @@ def test_the_next_run_removes_the_staging_directory_of_a_run_that_was_killed_and
         running.kill()
         running.wait()
     assert bh.pin_module().verify_tree(browsers, fake.lock) == []
+
+
+def test_a_stale_staging_directory_that_cannot_be_removed_is_a_warning_and_the_run_goes_on(w, fake, tmp_path):
+    """A directory of a dead pid that this user may not remove (an earlier run as root, killed): named in a warning, left alone, and the install (and an idempotent re-run) still succeed. The removal
+    is made to fail by a stand-in `rm` in front of the real one, so that the test is the same for a normal user and for root."""
+    browsers = w["prefix"] / "browsers"
+    browsers.mkdir()
+    gone = dead_pid()
+    stale = browsers / f".staging-{gone}"
+    stale.mkdir()
+    (stale / "left-by-root").write_text("x")
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    real_rm = shutil.which("rm")
+    (stub / "rm").write_text(f'#!/bin/sh\ncase "$*" in *"$STUB_RM_FAIL"*) echo "rm: cannot remove: Permission denied" >&2; exit 1 ;; esac\nexec {real_rm} "$@"\n')
+    (stub / "rm").chmod(0o755)
+    env = {"PATH": f"{stub}:{os.environ.get('PATH', '/usr/bin:/bin')}", "STUB_RM_FAIL": f".staging-{gone}"}
+    done = browser_step(w, "--mirror", str(fake.archives_dir), env=env)
+    assert done.returncode == 0, done.stderr
+    assert f"warning: cannot remove {stale}" in done.stdout and "Permission denied" not in done.stderr and (stale / "left-by-root").is_file()
+    assert bh.pin_module().verify_tree(browsers, fake.lock) == []
+    again = browser_step(w, "--mirror", "http://127.0.0.1:9/", env=env)                         # idempotent path, with the directory still there
+    assert again.returncode == 0 and "already installed and identical to the pin" in again.stdout and f"warning: cannot remove {stale}" in again.stdout
 
 
 # ------------------------------------------------------------------------------------------------------------------------------ usage, credentials, a failed final check

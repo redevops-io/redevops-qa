@@ -89,7 +89,7 @@ for stale in "$browsers"/.staging-*; do
   case "$n" in ''|*[!0-9]*) continue ;; esac
   if kill -0 "$n" 2>/dev/null || [ -d "/proc/$n" ]; then continue; fi          # its run is still going (kill -0 fails for another user's process; /proc does not)
   echo "removing the staging directory $stale left by an earlier run (process $n is gone)"
-  rm -rf -- "$stale"
+  rm -rf -- "$stale" 2>/dev/null || echo "warning: cannot remove $stale (for example it belongs to another user); leaving it and going on"
 done
 
 dirs_out="$(pin dirs --lock "$installed_lock")" || fail 6 "the lock could not be read"

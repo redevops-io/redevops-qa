@@ -482,9 +482,11 @@ CASES += [
      [t(BDOC, "test_a_bundle_installation_without_playwright_browsers_path_is_a_failure_that_names_the_launcher")]),
     ("run: a browser lane is refused against a browser that fails the pin", "cli.py", '    if check.status == "FAIL":\n        raise EnvironmentFault("BROWSER_PIN"', '    if False:\n        raise EnvironmentFault("BROWSER_PIN"',
      [t(BDOC, "test_run_refuses_a_browser_lane_against_a_browser_that_fails_the_pin_and_starts_nothing"), t(BDOC, "test_demo_makes_the_same_check")]),
-    ("run: the browser check is made before a run starts", "cli.py", "_refuse_a_browser_that_is_not_the_pinned_build(any(lane.engine == K.ENGINE_PLAYWRIGHT for lane in frozen.lanes))",
-     "_refuse_a_browser_that_is_not_the_pinned_build(False)",
+    ("run: the browser check is made before a run starts", "cli.py", "_refuse_a_browser_that_is_not_the_pinned_build(any(lane.engine == K.ENGINE_PLAYWRIGHT for lane in frozen.lanes), err)",
+     "_refuse_a_browser_that_is_not_the_pinned_build(False, err)",
      [t(BDOC, "test_run_refuses_a_browser_lane_against_a_browser_that_fails_the_pin_and_starts_nothing")]),
+    ("run: a skipped browser check is said so", "cli.py", '        print("browser pin: not checked (not a bundle install)", file=err)', "        pass",
+     [t(BDOC, "test_run_and_demo_say_once_that_the_browser_pin_was_not_checked_when_it_was_not")]),
     ("run: a plan without a browser lane does not need the browser", "cli.py", "    if not has_browser_lane:\n        return\n    from .doctor import check_browser_pin", "    if False:\n        return\n    from .doctor import check_browser_pin",
      [t(BDOC, "test_a_plan_without_a_browser_lane_is_not_stopped_by_the_browser_and_does_not_even_check_it")]),
 ]

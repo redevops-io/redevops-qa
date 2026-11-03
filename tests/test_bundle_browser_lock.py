@@ -61,7 +61,7 @@ def test_the_builder_carries_the_lock_into_the_bundle_and_records_it(tmp_path, f
 def test_the_readme_of_the_bundle_says_what_is_verified_and_what_is_not(tmp_path, fake):
     text = " ".join((bundle_with(tmp_path, fake) / "README.md").read_text(encoding="utf-8").split())            # the README is wrapped: compare words, not line breaks
     assert "not hashed" not in text and "recorded, not hashed" not in text
-    for phrase in ("browser.lock.json", "before** it unpacks that archive", "<prefix>/browsers/.staging-<pid>", "SIGKILL or a power loss", "recorded in `INSTALL.json`", "source checkout there is no pin", "does not guard the files", "docs/QA_BROWSER_PIN.md", "the sha256 and the size of the three archives", "operating system libraries Chromium loads", "availability of the Playwright download host",
+    for phrase in ("browser.lock.json", "before** it unpacks that archive", "<prefix>/browsers/.staging-<pid>", "SIGKILL or a power loss", "recorded in `INSTALL.json`", "source checkout there is no pin", "does not guard the files", "removal of both the lock and `INSTALL.json` is not detected", "run` and `demo` print `browser pin: not checked (not a bundle install)`", "docs/QA_BROWSER_PIN.md", "the sha256 and the size of the three archives", "operating system libraries Chromium loads", "availability of the Playwright download host",
                    "a change made to the tree after a check", "not a signature from the browser's publisher", "Playwright 1.0.0", "revision 1000 (Chromium 9.9.9.9)"):
         assert phrase in text, phrase
 
