@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from bundle_helpers import bb, clean_env, host_target, make_mini_bundle, make_wheel, resum, run_script, tree_listing
+from bundle_helpers import bb, clean_env, host_target, make_mini_bundle, make_wheel, resum, run_script, synthetic_wheel, tree_listing
 
 
 @pytest.fixture(scope="module")
@@ -136,7 +136,7 @@ def test_the_real_release_target_is_refused_on_any_host_that_is_not_that_target(
 
 def test_a_tampered_wheel_is_refused_by_the_sums_first_and_nothing_is_created(bundles, box):
     bundle = fresh_copy(bundles["v1"], box)
-    wheel = next((bundle / "wheelhouse").glob("*.whl"))
+    wheel = synthetic_wheel(bundle)
     wheel.write_bytes(wheel.read_bytes() + b"tampered")
     done = run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home")
     assert done.returncode == 4 and "checksum differs" in done.stderr and not (box / "qa").exists()
@@ -144,7 +144,7 @@ def test_a_tampered_wheel_is_refused_by_the_sums_first_and_nothing_is_created(bu
 
 def test_a_tampered_wheel_whose_sums_were_rewritten_is_refused_by_pip_require_hashes_and_the_prefix_is_removed(bundles, box):
     bundle = fresh_copy(bundles["v1"], box)
-    wheel = next((bundle / "wheelhouse").glob("*.whl"))
+    wheel = synthetic_wheel(bundle)
     wheel.write_bytes(wheel.read_bytes() + b"tampered")
     resum(bundle)                                       # the first check now passes: what is left is pip's own, against requirements.lock
     done = run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home")
@@ -155,7 +155,7 @@ def test_a_tampered_wheel_whose_sums_were_rewritten_is_refused_by_pip_require_ha
 
 def test_a_wheel_swapped_for_another_build_of_it_is_refused(bundles, box):
     bundle = fresh_copy(bundles["v1"], box)
-    old = next((bundle / "wheelhouse").glob("*.whl"))
+    old = synthetic_wheel(bundle)
     swapped = make_wheel(box, "1.0", marker="evil")                  # same name and version, other contents
     old.write_bytes(swapped.read_bytes())
     resum(bundle)
@@ -208,7 +208,7 @@ def test_a_missing_file_of_the_bundle_is_refused(bundles, box):
     (bundle / "BUNDLE.json").unlink()
     assert run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home").returncode == 4
     bundle2 = fresh_copy(bundles["v2"], box)
-    next((bundle2 / "wheelhouse").glob("*.whl")).unlink()
+    synthetic_wheel(bundle2).unlink()
     done = run_script(bundle2, "install.sh", ["--prefix", str(box / "qa2")], box / "home")
     assert done.returncode == 4 and "listed but missing" in done.stderr and not (box / "qa2").exists()
 
@@ -235,7 +235,7 @@ def test_a_failed_install_of_the_new_bundle_leaves_the_running_installation_work
     running = box / "running"
     assert run_script(bundles["v1"], "install.sh", ["--prefix", str(running)], box / "home").returncode == 0
     broken = fresh_copy(bundles["v2"], box)
-    wheel = next((broken / "wheelhouse").glob("*.whl"))
+    wheel = synthetic_wheel(broken)
     wheel.write_bytes(wheel.read_bytes() + b"x")
     resum(broken)
     assert run_script(broken, "install.sh", ["--prefix", str(box / "next")], box / "home").returncode == 6
@@ -407,3 +407,127 @@ def test_sha256sums_with_a_duplicate_empty_or_malformed_line_is_refused_before_a
     (bundle / "SHA256SUMS").write_text("\n".join(edit(lines)) + "\n")
     done = run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home")
     assert done.returncode == 4 and "does not accept" in done.stderr and not (box / "qa").exists(), (label, done.stderr)
+
+
+# ------------------------------------------------------------------------------------------------ the prefix must be somewhere the adapter path policy accepts (F1: root, HOME=/root)
+import os  # noqa: E402
+
+from bundle_helpers import ROOT  # noqa: E402
+
+
+def kit_is_denied():
+    import qa_adapter_kit.paths as kit            # the source of truth the installer reads from the bundle's own copy of it
+    return kit
+
+
+@pytest.fixture(scope="module")
+def policy_bundle(tmp_path_factory):
+    return make_mini_bundle(tmp_path_factory.mktemp("policy"), with_kit=True)
+
+
+@pytest.fixture()
+def failing_venv_python(box):
+    """The real interpreter, except that `-m venv` fails at once: an install the path policy accepted then ends with exit 6 instead of taking seconds to finish."""
+    wrapper = box / "fastfail"
+    wrapper.write_text(f"#!/bin/sh\nif [ \"$1\" = \"-m\" ] && [ \"$2\" = \"venv\" ]; then exit 1; fi\nexec '{sys.executable}' \"$@\"\n")
+    wrapper.chmod(0o755)
+    return str(wrapper)
+
+
+@pytest.mark.parametrize("prefix,rule", [("/root/redevops-qa", "the directory /root"), ("/root", "the directory /root"), ("/etc/redevops-qa", "the directory /etc"), ("/proc/x", "the directory /proc"),
+                                         ("/sys/x", "the directory /sys"), ("/dev/x", "the directory /dev"), ("/run/x", "the directory /run"), ("/var/run/x", "the directory /var/run"),
+                                         ("/boot/x", "the directory /boot"), ("/home/u/.config/qa", "a path component named .config"), ("/home/u/.ssh/qa", "a path component named .ssh"),
+                                         ("/root/redevops-qa/", "the directory /root"), ("/root/./x/..", "the directory /root")])
+def test_a_prefix_the_adapter_path_policy_refuses_is_refused_with_exit_2_naming_the_rule_and_nothing_is_created(policy_bundle, box, prefix, rule):
+    done = run_script(policy_bundle, "install.sh", ["--prefix", prefix], box / "home")
+    assert done.returncode == 2, done.stderr
+    assert rule in done.stderr and "adapter path policy" in done.stderr and "PROHIBITED_PATH" in done.stderr and "/opt/redevops-qa" in done.stderr and "Nothing was changed" in done.stderr
+    assert tree_listing(box / "home") == []
+
+
+def test_a_prefix_through_a_symbolic_link_into_a_refused_directory_is_refused_by_its_resolved_path(policy_bundle, box):
+    target = box / ".config"
+    target.mkdir()
+    link = box / "viaparent"
+    link.symlink_to(target)
+    done = run_script(policy_bundle, "install.sh", ["--prefix", str(link / "qa")], box / "home")
+    assert done.returncode == 2 and "with symbolic links resolved" in done.stderr and ".config" in done.stderr and not (target / "qa").exists()
+
+
+def test_the_installer_applies_exactly_the_rule_of_the_adapter_kit_for_a_battery_of_prefixes(policy_bundle, box, failing_venv_python):
+    kit = kit_is_denied()
+    version = "%d.%d" % sys.version_info[:2]
+    # prefixes the rule refuses, and prefixes that only look like them; an accepted prefix goes on to make its directory (exit 5 where / is not writable, 6 where the fake interpreter then fails),
+    # so near misses under system directories are only run by a user who cannot create them
+    refused_battery = ["/root/x", "/etc", "/run/user/1000/x", "/var/run/x", "/home/u/.config/q", "/home/u/.aws/q", "/dev/shm/x", "/boot", "/proc/1/x", "/sys/x"]
+    # a prefix that only ENDS in a name the policy lists is not refused: the Robot command line names <prefix>/venv/bin/python and the guard script, never the prefix itself
+    accepted_battery = [str(box / "qa"), str(box / "config" / "q"), str(box / "credentialsx"), str(box / "credentials"), str(box / "credentials.json"), str(box / "a" / "docker.sock"), str(box / "id_rsa.pub")]
+    if os.geteuid() != 0:
+        accepted_battery += ["/rootless/x", "/etc2/x", "/runner/x", "/var/runner/x", "/devx/y", "/bootx", "/opt/redevops-qa"]
+    mismatches = []
+    for prefix in refused_battery + accepted_battery:
+        expected_refused = any(kit.is_denied(p) for p in (prefix + "/venv/bin/python", f"{prefix}/venv/lib/python{version}/site-packages/qa_runner/robot_guard.py"))
+        done = run_script(policy_bundle, "install.sh", ["--prefix", prefix], box / "home", python=failing_venv_python)
+        refused = done.returncode == 2
+        if refused != expected_refused or (not refused and done.returncode not in (5, 6)):
+            mismatches.append((prefix, expected_refused, done.returncode, done.stderr[-120:]))
+    assert mismatches == []
+    assert [p for p in refused_battery if not kit.is_denied(p + "/venv/bin/python")] == []          # every entry of the first list really is refused by the kit
+    assert [p for p in accepted_battery if kit.is_denied(p + "/venv/bin/python") or kit.is_denied(f"{p}/venv/lib/python{version}/site-packages/qa_runner/robot_guard.py")] == []          # and of the second is not
+
+
+def test_the_installer_reads_the_rule_from_the_kit_of_the_bundle_so_it_cannot_drift_from_the_runner(tmp_path_factory, box, failing_venv_python):
+    text = (ROOT / "packages" / "qa-adapter-kit" / "src" / "qa_adapter_kit" / "paths.py").read_text(encoding="utf-8")
+    assert '"/boot", "/private/etc"' in text
+    changed = make_mini_bundle(tmp_path_factory.mktemp("kit2"), kit_paths_text=text.replace('"/boot", "/private/etc"', '"/boot", "/srv", "/private/etc"'))
+    done = run_script(changed, "install.sh", ["--prefix", "/srv/qa"], box / "home", python=failing_venv_python)
+    assert done.returncode == 2 and "the directory /srv" in done.stderr
+    same = make_mini_bundle(tmp_path_factory.mktemp("kit3"), with_kit=True)
+    assert run_script(same, "install.sh", ["--prefix", str(box / "srv" / "qa")], box / "home", python=failing_venv_python).returncode == 6        # the unchanged kit accepts what it did not list
+
+
+@pytest.mark.parametrize("label,text", [("one constant only", "DENIED_PREFIXES = ('/etc',)\n"),
+                                        ("definitions inside an if", "if True:\n    DENIED_PREFIXES = ('/etc',)\n    DENIED_COMPONENTS = ('.ssh',)\n    DENIED_NAMES = ('id_rsa',)\n"),
+                                        ("a dynamic expression", "import os\nDENIED_PREFIXES = tuple(os.listdir('/'))\nDENIED_COMPONENTS = ('.ssh',)\nDENIED_NAMES = ('id_rsa',)\n"),
+                                        ("not Python", "DENIED_PREFIXES = (\n"),
+                                        ("not strings", "DENIED_PREFIXES = (1, 2)\nDENIED_COMPONENTS = ('.ssh',)\nDENIED_NAMES = ('id_rsa',)\n")])
+def test_a_kit_whose_policy_constants_cannot_be_read_stops_the_install_with_exit_4_and_a_message_before_anything_is_created(tmp_path_factory, box, label, text):
+    broken = make_mini_bundle(tmp_path_factory.mktemp("kit4"), kit_paths_text=text)
+    done = run_script(broken, "install.sh", ["--prefix", str(box / "qa")], box / "home")
+    assert done.returncode == 4 and not (box / "qa").exists(), (label, done.stderr)
+    assert "Traceback" not in done.stderr and ("does not define the path policy" in done.stderr or "could not be read" in done.stderr) and "nothing was installed" in done.stderr, (label, done.stderr)
+
+
+def test_an_annotated_assignment_in_the_kit_is_read_like_a_plain_one(tmp_path_factory, box, failing_venv_python):
+    text = ("DENIED_PREFIXES: tuple = ('/srv',)\nDENIED_COMPONENTS: tuple = ('.ssh',)\nDENIED_NAMES: tuple = ('id_rsa',)\n")
+    annotated = make_mini_bundle(tmp_path_factory.mktemp("kit5"), kit_paths_text=text)
+    done = run_script(annotated, "install.sh", ["--prefix", "/srv/qa"], box / "home", python=failing_venv_python)
+    assert done.returncode == 2 and "the directory /srv" in done.stderr
+
+
+def test_a_bundle_without_an_adapter_kit_wheel_fails_the_install_instead_of_skipping_the_policy_check(tmp_path_factory, box):
+    bare = make_mini_bundle(tmp_path_factory.mktemp("kit6"), with_kit=False)
+    done = run_script(bare, "install.sh", ["--prefix", str(box / "qa")], box / "home")
+    assert done.returncode == 4 and "0 adapter-kit wheels" in done.stderr and "nothing was installed" in done.stderr and not (box / "qa").exists()
+    # a prefix the policy would refuse is not accepted just because the bundle has no kit to say so
+    assert run_script(bare, "install.sh", ["--prefix", "/root/qa"], box / "home").returncode == 4
+
+
+def test_two_adapter_kit_wheels_are_refused_because_the_installer_cannot_tell_which_one_the_lock_installs(policy_bundle, box):
+    bundle = fresh_copy(policy_bundle, box)
+    kit = next((bundle / "wheelhouse").glob("redevops_qa_adapter_kit-*.whl"))
+    shutil.copy(kit, kit.with_name(kit.name.replace("-1.0-", "-1.1-")))
+    resum(bundle)
+    done = run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home")
+    assert done.returncode == 4 and "2 adapter-kit wheels" in done.stderr and not (box / "qa").exists()
+
+
+def test_an_ordinary_prefix_still_installs_with_the_kit_present(policy_bundle, box):
+    prefix = box / "qa"
+    assert run_script(policy_bundle, "install.sh", ["--prefix", str(prefix)], box / "home").returncode == 0
+    assert run_script(policy_bundle, "uninstall.sh", ["--prefix", str(prefix)], box / "home").returncode == 0
+
+
+def test_the_installer_documents_the_new_exit_status():
+    text = (ROOT / "bundle" / "install.sh").read_text(encoding="utf-8")
+    assert "2 usage, or a prefix under a path the adapter path policy refuses (for example /root)" in text

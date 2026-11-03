@@ -41,3 +41,23 @@ def test_the_readme_does_not_call_the_project_open_source_and_does_not_claim_oth
     low = README.lower()
     assert not re.search(r"(?<!not )open[- ]source", low) and "soc 2" not in low and "tamper-proof" not in low
     assert "macos and windows are not claimed" in low and "linux x86_64" in low
+
+
+# ------------------------------------------------------------------------------------------------------------------ the demo page cites a run on main
+DEMO = (ROOT / "docs" / "QA_DEMO.md").read_text(encoding="utf-8")
+
+
+def test_the_demo_page_cites_a_run_on_main_with_its_jobs_and_anchors_and_no_branch_run():
+    assert "actions/runs/41591460007" in DEMO and "head commit `d856bab` of `main`" in DEMO
+    assert "41566638020" not in DEMO and "a93dfc3" not in DEMO and "on a branch" not in DEMO
+    anchors = re.findall(r"`(sha256:[0-9a-f]{64})`", DEMO)
+    assert len(set(anchors)) >= 4                                              # the three anchors and the plan digest
+    for job in ("125769400806", "125769400825", "125769400895", "125769764235", "125769764661", "125769764369"):
+        assert f"runs/41591460007/job/{job}" in DEMO, job
+
+
+def test_the_demo_page_keeps_its_statements_about_the_anchor_and_says_what_happens_as_root():
+    low = DEMO.lower()
+    assert "nothing in the tool authenticates where the value came from" in low and "differ from run to run" in low and "unkeyed" in low
+    assert "## Running it as root" in DEMO and "PROHIBITED_PATH" in DEMO and "/opt/redevops-qa" in DEMO and "`INCONCLUSIVE`" in DEMO
+    assert "tamper-proof" not in low and not re.search(r"(?<!not )open[- ]source", low)

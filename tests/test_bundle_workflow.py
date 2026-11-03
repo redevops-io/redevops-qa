@@ -200,3 +200,36 @@ def test_no_step_of_the_demo_jobs_pipes_a_command_whose_exit_status_matters_thro
         for line in str(step.get("run", "")).splitlines():
             code = line.split("#")[0]
             assert not re.search(r"\)\s*\|\s*tee\b|[^|]\|\s*tee\b", code) or "pipefail" in str(step.get("run", "")) or step.get("shell"), line
+
+
+def test_the_bundle_install_job_also_runs_the_root_check_after_the_acceptance_script():
+    steps = MAIN["jobs"]["bundle-install"]["steps"]
+    runs = [str(x.get("run", "")) for x in steps]
+    acceptance = next(i for i, r in enumerate(runs) if "tools/bundle_acceptance.sh" in r)
+    root = next(i for i, r in enumerate(runs) if "tools/bundle_root_check.sh" in r)
+    assert acceptance < root
+    assert runs[root].startswith('sudo env HOME=/root PATH="$PATH" bash tools/bundle_root_check.sh --current "$RUNNER_TEMP/current"') and '--python "$(command -v python3.12)"' in runs[root]
+
+
+def test_the_root_check_script_covers_the_refusal_the_working_prefix_the_evidence_under_root_and_the_tmpdir_case():
+    text = (ROOT / "tools" / "bundle_root_check.sh").read_text(encoding="utf-8")
+    for fragment in ('./install.sh --prefix /root/redevops-qa', "[ $st -eq 2 ]", "the directory /root", "PROHIBITED_PATH", "/opt/redevops-qa-root-check", "--out \"$evidence\"", "evidence=/root/qa-root-check-evidence",
+                     'TMPDIR="$tmpd" "$prefix/bin/redevops-qa" doctor', "[ $st -eq 3 ]", "adapter path policy: the temporary working directory of a run (from TMPDIR) is /root/qa-root-check-tmp/redevops-qa-<random> (the prefix /root is on the refused list)", "Nothing was started",
+                     "2b. the positive control", "HOME=/tmp/qa-root-check-home TMPDIR=/tmp/qa-root-check-tmp", "ROOT CHECK OK", '[ "$(id -u)" -eq 0 ]'):
+        assert fragment in text, fragment
+    assert "curl" not in text and "wget" not in text
+    for line in text.splitlines():
+        if re.search(r"\brm -rf\b", line) and not line.lstrip().startswith("#"):
+            own = '"$work"' in line and '"$evidence"' in line and '"$tmpd"' in line and "/tmp/qa-root-check-" in line
+            assert own or line.strip().startswith('[ ! -e "$prefix/INSTALL.json" ] || rm -rf -- "$prefix"'), line               # it removes only what it made
+
+
+def test_the_root_check_uninstalls_before_it_removes_the_directory_that_holds_uninstall_sh():
+    """A failure after step 2 used to leave /opt/redevops-qa-root-check installed: the cleanup removed the work directory first and then looked for uninstall.sh in it."""
+    text = (ROOT / "tools" / "bundle_root_check.sh").read_text(encoding="utf-8")
+    body = text[text.index("cleanup() {"):text.index("trap cleanup EXIT")]
+    uninstall = body.index('"$work/$name/uninstall.sh"')
+    remove_work = body.index('rm -rf "$work"')
+    assert uninstall < remove_work
+    assert body.index('[ -e "$prefix/INSTALL.json" ]') < uninstall
+    assert 'rm -rf -- "$prefix"' in body and body.index('rm -rf -- "$prefix"') < remove_work              # and the prefix is gone even if uninstall.sh refused

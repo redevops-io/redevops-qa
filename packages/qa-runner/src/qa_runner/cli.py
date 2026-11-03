@@ -173,6 +173,7 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
     if not K.RUN_ID_RE.fullmatch(run_id):
         raise PlanError("BAD_RUN_ID", "a run id is 1 to 40 characters: letters, digits, '.', '_' and '-', starting with a letter or digit")
     up = verified_bootstrap()
+    _refuse_a_run_the_path_policy_would_end_inconclusive(any(lane.engine == K.ENGINE_ROBOT for lane in frozen.lanes))
     reserved = _reserve(target, run_id)
     cancel = CancelToken()
     previous = {}
@@ -199,6 +200,15 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
         else:
             out.write(render_text(inspect_source(_snapshot(str(bundle_dir)))))          # no plan digest supplied: the one this process computed would only match itself
     return code
+
+
+def _refuse_a_run_the_path_policy_would_end_inconclusive(has_robot_lane: bool) -> None:
+    """The check of ``doctor`` (the paths the lane command lines will carry against the adapter kit's refused list), made before anything starts: a run that would end INCONCLUSIVE
+    (PROHIBITED_PATH) because of where it is installed or where its temporary directory is does not start; it is an environment fault (exit 3) that names the path and the rule."""
+    from .doctor import check_path_policy
+    check = check_path_policy(robot=has_robot_lane)          # only the Robot lane's command line carries these paths
+    if check.status == "FAIL":
+        raise EnvironmentFault("ADAPTER_PATH_POLICY", f"{check.detail}. To fix: {check.remedy}. Nothing was started and no evidence directory was made.")
 
 
 def _verify_in_a_new_process(bundle_dir: Path, plan_digest: str, expected_exit: int, run_exit: int, out: TextIO) -> int:

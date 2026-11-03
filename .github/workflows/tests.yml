@@ -575,6 +575,8 @@ jobs:
           path: ${{ runner.temp }}/previous
       - name: Run the acceptance script
         run: bash tools/bundle_acceptance.sh --current "$RUNNER_TEMP/current" --previous "$RUNNER_TEMP/previous"
+      - name: The same bundle as root with HOME=/root (a prefix under /root is refused, one under /opt works, a TMPDIR under /root is named by doctor)
+        run: sudo env HOME=/root PATH="$PATH" bash tools/bundle_root_check.sh --current "$RUNNER_TEMP/current" --python "$(command -v python3.12)"
       - name: Fail if the run left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
