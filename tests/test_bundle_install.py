@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from bundle_helpers import bb, clean_env, host_target, make_mini_bundle, make_wheel, resum, run_script, synthetic_wheel, tree_listing
+from bundle_helpers import bb, clean_env, host_target, make_mini_bundle, make_wheel, resum, restore_default_signals, run_script, synthetic_wheel, tree_listing
 
 
 @pytest.fixture(scope="module")
@@ -255,7 +255,7 @@ def test_a_signal_during_the_install_leaves_nothing_behind(bundles, box):
     slow.write_text(f"#!/bin/sh\nif [ \"$1\" = \"-m\" ] && [ \"$2\" = \"venv\" ]; then sleep 30; fi\nexec '{sys.executable}' \"$@\"\n")
     slow.chmod(0o755)
     proc = subprocess.Popen(["bash", str(bundle / "install.sh"), "--prefix", str(box / "qa"), "--python", str(slow)], env=clean_env(box / "home"), cwd=str(box / "home"),
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True, preexec_fn=restore_default_signals)
     deadline = time.time() + 30
     while not (box / "qa").exists() and time.time() < deadline:
         time.sleep(0.1)

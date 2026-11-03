@@ -120,6 +120,8 @@ CASES = [
      [t(BB, "test_an_unusable_mirror_is_a_usage_error_with_exit_2_and_changes_nothing")]),
     ("install.sh: the browser lock digest is recorded in INSTALL.json", "bundle/install.sh", '    doc["browser_lock_sha256"] = hashlib.sha256(open(lock, "rb").read()).hexdigest()\n', "    pass\n",
      [t(BB, "test_install_sh_records_the_digest_of_the_browser_lock_it_installed")]),
+    ("harness: SIGHUP, ignored by nohup, is restored before a script is signalled", "tests/bundle_helpers.py", "    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):\n", "    for sig in (signal.SIGINT, signal.SIGTERM):\n",
+     [t(BB, "test_the_harness_resets_signals_that_the_test_process_inherited_as_ignored_and_the_script_cannot")]),
     ("checker: the lock's tree digest is checked", CB, "              and lock.get(\"tree_sha256\") == _tree_digest(tree) and", "              and",
      [t(BL, "test_the_checker_finds_a_lock_whose_tree_was_edited_without_its_digest")]),
     ("checker: the browser record says not shipped, fetched at install and pinned", CB,
