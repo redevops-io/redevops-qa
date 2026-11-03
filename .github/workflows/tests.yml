@@ -567,7 +567,8 @@ jobs:
           DEFECT: ${{ matrix.defect }}
         run: |
           status=0
-          "$HOME/redevops-qa/bin/redevops-qa" demo --defect "$DEFECT" --out "$RUNNER_TEMP/evidence" | tee "$RUNNER_TEMP/demo.out" || status=$?
+          "$HOME/redevops-qa/bin/redevops-qa" demo --defect "$DEFECT" --out "$RUNNER_TEMP/evidence" > "$RUNNER_TEMP/demo.out" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/demo.out"
           echo "demo exit status: $status"
           echo "STATUS=$status" >> "$GITHUB_ENV"
       - name: Check the outcome against the seeded defect and print the anchor
@@ -576,7 +577,8 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           python -I "$GITHUB_WORKSPACE/tools/check_demo_outcome.py" run --defect "$DEFECT" --exit-code "$STATUS" --output "$RUNNER_TEMP/demo.out" \
-            --evidence-root "$RUNNER_TEMP/evidence" --anchor-out "$RUNNER_TEMP/anchor/anchor-$DEFECT.txt" | tee "$RUNNER_TEMP/anchor.out"
+            --evidence-root "$RUNNER_TEMP/evidence" --anchor-out "$RUNNER_TEMP/anchor/anchor-$DEFECT.txt" > "$RUNNER_TEMP/anchor.out"
+          cat "$RUNNER_TEMP/anchor.out"
           { echo "### demo $DEFECT"; echo; echo '```'; cat "$RUNNER_TEMP/anchor.out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Keep the evidence bundle
         if: always()

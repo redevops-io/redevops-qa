@@ -161,7 +161,8 @@ def test_the_demo_job_installs_the_kept_bundle_with_the_readme_commands_runs_the
     assert job["needs"] == "bundle"
     run = "\n".join(str(s.get("run", "")) for s in job["steps"])
     assert 'tar xOf "$RUNNER_TEMP/dl/$name.tar" "$name/README.md"' in run and run.count("tools/readme_block.py") == 2 and " unpack" in run and " install" in run
-    assert '"$HOME/redevops-qa/bin/redevops-qa" demo --defect "$DEFECT" --out "$RUNNER_TEMP/evidence"' in run and "|| status=$?" in run
+    assert '"$HOME/redevops-qa/bin/redevops-qa" demo --defect "$DEFECT" --out "$RUNNER_TEMP/evidence" > "$RUNNER_TEMP/demo.out" 2>&1 || status=$?' in run
+    assert "| tee" not in run                       # the default shell of a step has no pipefail: a pipe would hide the exit status of the command in front of it
     assert "python -I \"$GITHUB_WORKSPACE/tools/check_demo_outcome.py\" run" in run and "--exit-code \"$STATUS\"" in run and "GITHUB_STEP_SUMMARY" in run
     uploads = {s["with"]["name"]: s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact")}
     assert set(uploads) == {"demo-evidence-${{ matrix.defect }}", "demo-anchor-${{ matrix.defect }}"}
@@ -186,3 +187,12 @@ def test_the_verify_job_is_a_second_job_that_starts_from_the_kept_artifacts_in_a
 def test_the_new_test_files_run_in_the_bundle_tests_job():
     run = "\n".join(str(s.get("run", "")) for s in MAIN["jobs"]["bundle-tests"]["steps"])
     assert "tests/test_demo_outcome.py" in run
+
+
+@pytest.mark.parametrize("job", DEMO_JOBS)
+def test_no_step_of_the_demo_jobs_pipes_a_command_whose_exit_status_matters_through_another(job):
+    """A step without an explicit shell runs `bash -e {0}`: no pipefail, so `cmd | tee file` succeeds when `cmd` fails. (The first version of the demo job lost the demo's exit status this way.)"""
+    for step in MAIN["jobs"][job]["steps"]:
+        for line in str(step.get("run", "")).splitlines():
+            code = line.split("#")[0]
+            assert not re.search(r"\)\s*\|\s*tee\b|[^|]\|\s*tee\b", code) or "pipefail" in str(step.get("run", "")) or step.get("shell"), line
