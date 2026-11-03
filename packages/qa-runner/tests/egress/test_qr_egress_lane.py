@@ -60,14 +60,14 @@ def test_the_orchestrated_lane_given_the_hostile_page_loads_it_and_the_hostile_o
     assert denied and doc["browser_guard"]["denied"] >= 1, "the in-browser request gate did not log the attempts on the hostile origin"
 
 
-def test_the_orchestrated_lane_given_the_full_hostile_page_including_the_websocket_still_sends_the_hostile_origin_nothing(up, tmp_path, record_property):
+def test_the_orchestrated_lane_given_the_full_hostile_page_including_the_websocket_still_sends_the_hostile_origin_nothing(up, tmp_path):
     """The WebSocket attempt keeps the page from finishing its load: the navigation step times out and the lane does not run to a verdict. The lane child must still END NORMALLY: it exits 0
     with a COMPLETED result file whose outcome is not a pass (the lane's own exit code is 4; exit 3 is what the orchestrator makes of such a lane). Before the child left through ``os._exit`` it was
     killed by SIGSEGV during interpreter shutdown on ubuntu-24.04 in every CI run of this test (24 of 24), after the result was written; any signal here is a failure again. Also asserted: the
     browser ran (the allowed origin served the page), the hostile TCP origin saw no request and no connection, and the UDP listener saw nothing."""
     proc, doc, seen, a, b, out = hostile_lane(up, tmp_path, PAGE)
     ended = f"exit {proc.exit_code}" if proc.exit_code is not None else f"signal {proc.signal}"
-    record_property("lane_child_end", ended)
+    print("lane child ended:", ended)
     assert "/page" in seen["a_seen"], f"the browser never loaded the page (the child ended: {ended}): the silence below would mean nothing; stderr: {proc.stderr[-500:]!r}"
     assert seen["b_hits"] == frozenset(), sorted(seen["b_hits"])
     assert seen["b_connections"] == 0, seen["b_connections"]
