@@ -13,11 +13,14 @@ Offline (no network, no secret) except the explicit ``--verify-ci`` and ``--cros
   the matching runner, with the stable channel, no skip, no condition, and a recorded run; ``verified`` needs engines that are backed by a real engine
   in the capability manifest; a planned target must not have its files in the repository;
 * the pinned source commit and the head commit of every recorded run are ancestors of main (a recorded run's head may instead be an ancestor of the commit
-  under test, but only when ``--verify-ci`` read the cited job's log and it confirmed the commit the run installed and the passed counts); a recorded run states
-  the pin it installed from (``source_commit``, which must be the profile's pinned commit) separately from its own head commit;
+  under test, but only when the pin in this file as committed at that head equals the record's ``source_commit`` and, with ``--verify-ci``, the cited job's log
+  also confirmed the commit the run installed and the passed counts); the pin at every recorded head must equal ``source_commit`` (read with ``git show``: no
+  log, no network, the clone needs the full history); a recorded run states the pin it installed from (``source_commit``, which must be the profile's pinned
+  commit) separately from its own head commit;
 * with ``--verify-ci`` (read-only API, a token for the log) every recorded run, its job and the job's log are re-checked: the run's head and whole-run
   conclusion, the job's success, name and day, the line ``checkout verified: HEAD is the pinned commit <sha>`` with ``<sha>`` equal to ``source_commit``, and the
-  passed counts of the log equal to the counts in the summary; a log that cannot be read fails when the run's head is not on main;
+  passed counts of the log equal to the counts in the summary, each suite also shown as ``OK N tests, 0 skipped, 0 failed``; a log that cannot be read fails,
+  except that a log that is gone (HTTP 404 or 410) is tolerated for a run whose head is on main;
 * ``docs/QA_INSTALL_PROFILES.md`` equals the document generated from the JSON.
 
 Usage: ``python tools/check_install_profiles.py [--root DIR] [--main-ref REF] [--no-freshness] [--write-docs] [--verify-ci] [--cross-check]``.
@@ -405,6 +408,34 @@ def semantic_problems(profiles: Dict[str, Any], capabilities: Dict[str, Any], ro
     return out
 
 
+def pin_at_head_report(profiles: Dict[str, Any], root: Path) -> Tuple[List[str], Set[Tuple[str, str]]]:
+    """Log-independent: the job reads its pin from the file of its own checkout, so ``pinned_commit`` in ``qa-install-profiles.json`` as committed at the
+    recorded run's head_sha must equal the record's ``source_commit``. Needs the commit in the clone (the install-profiles job fetches the full history); a commit
+    or file that cannot be read is a finding (fail closed). Returns the findings and the (profile, host) pairs that passed."""
+    out: List[str] = []
+    ok: Set[Tuple[str, str]] = set()
+    for p in profiles["profiles"]:
+        for h in p["hosts"]:
+            vb = h["verified_by"]
+            if not vb:
+                continue
+            at = f"profile {p['id']} host {h['os_arch']}"
+            code, text = caps._git(root, "show", f"{vb['head_sha']}:{PROFILES}")
+            if code != 0:
+                out.append(f"{at}: cannot read {PROFILES} at the recorded head {vb['head_sha'][:12]} (is the full history fetched?), so the pin that run installed cannot be checked")
+                continue
+            try:
+                pinned = json.loads(text)["source"]["pinned_commit"]
+            except (ValueError, KeyError, TypeError):
+                out.append(f"{at}: {PROFILES} at the recorded head {vb['head_sha'][:12]} has no readable source.pinned_commit")
+                continue
+            if pinned != vb["source_commit"]:
+                out.append(f"{at}: the pinned commit at the recorded head {vb['head_sha'][:12]} is {pinned}, the record says the run installed {vb['source_commit']}")
+            else:
+                ok.add((p["id"], h["os_arch"]))
+    return out, ok
+
+
 def freshness_problems(profiles: Dict[str, Any], root: Path, main_ref: Optional[str] = None, head_ok: FrozenSet[Tuple[str, str]] = frozenset()) -> List[str]:
     """The pinned source commit and the head commit of every recorded run must be ancestors of main.
 
@@ -427,7 +458,7 @@ def freshness_problems(profiles: Dict[str, Any], root: Path, main_ref: Optional[
         elif caps._git(root, "merge-base", "--is-ancestor", sha, ref)[0] != 0:
             if key is not None and key in head_ok and caps._git(root, "merge-base", "--is-ancestor", sha, "HEAD")[0] == 0:
                 continue
-            hint = " (it is an ancestor of HEAD: run with --verify-ci so that the cited job's log can confirm what it installed)" if key is not None and caps._git(root, "merge-base", "--is-ancestor", sha, "HEAD")[0] == 0 else ""
+            hint = " (it is an ancestor of HEAD, which is accepted only when the pin at that commit is the recorded source_commit and, with --verify-ci, the cited job's log confirms the run)" if key is not None and caps._git(root, "merge-base", "--is-ancestor", sha, "HEAD")[0] == 0 else ""
             out.append(f"freshness: {what} {sha[:12]} is not an ancestor of {ref}{hint}")
     return out
 
@@ -498,6 +529,7 @@ def docs_problems(profiles: Dict[str, Any], root: Path) -> List[str]:
 # ------------------------------------------------------------------------------------------------ opt-in network checks
 CHECKOUT_LINE = re.compile(r"checkout verified: HEAD is the pinned commit ([0-9a-f]{40}), clean tree")
 PASSED_LINE = re.compile(r"^\S+Z (\d+) passed(?:, \d+ [a-z ]+)* in [0-9.]+s", re.M)
+OK_LINE = re.compile(r"^\S+Z OK (\d+) tests, 0 skipped, 0 failed\s*$", re.M)
 SUMMARY_COUNTS = re.compile(r"(\d+(?: \+ \d+)*) tests passed")
 
 
@@ -506,8 +538,20 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+LOG_REDIRECT_PREFIXES = ("https://",)       # the log is fetched from the address the API redirects to; nothing else is opened
+LOG_MAX_BYTES = 20_000_000
+
+
+def _read_bounded(response: Any) -> str:
+    data = response.read(LOG_MAX_BYTES + 1)
+    if len(data) > LOG_MAX_BYTES:
+        raise OSError(f"the log is larger than {LOG_MAX_BYTES} bytes")
+    return data.decode("utf-8", "replace")
+
+
 def api_get_log(url: str) -> str:
-    """The text of a job log through the read-only API. The API answers with a redirect to a short-lived address; it is followed without the credential."""
+    """The text of a job log through the read-only API. The API answers with a redirect to a short-lived address; it is followed by hand, only to an https
+    address, without the credential (which goes to the first request only), and the body is bounded."""
     import os
     request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
     credential = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
@@ -515,13 +559,15 @@ def api_get_log(url: str) -> str:
         request.add_header("Authorization", "Bearer " + credential)
     try:
         with urllib.request.build_opener(_NoRedirect).open(request, timeout=30) as response:
-            return response.read().decode("utf-8", "replace")
+            return _read_bounded(response)
     except urllib.error.HTTPError as exc:
         location = exc.headers.get("Location") if exc.code in (301, 302, 303, 307, 308) else None
         if not location:
             raise
-    with urllib.request.urlopen(location, timeout=60) as response:       # noqa: S310 - the address the API itself returned, https only
-        return response.read().decode("utf-8", "replace")
+    if not location.startswith(LOG_REDIRECT_PREFIXES):
+        raise OSError("the log address is not an https address")
+    with urllib.request.build_opener(_NoRedirect).open(urllib.request.Request(location), timeout=60) as response:     # noqa: S310 - https only, checked above
+        return _read_bounded(response)
 
 
 def log_problems(at: str, vb: Dict[str, Any], text: str) -> List[str]:
@@ -540,6 +586,9 @@ def log_problems(at: str, vb: Dict[str, Any], text: str) -> List[str]:
         logged = [int(x) for x in PASSED_LINE.findall(text)]
         if logged != recorded:
             out.append(f"{at}: the log of job {vb['job_id']} shows {' + '.join(map(str, logged)) or 'no'} passed tests, the record says {' + '.join(map(str, recorded))}")
+        clean = [int(x) for x in OK_LINE.findall(text)]
+        if clean != recorded:
+            out.append(f"{at}: the log of job {vb['job_id']} shows {' + '.join(map(str, clean)) or 'no'} tests checked as 'OK N tests, 0 skipped, 0 failed', the record says {' + '.join(map(str, recorded))} with 0 skipped and 0 failed")
     return out
 
 
@@ -548,8 +597,9 @@ def verify_ci_report(profiles: Dict[str, Any], repo: str, fetch: Callable[[str],
     """Re-check every recorded run against the read-only API: the run (head, whole-run conclusion), the job (success, name, day) and the job's log (the commit
     it installed and the passed counts). Returns the findings and the (profile, host) pairs whose log confirmed the record.
 
-    A log that cannot be read is a finding for a run whose head is not on main (it is the only evidence there is) and is tolerated for a run whose head is on
-    main (a log expires after some weeks; the record was checked when it was made)."""
+    A log that cannot be read is a finding, with one exception: a log that is gone (HTTP 404 or 410, the retention of logs has run out) is tolerated for a run whose
+    head is on main (the record was checked when it was made, and the pin it installed is checked without the log by ``pin_at_head_report``). A missing or
+    insufficient credential (401, 403), a server error, a network error or a timeout is never tolerated."""
     out: List[str] = []
     confirmed: Set[Tuple[str, str]] = set()
     for p in profiles["profiles"]:
@@ -584,12 +634,16 @@ def verify_ci_report(profiles: Dict[str, Any], repo: str, fetch: Callable[[str],
                     text = fetch_log(f"https://api.github.com/repos/{repo}/actions/jobs/{vb['job_id']}/logs")
                 except Exception as exc:  # noqa: BLE001
                     text = None
-                    reason = type(exc).__name__
+                    gone = isinstance(exc, urllib.error.HTTPError) and exc.code in (404, 410)
+                    reason = type(exc).__name__ + (f" {exc.code}" if isinstance(exc, urllib.error.HTTPError) else "")
             else:
-                reason = "no log reader"
+                gone, reason = None, "no log reader"
             if text is None:
-                if not head_on_main(vb["head_sha"]):
-                    out.append(f"{at}: the log of job {vb['job_id']} cannot be read ({reason}); the head of this run is not on main, so the log is the only evidence of what it installed (failing closed)")
+                if gone is None and head_on_main(vb["head_sha"]):
+                    continue                                    # no reader was given: only the run and the job were asked for
+                if not (gone and head_on_main(vb["head_sha"])):
+                    out.append(f"{at}: the log of job {vb['job_id']} cannot be read ({reason}), so what it installed and its counts cannot be confirmed (failing closed"
+                               + ("" if not gone else ": the log is gone but the head of this run is not on main") + ")")
                 continue
             found = log_problems(at, vb, text)
             out += found
@@ -604,7 +658,7 @@ def verify_ci_problems(profiles: Dict[str, Any], repo: str, fetch: Callable[[str
 
 
 # ------------------------------------------------------------------------------------------------ command line
-def check_all(root: Path, *, main_ref: Optional[str] = None, freshness: bool = True, head_ok: FrozenSet[Tuple[str, str]] = frozenset()) -> List[str]:
+def check_all(root: Path, *, main_ref: Optional[str] = None, freshness: bool = True, head_ok: Optional[FrozenSet[Tuple[str, str]]] = None) -> List[str]:
     profiles = load_json(root / PROFILES)
     capabilities = load_json(root / caps.MANIFEST)
     findings = [f"schema: {m}" for m in qa_jsonschema.validate(profiles, load_json(root / SCHEMA))]
@@ -613,7 +667,10 @@ def check_all(root: Path, *, main_ref: Optional[str] = None, freshness: bool = T
     findings += semantic_problems(profiles, capabilities, root)
     findings += docs_problems(profiles, root)
     if freshness:
-        findings += freshness_problems(profiles, root, main_ref, head_ok)
+        pin_findings, pin_ok = pin_at_head_report(profiles, root)
+        findings += pin_findings
+        # The exception for a head that is only on the commit under test needs the pin-at-head check; with --verify-ci it needs the cited log as well.
+        findings += freshness_problems(profiles, root, main_ref, frozenset(pin_ok) if head_ok is None else frozenset(pin_ok) & head_ok)
     return findings
 
 
@@ -634,11 +691,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     profiles = load_json(root / PROFILES)
     ci_findings: List[str] = []
-    head_ok: FrozenSet[Tuple[str, str]] = frozenset()
+    head_ok: Optional[FrozenSet[Tuple[str, str]]] = None
     if args.verify_ci:
         ref = caps.resolve_main_ref(root, args.main_ref, "main")
         on_main = (lambda sha: caps._git(root, "merge-base", "--is-ancestor", sha, ref)[0] == 0) if ref else (lambda sha: False)
-        ci_findings, confirmed = verify_ci_report(profiles, load_json(root / caps.MANIFEST)["repository"], fetch_log=api_get_log, head_on_main=on_main)
+        ci_findings, confirmed = verify_ci_report(profiles, load_json(root / caps.MANIFEST)["repository"], fetch=caps._api_get, fetch_log=api_get_log, head_on_main=on_main)
         head_ok = frozenset(confirmed)
     findings = check_all(root, main_ref=args.main_ref, freshness=not args.no_freshness, head_ok=head_ok) + ci_findings
     if args.cross_check:
