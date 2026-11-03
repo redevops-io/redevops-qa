@@ -300,3 +300,25 @@ def test_a_waiter_left_behind_by_close_does_not_re_arm_the_terminal_state(tmp_pa
     late = next(b for b in made if b is not held)
     assert eventually(lambda: late.quit_called) and not held.quit_called
     adapter.close()
+
+
+def test_two_callers_waiting_on_the_same_too_slow_start_both_get_a_timeout(tmp_path):
+    made = []
+    _, adapter, _ = make_session(tmp_path, factory=slow_factory(0.8, made), config=config(0.2))
+    codes = []
+    lock = threading.Lock()
+
+    def starter(delay):
+        time.sleep(delay)
+        try:
+            adapter.start()
+        except AdapterFault as exc:
+            with lock:
+                codes.append(exc.code)
+    first, second = threading.Thread(target=starter, args=(0,)), threading.Thread(target=starter, args=(0.05,))
+    first.start()
+    second.start()
+    first.join(5)
+    second.join(5)
+    assert codes == [ErrorCode.TIMEOUT, ErrorCode.TIMEOUT]             # nobody closed the adapter: neither caller may be told it was closed
+    assert eventually(lambda: len(made) == 1 and made[0].quit_called) and adapter._driver is None
