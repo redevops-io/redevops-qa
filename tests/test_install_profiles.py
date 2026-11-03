@@ -532,6 +532,28 @@ def test_a_job_with_the_experimental_channel_a_condition_or_no_required_check_wa
         job["continue-on-error"] = True
     assert "no condition" in joined(job_problems(workflow_mutation=tolerant))
 
+    def run_step_conditional(job, wf):
+        next(s for s in job["steps"] if "tools/run_install_profile.py" in str(s.get("run", "")))["if"] = "always()"
+    assert "no condition" in joined(job_problems(workflow_mutation=run_step_conditional))
+
+    def upload_on_success_only(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = "success()"
+    assert "no condition" in joined(job_problems(workflow_mutation=upload_on_success_only))
+
+    def tolerant_upload(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["continue-on-error"] = True
+    assert "no condition" in joined(job_problems(workflow_mutation=tolerant_upload))
+
+
+def test_the_evidence_upload_of_a_profile_job_may_run_always_so_that_a_failed_run_keeps_its_evidence():
+    def upload_always(job, wf):
+        next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))["if"] = "always()"
+    assert "no condition" not in joined(job_problems(workflow_mutation=upload_always))
+    sel = WORKFLOW["jobs"]["profile-local-python-selenium"]["steps"]
+    uploads = [s for s in sel if str(s.get("uses", "")).startswith("actions/upload-artifact")]
+    assert [u["if"] for u in uploads] == ["always()"] and uploads[0]["with"]["name"] == "evidence-local-python-selenium"
+    assert not [s for s in sel if "if" in s and s not in uploads]            # every other step, the profile's own included, is unconditional
+
     def unmarked(job, wf):
         job["name"] = "install profile local-python-robot (clean venv)"
     assert "NOT a required check until proven" in joined(job_problems(workflow_mutation=unmarked))
@@ -564,7 +586,7 @@ def test_the_workflow_has_one_job_per_offered_profile_and_never_makes_them_a_dep
             assert job["needs"] == "bundle" and "--phases source,install,smoke,check" in text and "--phases uninstall" in text and "required check" in job["name"]
             assert not {"if", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "if" in s or "continue-on-error" in s]
             continue
-        assert not {"if", "needs", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "if" in s or "continue-on-error" in s]
+        assert not {"if", "needs", "continue-on-error", "strategy"} & set(job) and not [s for s in job["steps"] if "continue-on-error" in s or ("if" in s and not chk.keeps_evidence(s))]
         assert "required check" in job["name"] and "--phases install,smoke,check" in text and "--phases uninstall" in text
         assert job["runs-on"] == "ubuntu-24.04"
     other = WORKFLOW["jobs"]["install-profiles"]

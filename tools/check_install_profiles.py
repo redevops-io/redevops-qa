@@ -147,6 +147,12 @@ def expected_bundle_steps(name: str, python: str) -> Dict[str, List[List[str]]]:
     }
 
 
+def keeps_evidence(step: Dict[str, Any]) -> bool:
+    """The one condition a profile job may carry: an artifact upload that runs ``always()``, so the evidence of a failed run is kept.
+    A profile step (anything that runs the profile) is never conditional, and an upload does not change whether the job fails."""
+    return str(step.get("uses", "")).startswith("actions/upload-artifact@") and str(step.get("if", "")).strip() == "always()"
+
+
 def bundle_problems(profile: Dict[str, Any], root: Path, workflow: Dict[str, Any]) -> List[str]:
     out: List[str] = []
     at = f"profile {profile['id']}"
@@ -370,7 +376,7 @@ def semantic_problems(profiles: Dict[str, Any], capabilities: Dict[str, Any], ro
                 out.append(f"{hat}: the job must run the stable channel on --host {h['os_arch']}")
             if RUNNERS.get(job.get("runs-on")) != h["os_arch"]:
                 out.append(f"{hat}: the job runs on {job.get('runs-on')}, which is not {h['os_arch']}")
-            if {"if", "continue-on-error", "strategy"} & set(job) or [s for s in job["steps"] if "if" in s or "continue-on-error" in s]:
+            if {"if", "continue-on-error", "strategy"} & set(job) or [s for s in job["steps"] if "continue-on-error" in s or ("if" in s and not keeps_evidence(s))]:
                 out.append(f"{hat}: the job must have no condition, no continue-on-error and no matrix")
             if not any(str(s.get("with", {}).get("python-version")) == p["python"]["version"] for s in job["steps"]):
                 out.append(f"{hat}: the job does not set up Python {p['python']['version']}")

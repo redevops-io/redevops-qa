@@ -10,6 +10,7 @@ Page content is data. It appears only as a bounded ``read`` observation, which t
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, FrozenSet, Optional
@@ -43,6 +44,7 @@ class AdapterConfig:
     allowed_hosts: FrozenSet[str] = frozenset()      # "host" or "host:port"; empty means every navigation is refused (default deny)
     allow_screenshots: bool = False
     wait_s: float = 5.0                              # upper bound for one driver wait; the action's own timeout cuts it further
+    launch_timeout_s: float = 60.0                   # budget for starting the driver and the browser (see ``SeleniumInteractiveAdapter.start``)
 
 
 def check_url(url: str, allowed_hosts: FrozenSet[str]) -> str:
@@ -70,9 +72,33 @@ def _fault(exc: BaseException) -> Exception:
     return AdapterFault(f"browser action failed: {kind.value}", retryable=kind in RETRYABLE, code=ErrorCode.ADAPTER_CRASH)
 
 
+class _Launch:
+    """One driver launch, run on its own thread so that it has a budget of its own and can be cancelled."""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.exc: Optional[BaseException] = None
+        self.cancelled = False
+
+
+def _quit(drv: BrowserDriver) -> None:
+    try:
+        drv.quit()
+    except Exception:
+        pass
+
+
 class SeleniumInteractiveAdapter:
     """``driver_factory`` is called on first use. A factory (or a driver) that raises ``DriverFault(UNAVAILABLE)`` makes the action
-    ERROR ``UNAVAILABLE``; there is no fallback to another browser and no download."""
+    ERROR ``UNAVAILABLE``; there is no fallback to another browser and no download.
+
+    Starting the driver and the browser is the slowest step of a session (a cold first start on a CI runner has taken close to ten
+    seconds), so it has its own budget, ``AdapterConfig.launch_timeout_s``. Call ``start()`` once before the first action to start the
+    browser under that budget and outside every action's ``timeout_s``. When the first action starts it instead, the session's
+    per-action ``timeout_s`` (default 10 s) still bounds it: give that action a ``timeout_s`` of at least the time a start needs.
+    ``close()`` and ``abort()`` cancel a start that has not finished: the browser is quit the moment the launch returns, so a start
+    that an action timeout abandoned does not leave a browser behind. (The start itself cannot be interrupted from outside; it is
+    bounded by the driver's own start-up limits.) There is no retry of a start that timed out."""
 
     def __init__(self, driver_factory: Callable[[], BrowserDriver], *, config: Optional[AdapterConfig] = None,
                  manifest: Optional[AdapterManifest] = None):
@@ -80,16 +106,62 @@ class SeleniumInteractiveAdapter:
         self.config = config or AdapterConfig()
         self._factory = driver_factory
         self._driver: Optional[BrowserDriver] = None
+        self._launch: Optional[_Launch] = None
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        """Start the driver and the browser now, within ``launch_timeout_s``. A no-op when it is already running. A start that does
+        not finish in time is cancelled and reported as a ``TIMEOUT`` fault; a missing driver is ``UNAVAILABLE`` as for any action."""
+        try:
+            self._drv()
+        except (AdapterFault, AdapterUnavailable):
+            raise
+        except Exception as exc:
+            raise _fault(exc) from None
+
+    def _run_launch(self, launch: _Launch) -> None:
+        try:
+            drv = self._factory()
+        except BaseException as exc:      # noqa: BLE001 - classified by the caller, never kept as text
+            launch.exc = exc
+            launch.done.set()
+            return
+        with self._lock:
+            keep = not launch.cancelled
+            if keep:
+                self._driver = drv
+        if not keep:
+            _quit(drv)                    # abandoned while it was starting: nobody owns this browser, so it is not left running
+        launch.done.set()
 
     def _drv(self) -> BrowserDriver:
-        if self._driver is None:
-            try:
-                self._driver = self._factory()
-            except AdapterUnavailable:
-                raise
-            except Exception as exc:
-                raise _fault(exc) from None
-        return self._driver
+        with self._lock:
+            if self._driver is not None:
+                return self._driver
+            launch = self._launch
+            if launch is None:
+                launch = self._launch = _Launch()
+                threading.Thread(target=self._run_launch, args=(launch,), daemon=True, name="qa-selenium-launch").start()
+        if not launch.done.wait(self.config.launch_timeout_s):
+            self._cancel(launch)
+            raise AdapterFault("the browser did not start within the launch budget", retryable=False, code=ErrorCode.TIMEOUT)
+        with self._lock:
+            if self._launch is launch:
+                self._launch = None
+            if launch.exc is None and not launch.cancelled and self._driver is not None:
+                return self._driver
+            exc = launch.exc
+        if exc is None:
+            raise AdapterFault("the adapter was closed while the browser was starting", retryable=False, code=ErrorCode.INVALID_REQUEST)
+        if isinstance(exc, AdapterUnavailable):
+            raise exc
+        raise _fault(exc) from None
+
+    def _cancel(self, launch: _Launch) -> None:
+        with self._lock:
+            launch.cancelled = True
+            if self._launch is launch:
+                self._launch = None
 
     def perform(self, request: InteractiveActionRequest, layout: InteractiveLayout) -> ActionOutcome:
         wait = min(request.timeout_s, self.config.wait_s)
@@ -167,9 +239,10 @@ class SeleniumInteractiveAdapter:
         self.close()
 
     def close(self) -> None:
-        drv, self._driver = self._driver, None
+        with self._lock:
+            drv, self._driver = self._driver, None
+            launch, self._launch = self._launch, None
+            if launch is not None:
+                launch.cancelled = True       # a start that has not finished quits its browser when it does
         if drv is not None:
-            try:
-                drv.quit()
-            except Exception:
-                pass
+            _quit(drv)

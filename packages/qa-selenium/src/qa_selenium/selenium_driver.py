@@ -4,6 +4,8 @@
 Selenium Manager is never used: the driver executable is passed to ``Service(executable_path=...)``, and Selenium 4.52.0 skips its
 manager when a service path is given (``driver_finder.py`` logs 'Skipping Selenium Manager'). The browser binary and the driver
 executable must both be named and exist; the browser is never downloaded. Each driver gets a fresh throwaway profile directory.
+``log_path`` (default off) writes ChromeDriver's verbose log, with the browser's own log lines, to that file: diagnostics for a slow
+or failed start; it never changes what the driver does.
 
 This module is exercised only by the real-browser lane (``tests/browser``); the offline suite uses ``testing.fake``.
 """
@@ -26,7 +28,8 @@ CHROME_ARGS = (
 
 
 class SeleniumChromeDriver:
-    def __init__(self, chromedriver_path: str, chrome_binary: str, *, proxy_server: Optional[str] = None, extra_args: tuple = ()):
+    def __init__(self, chromedriver_path: str, chrome_binary: str, *, proxy_server: Optional[str] = None, extra_args: tuple = (),
+                 log_path: Optional[str] = None):
         try:
             import importlib.metadata as md
             from selenium import webdriver
@@ -53,7 +56,9 @@ class SeleniumChromeDriver:
         if proxy_server:
             options.add_argument(f"--proxy-server={proxy_server}")
         try:
-            self._driver = webdriver.Chrome(service=Service(executable_path=chromedriver_path), options=options)
+            service = (Service(executable_path=chromedriver_path, log_output=log_path, service_args=["--verbose", "--enable-chrome-logs"])
+                       if log_path else Service(executable_path=chromedriver_path))
+            self._driver = webdriver.Chrome(service=service, options=options)
         except Exception as exc:
             shutil.rmtree(self._profile, ignore_errors=True)
             kind = classify_exception(exc)
