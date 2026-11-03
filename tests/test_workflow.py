@@ -232,6 +232,28 @@ def test_the_runner_browser_job_runs_only_the_browser_tests_in_a_scrubbed_enviro
     assert steps.count('test -z "$(git status --porcelain)"') == 2
 
 
+def test_the_runner_egress_job_runs_only_the_egress_tests_in_a_scrubbed_environment_and_fails_on_skips():
+    job = WF["jobs"]["runner-egress"]
+    steps = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert job["runs-on"] == "ubuntu-24.04"
+    assert "-m egress packages/qa-runner/tests/egress" in steps and "env -i HOME=" in steps and "tools/check_junit.py" in steps and "--junitxml" in steps
+    assert "playwright==1.64.1" in steps and "playwright install --with-deps chromium" in steps and "PLAYWRIGHT_BROWSERS_PATH" in steps and "robotframework" not in steps.lower()
+    assert "pins" in job["needs"] and "continue-on-error" not in job and "upload-artifact" not in str(job)
+    fetches = [s for s in job["steps"] if "repository" in s.get("with", {})]
+    assert len(fetches) == 2 and "--verify-trees --require-git" in steps
+    assert steps.count('test -z "$(git status --porcelain)"') == 2
+    assert "--expect-tests 30" in steps                                         # the number of tests the egress lane holds: a deleted or deselected test is not green
+    offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["runner"]["steps"])
+    assert "-m egress" not in offline
+
+
+def test_the_runner_documentation_says_robot_egress_is_not_enforced_and_what_the_egress_tests_do_not_show():
+    text = (ROOT / "packages" / "qa-runner" / "README.md").read_text(encoding="utf-8")
+    for needle in ("Robot lane: egress is NOT enforced", "guard, not a sandbox", "egress-not-enforced-robot", "What is not shown", "fails closed"):
+        assert needle in text
+    assert "tamper-proof" not in text.lower()
+
+
 def test_the_runner_documentation_states_what_it_does_not_show():
     text = (ROOT / "packages" / "qa-runner" / "README.md").read_text(encoding="utf-8")
     for needle in ("unkeyed", "does not say the application is correct", "Linux x86_64", "never installs", "source-available, not open source", "What verification does and does not prove",

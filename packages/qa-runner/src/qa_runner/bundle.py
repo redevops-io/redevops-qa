@@ -75,6 +75,13 @@ def _lane_entry(run_id: str, lane: LaneOutcome) -> Dict[str, Any]:
     return {"lane_id": lane.lane_id, "run_id": f"{run_id}.{lane.lane_id}", "engine": {"name": lane.engine_name, "version": lane.engine_version}, "native": native}
 
 
+def extra_limitations(frozen: FrozenPlan) -> List[Dict[str, str]]:
+    """The limitations a run's report carries beyond the standard ones: today the statement that egress is not enforced for a Robot lane. It is derived from the PLAN (the lanes that name the
+    Robot engine), so ``verify`` can require exactly this text from the same plan."""
+    robot = [l.lane_id for l in frozen.lanes if l.engine == K.ENGINE_ROBOT]
+    return [{"id": K.ROBOT_EGRESS_LIMITATION_ID, "text": K.robot_egress_limitation_text(robot)}] if robot else []
+
+
 def finalize_results(judged: List[Dict[str, Any]], native_status: str, double: bool, harness_verdicts: Mapping[str, str], incomplete: bool = False) -> List[Dict[str, Any]]:
     """What the recomputed verdicts of a lane become once the lane's own status is taken into account. ``verify`` applies the same rules to the same inputs read back from a bundle.
 
@@ -123,7 +130,8 @@ def build_run_bundle(up: Upstreams, inputs: RunInputs) -> BuiltBundle:
                             "evidence": r["evidence"]})
     report = assemble_report(run_id=inputs.run_id, started_at=inputs.started_at, finished_at=inputs.finished_at, plan_digest=frozen.plan_digest,
                              environment=dict(inputs.environment), lanes=lanes_report, frozen=frozen.rows, results=results,
-                             verifier={"id": K.VERIFIER_NAME, "version": K.RUNNER_VERSION}, redaction=dict(REDACTION), extensions=dict(inputs.extensions) or None)
+                             verifier={"id": K.VERIFIER_NAME, "version": K.RUNNER_VERSION}, redaction=dict(REDACTION), extra_limitations=extra_limitations(frozen),
+                             extensions=dict(inputs.extensions) or None)
     pins = frozen.pins
     tools = {"redevops-qa-runner": K.RUNNER_VERSION, "qa-evidence": EVIDENCE_VERSION, "agent-harness": pins["harness"], "runtime-contracts": pins["contracts"]}
     return build_bundle(report=report, files=files, tools=tools, producer={"name": "redevops-qa", "version": K.RUNNER_VERSION})

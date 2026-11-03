@@ -24,6 +24,16 @@ ENGINE_PLAYWRIGHT = "playwright-chromium"
 ENGINE_ROBOT = "robot-framework"
 ENGINES = (ENGINE_PLAYWRIGHT, ENGINE_ROBOT)
 
+#: the report states, in its limitations, that egress is not enforced for a Robot lane (the lane ids are listed, so the statement is exactly as long as the plan's Robot lanes)
+ROBOT_EGRESS_LIMITATION_ID = "egress-not-enforced-robot"
+
+
+def robot_egress_limitation_text(lane_ids) -> str:
+    return ("Network egress is NOT enforced for the Robot Framework lane(s) of this run (" + ", ".join(sorted(lane_ids)) + "): a Robot library opens its own sockets, "
+            "the egress gateway is not in the path of that traffic, and the library allowlist is a guard, not a sandbox. Nothing in this report shows that those "
+            "lanes' traffic was limited to the allowed origin; each such lane's egress-profile.json records not-enforced.")
+
+
 ORIGIN_PLACEHOLDER = "{origin}"
 DEFECTS = ("none", "discount", "settings")
 

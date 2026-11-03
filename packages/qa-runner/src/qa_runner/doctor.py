@@ -190,6 +190,9 @@ def check_fixture_app() -> Check:
 
 
 def check_egress_gateway() -> Check:
+    """Fails closed: the gateway must start AND the browser launch configuration must be available and complete. Nothing is sent here; whether Chromium obeys the configuration is shown by the
+    egress tests against a hostile page, not by this check."""
+    from .egress import launch_config_problems
     try:
         from qa_egress import GatewayServer, build_launch_config
         from qa_egress.resolver import SystemResolver
@@ -197,13 +200,20 @@ def check_egress_gateway() -> Check:
         policy = up.harness.egress.EgressPolicy.from_config({"private": [{"host": "127.0.0.1", "networks": ["127.0.0.1/32"], "schemes": ["http"], "ports": [1],
                                                                         "label": "doctor"}]})
         with GatewayServer(policy, SystemResolver()) as gw:
-            cfg = build_launch_config("127.0.0.1", gw.port)
-            ok = bool(cfg.chromium_args) and any(a.startswith("--proxy-bypass-list=<-loopback>") for a in cfg.chromium_args)
+            try:
+                fields = build_launch_config("127.0.0.1", gw.port).profile_fields()
+            except Exception as exc:
+                return Check("egress gateway", "FAIL", f"the gateway started but the browser launch configuration is unavailable ({type(exc).__name__}); a browser lane would have no "
+                             "protected way out and the run refuses to continue without it", "check that qa-egress is importable and unmodified; reinstall it from this checkout")
+            problems = launch_config_problems(fields, gw.port)
     except Exception as exc:
         return Check("egress gateway", "FAIL", f"the egress gateway could not start ({type(exc).__name__}); a browser lane would have no protected way out and "
                      "the run refuses to continue without it", "check that qa-egress is importable, the pins verify and a loopback port can be bound")
-    return Check("egress gateway", "OK" if ok else "FAIL", "binds on loopback and builds the launch configuration whose flags force browser traffic through it (loopback is not bypassed); no traffic was sent here: enforcement is shown by the browser tests, not by this check"
-                 if ok else "the launch configuration does not force loopback traffic through the gateway", "" if ok else "reinstall qa-egress from this checkout")
+    if problems:
+        return Check("egress gateway", "FAIL", "the browser launch configuration does not make the gateway the only way out (" + "; ".join(problems) + "); the run refuses to continue without it",
+                     "reinstall qa-egress from this checkout")
+    return Check("egress gateway", "OK", "binds on loopback and builds the launch configuration whose flags force browser traffic through it (loopback is not bypassed); no traffic was sent "
+                 "here: enforcement is shown by the browser tests, not by this check. Egress is not enforced for a Robot lane")
 
 
 def check_workdir() -> Check:

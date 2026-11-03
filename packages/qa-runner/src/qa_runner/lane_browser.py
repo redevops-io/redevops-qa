@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -23,6 +24,15 @@ from qa_evidence.canon import CanonError, dumps_canonical, loads_strict
 from . import constants as K
 from .safe_read import UnsafeRead, read_regular
 from .deps import bootstrap
+from .egress import launch_config_problems
+
+
+class LaunchConfigRefused(RuntimeError):
+    """The browser launch configuration is incomplete: no browser was started."""
+
+
+class GatewayLost(RuntimeError):
+    """The egress gateway stopped answering before the lane ended: whatever the browser did after that is not evidence of a protected run."""
 
 
 class AppChecks:
@@ -74,6 +84,18 @@ class RecordingAdapter:
         return self._inner.close_session(handle)
 
 
+def gateway_snapshot(gateway: Any) -> List[Dict[str, Any]]:
+    """What the gateway decided, read once the browser is done. A gateway that no longer answers (stopped, crashed, its loop closed) is a lost gateway: the lane fails closed with ``GatewayLost``,
+    because nothing the browser did after that point went through a protected path and the log of what it decided is incomplete."""
+    try:
+        if not gateway.running:
+            raise GatewayLost("the egress gateway is not running")
+        gateway.wait_idle()
+        return gateway.events()
+    except Exception as exc:
+        raise GatewayLost("the egress gateway was lost before the lane ended") from exc
+
+
 def observation_row(observed: Any) -> Dict[str, Any]:
     return {"resolution": observed.resolution.value, "match_count": int(observed.match_count), "value": observed.value,
             "value_digest": observed.value_digest}
@@ -112,6 +134,9 @@ def run_lane(cfg: Dict[str, Any]) -> Dict[str, Any]:
     adapter = None
     try:
         fields = build_launch_config("127.0.0.1", gateway.port).profile_fields()
+        problems = launch_config_problems(fields, gateway.port)
+        if problems:                                      # fail closed: never start a browser whose configuration is weaker than the one doctor accepts
+            raise LaunchConfigRefused("the browser launch configuration does not make the gateway the only way out: " + "; ".join(problems))
         profile = EgressProfile("lane", egress_policy, resolver, tuple(fields["launch_args"]), ProxySettings(**fields["proxy"]))
         real = PlaywrightAdapter(PlaywrightDriver(), blobs=blobs, redactor=redactor, clock=clock, egress_profiles={"lane": profile}, config=AdapterConfig())
         adapter = RecordingAdapter(real)
@@ -126,8 +151,7 @@ def run_lane(cfg: Dict[str, Any]) -> Dict[str, Any]:
             result = runner.run(spec, run_id=cfg["run_id"], pinned_assertion_set_hash=pin)
         finally:
             real.shutdown()
-        gateway.wait_idle()
-        gateway_events = gateway.events()
+        gateway_events = gateway_snapshot(gateway)
     finally:
         gateway.stop()
     ordered = sorted(assertions, key=lambda a: a.assertion_id)
@@ -197,4 +221,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    # Leave without running the interpreter's shutdown. Everything the lane has to say is already on disk (written and closed before ``main`` returns) and on the two standard streams, which are
+    # flushed here. On ubuntu-24.04, in 24 of 24 CI runs of a lane whose navigation had timed out (a hostile page that opens a WebSocket to a refused origin), the process was killed by SIGSEGV
+    # DURING interpreter shutdown, after ``main`` had returned and the result file was complete (faulthandler: no Python frame, extension module greenlet); with this exit the same runs ended
+    # with exit status 0 (24 of 24). Without it an honest result was followed by a crash that the parent can only read as a signal. The parent supervises the process group, so nothing is left behind.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
