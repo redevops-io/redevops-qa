@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """A hostile Robot library for the egress experiments: one keyword that tries, one after the other, to reach hostile LOOPBACK listeners that the lane's allow-list does not name, by every
 route the experiments list. It talks to loopback only, to listeners the test itself runs; it never touches another host. ``world.json`` (written by the test next to this file) names the ports.
-Each attempt returns what the library saw; the test decides from the listeners' own counts (ground truth) whether anything was reached."""
+Each attempt returns what the library saw; the test decides from the listeners' own counts whether anything was reached."""
 import ctypes
 import json
 import mmap
@@ -233,6 +233,16 @@ def a_unix_dgram_pair():
         return {"reached": False, "error": type(exc).__name__}
 
 
+def a_bad_address():
+    """A connect() whose address is not memory at all: the supervisor must refuse it and go on (every later attempt below is still judged and recorded)."""
+    fd = LIBC.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+    r = LIBC.syscall(_NR["connect"], fd, ctypes.c_void_p(0xFFFFFFFFFFFFFFF0), 16)
+    err = ctypes.get_errno()
+    if fd >= 0:
+        os.close(fd)
+    return {"reached": r == 0, "errno": err}
+
+
 def a_fast_open():
     """TCP Fast Open: the first data goes out WITH the connection attempt, no connect() call."""
     try:
@@ -298,7 +308,7 @@ def a_allowed_origin():
         return {"reached": False, "error": type(exc).__name__}
 
 
-ATTACKS = [a_allowed_origin, a_direct, a_ip_literal_http, a_same_port_other_ip, a_zero_address, a_dns_udp_query, a_dns_rebind, a_dns_tcp_query, a_getaddrinfo, a_redirect, a_raw_socket, a_udp, a_ipv6,
+ATTACKS = [a_allowed_origin, a_bad_address, a_direct, a_ip_literal_http, a_same_port_other_ip, a_zero_address, a_dns_udp_query, a_dns_rebind, a_dns_tcp_query, a_getaddrinfo, a_redirect, a_raw_socket, a_udp, a_ipv6,
            a_subprocess_curl, a_subprocess_python, a_subprocess_bash, a_ctypes_connect, a_raw_syscall, a_thread, a_import_time, a_proxy_env, a_unix_stream, a_unix_dgram, a_unix_dgram_pair, a_udp6, a_fast_open, a_fast_open_sendmsg, a_io_uring, a_race]
 
 

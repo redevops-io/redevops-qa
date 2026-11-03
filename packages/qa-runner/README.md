@@ -123,7 +123,7 @@ loads code at run time). The suite runs under the kit supervisor with `QA_BASE_U
   hand-written record, one from another run or one that does not belong to the report next to it is unusable evidence (`EVIDENCE_UNUSABLE`).
 * **A Robot lane's egress is limited by kernel layers, or by nothing, and the plan says which.** `"egress": "origin-only"` asks for the layers of the section Egress below (the same one-origin
   allow-list as the browser lane's); the lane does not start if they cannot be installed. `"egress": "not-enforced"` asks for nothing: a Robot library then opens its own sockets, the lane's
-  egress profile says so and so does the report. A browser lane must use `origin-only`.
+  egress profile says so and so does the report (the limitation `egress-not-enforced-robot`). A browser lane must use `origin-only`.
 * **Same supervision as the browser lane:** the Robot lane runs in a child process too (the same deadline, cancel, process-group kill, and a parent-death watchdog), and the engine runs
   under its own supervisor inside it.
 * **A suite that records a value it did not observe is caught outside the record.** Three things hold it: the pinned hashes of the suite and library (above); the target's own request
@@ -179,7 +179,7 @@ native status that says so; its assertions are `INCONCLUSIVE`; the run is never 
   not hold and none is used. The lane child installs two layers on itself BEFORE it starts the engine (`qa_runner.netfence`; `prctl`, `seccomp` and the Landlock calls through `ctypes`: no helper
   program, no privilege), and everything the engine starts inherits them: (1) a seccomp filter with a supervising thread of the lane child lets `connect` through only to the plan's allow-list (one
   loopback address and port; anything else is refused with `EACCES` and recorded), allows only TCP over IPv4 and local stream sockets as socket kinds (UDP, raw, packet, netlink, IPv6, SCTP, MPTCP and
-  the rest are refused), refuses `connect` to a local socket path, TCP Fast Open (and `sendto` with an address, which no experiment isolates: UDP and datagram sockets are already refused at creation), `io_uring`, `ptrace`, `process_vm_*` and `pidfd_getfd`; (2) Landlock limits TCP `connect` to the allowed port, in the kernel,
+  the rest are refused), refuses `connect` to a local socket path and TCP Fast Open (both measured below) and, not measured by an experiment of their own, `sendto` with an address (UDP and datagram sockets are already refused at creation), `io_uring` setup, `ptrace`, `process_vm_*` and `pidfd_getfd` (a container's own filter may refuse some of them first); (2) Landlock limits TCP `connect` to the allowed port, in the kernel,
   after the supervisor's decision. The layers are installed with `PR_SET_NO_NEW_PRIVS`, cannot be removed by the process that carries them, and are followed by a self-test (a listener that is not
   allowed must refuse this very thread, a UDP socket must be refused): if either layer is unavailable or the self-test fails, the engine is not started (`NATIVE_UNAVAILABLE`, `egress-unavailable`, exit
   status 3), and `run`/`demo` refuse before anything starts ("Nothing was started and no evidence directory was made"). There is no weaker mode.
@@ -219,7 +219,7 @@ are the listeners' counts, not what the library says; the same attempts run with
 | raw socket (not asserted: it needs root to succeed even with no layer) | root only | refused | not covered | refused |
 | TCP Fast Open (data sent with the connection attempt), by `sendto` and by `sendmsg` | reached | blocked | reached | blocked |
 | `curl`, `python`, `bash` (`/dev/tcp`) started by the library; `ctypes` `connect`; a raw `syscall`; a thread; a module that connects when it is imported | reached | blocked | blocked | blocked |
-| `io_uring` | depends on the host | refused (not asserted: a container's own filter may refuse first) | not covered | refused |
+| `io_uring` setup | depends on the host | refused (a container's own filter may refuse first, so no audit record is required) | not covered | refused |
 | the address of `connect` flipped by a second process while it is called | reached | NOT stopped: it reached the forbidden port in the measurements made while writing this (a race: not asserted either way) | blocked | blocked (asserted: Landlock holds the port) |
 | the allowed origin, by the library's normal route | works | works | works | works |
 

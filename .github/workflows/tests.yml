@@ -421,8 +421,8 @@ jobs:
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
             python -m pytest -q -m robot_egress packages/qa-runner/tests/robot_egress --junitxml="$RUNNER_TEMP/junit-robot-egress.xml"
       - name: Fail on zero collected tests, any skip, or a number of tests other than the one expected (a deleted or deselected test cannot stay green)
-        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-egress.xml" --expect-tests 0
-      - name: Run the experiments as root in an ubuntu:24.04 container (Docker's default options: its own seccomp profile, no added capability)
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-egress.xml" --expect-tests 217
+      - name: "Run the experiments as root in an ubuntu:24.04 container (Docker's default options, so its own seccomp profile and no added capability)"
         run: |
           docker run --rm -v "$PWD":/w -v "$RUNNER_TEMP":/out -w /w ubuntu:24.04 bash -euc '
             apt-get update -qq >/dev/null
@@ -436,7 +436,7 @@ jobs:
               --junitxml=/out/junit-robot-egress-root.xml
           '
       - name: Fail on zero collected tests, any skip, or a number of tests other than the one expected (as root)
-        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-egress-root.xml" --expect-tests 0
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-egress-root.xml" --expect-tests 191
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 

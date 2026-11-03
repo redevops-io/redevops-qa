@@ -370,13 +370,20 @@ class Fence:
                         if err in (errno.ENOENT, errno.EINTR, errno.EAGAIN):
                             continue                                        # the caller was killed before we looked
                         raise OSError(err, "receive failed")
-                    self._handle(fd, req)
+                    try:
+                        self._handle(fd, req)
+                    except Exception:                                       # a decision that could not be taken is a refusal, never a lost supervisor
+                        self._refuse_after_error(fd, req)
                 elif flags & (select.POLLHUP | select.POLLERR | select.POLLNVAL):
                     break                                                   # every process that carried the filter is gone
         except Exception as exc:                                            # the supervisor is lost: every later decision call fails (ENOSYS) and the lane says so
             with self._lock:
                 self.lost = not self._stop.is_set()
                 self._events.append({"seq": len(self._events) + 1, "layer": LAYER_SECCOMP, "syscall": "supervisor", "verdict": "lost", "reason": type(exc).__name__})
+
+    def _refuse_after_error(self, fd: int, req: _Notif) -> None:
+        self._record(verdict="deny", syscall=self._nr_name.get(req.data.nr, f"syscall-{req.data.nr}"), reason="decision-failed")
+        self._libc.ioctl(fd, IOCTL_SEND, ctypes.byref(_Resp(id=req.id, val=0, error=-errno.EACCES, flags=0)))
 
     def _read_sockaddr(self, pid: int, addr: int, length: int) -> Optional[bytes]:
         try:
@@ -385,7 +392,7 @@ class Fence:
             return None
         try:
             return os.pread(fd, min(max(length, 0), 128), addr)
-        except OSError:
+        except (OSError, OverflowError, ValueError):                       # an address the caller made up (above the range of an offset, or not mapped): refused, and the supervisor lives on
             return None
         finally:
             os.close(fd)
@@ -414,7 +421,7 @@ class Fence:
     def _decide_connect(self, pid: int, args: List[int]) -> Tuple[bool, Dict[str, Any]]:
         raw = self._read_sockaddr(pid, args[1], args[2] & 0xFFFFFFFF)
         if raw is None or len(raw) < 2:
-            return False, {"syscall": "connect", "family": None, "reason": "address-unreadable"}
+            return False, {"syscall": "connect", "reason": "address-unreadable"}
         family = struct.unpack_from("=H", raw, 0)[0]
         if family == AF_INET and len(raw) >= 8:
             port = struct.unpack_from(">H", raw, 2)[0]

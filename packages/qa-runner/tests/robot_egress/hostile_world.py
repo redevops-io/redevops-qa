@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
-"""The hostile LOOPBACK world of the Robot egress experiments: listeners that count what reaches them (the ground truth the experiments read), a resolver that answers every name with
+"""The hostile LOOPBACK world of the Robot egress experiments: listeners that count what reaches them (the count the experiments read), a resolver that answers every name with
 127.0.0.1, and an 'allowed origin' that answers /ok and redirects /redirect. Everything binds to the loopback interface of this machine and nothing here connects anywhere else."""
 from __future__ import annotations
 

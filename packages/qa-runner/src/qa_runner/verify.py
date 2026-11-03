@@ -321,9 +321,11 @@ def _check_robot_egress(frozen: FrozenPlan, files: Mapping[str, bytes], report: 
         if problems:
             v.add("EGRESS_LOG_MALFORMED", path, safe_text("; ".join(problems[:3]), 200))
             continue
+        if f"lanes/{lid}/egress-profile.json" not in files:
+            continue                                             # not kept (the evidence budget) and listed as such, or EXPECTED_FILE_MISSING (_check_required)
         origin = lane_origin(fl, files)
         if origin is None:
-            v.add("EGRESS_PROFILE_MISSING", f"lanes/{lid}/egress-profile.json", "the egress profile is missing, malformed, or not exactly the one the plan's profile gives for the origin it names")
+            v.add("EGRESS_PROFILE_MISSING", f"lanes/{lid}/egress-profile.json", "the egress profile is malformed, or not exactly the one the plan's profile gives for the origin it names")
             continue
         allowed = [f"127.0.0.1/32:{origin.rsplit(':', 1)[1]}"]
         if header.get("event") == "unavailable":
@@ -349,8 +351,9 @@ def _check_robot_egress(frozen: FrozenPlan, files: Mapping[str, bytes], report: 
         if native["raw_status"] == "egress-fence-lost" and not any(e["verdict"] == "lost" for e in events):
             v.add("EGRESS_DENIAL_NOT_IN_LOG", path, "the lane is reported as having lost its egress supervisor but its log does not say so")
     reported = (report.get("extensions") or {}).get("egress_fence_denied")
-    ran = any(fl.engine == K.ENGINE_ROBOT and fl.egress == "origin-only" and f"lanes/{fl.lane_id}/{egresslog.LOG_NAME}" in files for fl in frozen.lanes)
-    if reported is not None and (not ran or reported != total):
+    fenced = [fl for fl in frozen.lanes if fl.engine == K.ENGINE_ROBOT and fl.egress == "origin-only"]
+    complete = all(f"lanes/{fl.lane_id}/{egresslog.LOG_NAME}" in files for fl in fenced)          # a log the evidence budget did not keep cannot be counted (its absence is judged by _check_required)
+    if reported is not None and fenced and complete and reported != total:
         v.add("REPORT_FIELD_MISMATCH", "extensions.egress_fence_denied", "the number of refused attempts in the report is not the number in the lanes' egress logs")
 
 

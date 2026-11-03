@@ -2,7 +2,7 @@
 """The negative experiments of the Robot lane's egress layers.
 
 A hostile Robot library (``hostile_suite/HostileLib.py``) runs inside the real lane child, under the real Robot Framework and the kit supervisor, and tries to reach hostile LOOPBACK listeners
-that the lane's allow-list does not name, by every route below. The listeners count what reaches them: that count is the ground truth, not what the library says. The same attempts run in
+that the lane's allow-list does not name, by every route below. The listeners count what reaches them: that count decides, not what the library says. The same attempts run in
 four configurations:
 
 * ``control``: the plan says ``not-enforced``, no layer is installed (the attempts must REACH: otherwise an attempt that does nothing would count as blocked);
@@ -18,7 +18,7 @@ from qa_runner import egresslog
 from hostile_world import World
 from lane_run import run_hostile
 
-ATTACKS = ["allowed_origin", "direct", "ip_literal_http", "same_port_other_ip", "zero_address", "dns_udp_query", "dns_rebind", "dns_tcp_query", "getaddrinfo", "redirect", "raw_socket", "udp",
+ATTACKS = ["allowed_origin", "bad_address", "direct", "ip_literal_http", "same_port_other_ip", "zero_address", "dns_udp_query", "dns_rebind", "dns_tcp_query", "getaddrinfo", "redirect", "raw_socket", "udp",
            "ipv6", "subprocess_curl", "subprocess_python", "subprocess_bash", "ctypes_connect", "raw_syscall", "thread", "import_time", "proxy_env", "unix_stream", "unix_dgram", "unix_dgram_pair", "udp6", "fast_open",
            "fast_open_sendmsg", "io_uring", "race"]
 #: what the listener of an experiment counts as proof of reach; an attempt that is not here is judged by the library's own report (it created the socket, it resolved the name)
@@ -32,6 +32,7 @@ NOT_ASSERTED = {"raw_socket": "needs root to succeed even without any layer", "g
 
 #: reached (True) or blocked (False) in each configuration; the entries are what was MEASURED, and a change of the layers that changes one is a change of what the report may say
 CONTROL = {a: True for a in ATTACKS if a not in NOT_ASSERTED}
+CONTROL["bad_address"] = False                  # the kernel refuses an address that is not memory (EFAULT) with no layer at all: not a reach, here only to show the supervisor survives it
 BOTH = {a: False for a in ATTACKS if a not in NOT_ASSERTED}
 BOTH["allowed_origin"] = True
 SECCOMP_ONLY = dict(BOTH)
@@ -108,6 +109,14 @@ def test_every_refused_attempt_is_in_the_audit_record(runs, config, attack):
     assert not run.log_problems and run.log_header is not None
     refusals = [e for e in segments(run.log_events).get(attack, []) if e["verdict"] == "deny"]
     assert refusals, f"{attack} under {config}: the supervisor recorded no refusal between its marker and the next"
+
+
+@pytest.mark.parametrize("config", ["both", "seccomp-only"])
+def test_a_connect_with_an_address_that_is_not_memory_is_refused_and_the_supervisor_goes_on(runs, config):
+    run = runs(config)
+    mine = [e for e in segments(run.log_events)["bad_address"] if e["verdict"] == "deny"]
+    assert [(e["syscall"], e["reason"]) for e in mine] == [("connect", "address-unreadable")] and not run.outcome.raw_status == "egress-fence-lost"
+    assert segments(run.log_events)["direct"], "the attempts after it were still decided and recorded"
 
 
 @pytest.mark.parametrize("config", ["both", "seccomp-only"])
