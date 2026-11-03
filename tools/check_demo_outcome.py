@@ -23,10 +23,17 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Sequence
 
+ALL_VERIFIED = {"A-SAVED": ("browser", "VERIFIED", "EQUALS_EXPECTED"), "A-NOTIF-ON": ("browser", "VERIFIED", "EQUALS_EXPECTED"), "A-URL": ("browser", "VERIFIED", "PREDICATE_HOLDS"),
+                "A-ORDER-RULE": ("robot", "VERIFIED", "EQUALS_EXPECTED")}
+#: What each seeded defect must produce, exactly: every assertion with its lane, its verdict and its reason code, so that a defect that breaks MORE than the seeded one (the whole browser lane,
+#: say) is not reported as "the seeded defect was found". ``failed_lane`` is the lane that the defect is seeded in.
 EXPECT = {
-    "none": {"exit": 0, "outcome": "VERIFIED", "reason": "ALL_ASSERTIONS_VERIFIED", "failed_lane": None, "native": {"browser": "NATIVE_PASS", "robot": "NATIVE_PASS"}},
-    "discount": {"exit": 1, "outcome": "FAILED", "reason": "ASSERTION_FAILED", "failed_lane": "robot", "native": {"browser": "NATIVE_PASS", "robot": "NATIVE_FAIL"}},
-    "settings": {"exit": 1, "outcome": "FAILED", "reason": "ASSERTION_FAILED", "failed_lane": "browser", "native": {"browser": "NATIVE_FAIL", "robot": "NATIVE_PASS"}},
+    "none": {"exit": 0, "outcome": "VERIFIED", "reason": "ALL_ASSERTIONS_VERIFIED", "failed_lane": None, "native": {"browser": "NATIVE_PASS", "robot": "NATIVE_PASS"},
+             "assertions": dict(ALL_VERIFIED)},
+    "discount": {"exit": 1, "outcome": "FAILED", "reason": "ASSERTION_FAILED", "failed_lane": "robot", "native": {"browser": "NATIVE_PASS", "robot": "NATIVE_FAIL"},
+                 "assertions": {**ALL_VERIFIED, "A-ORDER-RULE": ("robot", "FAILED", "EXPECTED_VALUE_DIFFERS")}},
+    "settings": {"exit": 1, "outcome": "FAILED", "reason": "ASSERTION_FAILED", "failed_lane": "browser", "native": {"browser": "NATIVE_FAIL", "robot": "NATIVE_PASS"},
+                 "assertions": {**ALL_VERIFIED, "A-NOTIF-ON": ("browser", "FAILED", "EXPECTED_VALUE_DIFFERS")}},
 }
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
@@ -59,14 +66,21 @@ def check_run(defect: str, exit_code: int, output: str, evidence_root: Path) -> 
     if sorted(states) != ["browser", "robot"]:
         problems.append(f"expected the lanes browser and robot, found {sorted(states)}")
     acc = report["accounting"]
-    if acc["unaccounted"] != 0 or acc["inconclusive"] != 0 or acc["frozen"] != acc["verified"] + acc["failed"]:
-        problems.append(f"the accounting is not closed: {({k: acc[k] for k in ('frozen', 'verified', 'failed', 'inconclusive', 'unaccounted')})}")
-    for lane, lane_states in sorted(states.items()):
-        if lane == want["failed_lane"]:
-            if "FAILED" not in lane_states or set(lane_states) - {"FAILED", "VERIFIED"}:
-                problems.append(f"lane {lane} should have a failed assertion and nothing unaccounted, has {lane_states}")
-        elif set(lane_states) != {"VERIFIED"}:
-            problems.append(f"lane {lane} should be all verified, has {lane_states}")
+    failed_n = sum(1 for _l, st, _r in want["assertions"].values() if st == "FAILED")
+    exp_counts = {"frozen": len(want["assertions"]), "verified": len(want["assertions"]) - failed_n, "failed": failed_n, "inconclusive": 0, "unaccounted": 0}
+    got_counts = {k: acc[k] for k in exp_counts}
+    if got_counts != exp_counts:
+        problems.append(f"the accounting is {got_counts}, expected {exp_counts}")
+    got = {r["assertion_id"]: (r["lane_id"], r["verdict"]["state"], r["verdict"].get("reason_code", (r["verdict"].get("provenance") or {}).get("reason_code"))) for r in acc["results"]}
+    if len(got) != len(acc["results"]):
+        problems.append("an assertion id appears twice in the results")
+    for aid in sorted(set(want["assertions"]) | set(got)):
+        if aid not in got:
+            problems.append(f"assertion {aid} is missing from the results")
+        elif aid not in want["assertions"]:
+            problems.append(f"assertion {aid} is not one of the plan's")
+        elif got[aid] != want["assertions"][aid]:
+            problems.append(f"assertion {aid}: lane, verdict and reason code are {got[aid]}, expected {want['assertions'][aid]}")
     natives = {l["lane_id"]: l["native"]["status"] for l in report["lanes"]}
     if natives != want["native"]:
         problems.append(f"the engines reported {natives}, expected {want['native']}")

@@ -666,16 +666,22 @@ jobs:
           cp -R "$(ls -d "$RUNNER_TEMP"/evidence/r0-*)" "$RUNNER_TEMP/changed"
           printf 'x' >> "$RUNNER_TEMP/changed/report.json"
           status=0
-          "$RUNNER_TEMP/verifier/bin/redevops-qa" verify "$RUNNER_TEMP/changed" || status=$?
+          "$RUNNER_TEMP/verifier/bin/redevops-qa" verify "$RUNNER_TEMP/changed" > "$RUNNER_TEMP/changed.out" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/changed.out"
           echo "verify exit status on the changed copy: $status"
           test "$status" -eq 5
+          grep -q "^  SIZE_MISMATCH report.json:" "$RUNNER_TEMP/changed.out"
+          grep -q "^  REPORT_UNREADABLE report.json:" "$RUNNER_TEMP/changed.out"
       - name: A wrong anchor is refused
         run: |
           cd "$RUNNER_TEMP"
           status=0
-          "$RUNNER_TEMP/verifier/bin/redevops-qa" verify "$(ls -d "$RUNNER_TEMP"/evidence/r0-*)" --anchor "sha256:$(printf '0%.0s' $(seq 64))" --require-anchor || status=$?
+          "$RUNNER_TEMP/verifier/bin/redevops-qa" verify "$(ls -d "$RUNNER_TEMP"/evidence/r0-*)" --anchor "sha256:$(printf '0%.0s' $(seq 64))" --require-anchor > "$RUNNER_TEMP/wrong-anchor.out" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/wrong-anchor.out"
           echo "verify exit status with a wrong anchor: $status"
           test "$status" -eq 5
+          grep -q "^  ANCHOR_MISMATCH anchor:" "$RUNNER_TEMP/wrong-anchor.out"
+          grep -q "^  ANCHOR_REQUIRED anchor:" "$RUNNER_TEMP/wrong-anchor.out"
 
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
