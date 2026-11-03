@@ -77,6 +77,10 @@ Two installations never share a file. Moving an installed directory does not wor
 * The build is deterministic in design (sorted entries, fixed timestamps, no compression of the archive). This README claims nothing about two builds being byte for byte equal.
 * A run's evidence is hash-linked and the chain is unkeyed: someone who can rewrite a whole evidence bundle can rewrite its digests too. `redevops-qa verify --anchor` compares
   the manifest digest with a value you obtained elsewhere; a match shows the bundle is the one that value was taken from, and nothing in it authenticates where the value came from.
+* An optional signed anchor: `redevops-qa verify --anchor-sig FILE --anchor-pub FILE` checks a detached OpenSSH signature of the manifest digest (made with `redevops-qa anchor statement` / `anchor sign` and a key you
+  hold; this bundle holds no key) against ONE Ed25519 public key you supply, by calling the OpenSSH client's `ssh-keygen -Y verify`, which must be on the host (a verification without it exits 7 and accepts nothing). It shows
+  that the manifest digest was signed by the holder of the matching private key and that a bundle rewritten after signing does not verify; it does not show who holds that key, that the key was not exposed, when the
+  signature was made, or that the run was executed on an uncompromised host. A signature is only as trustworthy as the channel through which you obtained the public key.
 * The harness is installed from this bundle only. The name `agent-harness` on the public package index belongs to an unrelated project: do not install it by name.
 
 ## Licences

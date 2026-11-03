@@ -23,6 +23,7 @@ CORR = "test_qr_corroborate.py"
 CORRR = "test_qr_corroborate_robot.py"
 EGCFG = "test_qr_egress_config.py"
 CRASH = "test_qr_lane_crash.py"
+ANCHOR = "test_qr_anchor_sig.py"
 
 
 def t(file, name):
@@ -387,6 +388,55 @@ CASES = [
     ("doctor warns outside linux x86_64", "doctor.py", "    if (system, machine) == SUPPORTED_PLATFORM:", "    if True:", [t(CLI, "test_only_linux_x86_64_is_the_supported_platform")]),
     ("doctor fails when the pins do not verify", "doctor.py", "        up = verified_bootstrap()\n    except EnvironmentFault as exc:\n        return Check(\"pinned dependencies\"",
      "        up = bootstrap()\n    except EnvironmentFault as exc:\n        return Check(\"pinned dependencies\"", [t(CLI, "test_pins_that_are_not_the_pinned_trees_fail_and_say_what_to_fetch")]),
+    # ---- the optional signed anchor (anchor_sig.py, verify.py, cli.py) -------------------------------------------------------------------
+    ("M1 the result of ssh-keygen is ignored", "anchor_sig.py", '        if done.returncode == 0:\n            if done.stdout.decode("ascii", "replace").strip() == good:', "        if True:\n            if True:",
+     [t(ANCHOR, "test_a_signature_over_another_manifest_digest_is_refused_with_status_5"), t(ANCHOR, "test_a_bundle_rewritten_and_re_chained_after_signing_is_accepted_by_plain_verify_and_refused_by_the_signature[failing-lane-dropped]")]),
+    ("M2 the statement takes the manifest digest the caller supplies instead of the recomputed one", "verify.py", '"manifest_digest": qe.manifest_digest,', '"manifest_digest": qe.anchor.supplied or qe.manifest_digest,',
+     [t(ANCHOR, "test_a_bundle_rewritten_and_re_chained_after_signing_is_accepted_by_plain_verify_and_refused_by_the_signature[robot-reports-a-clean-run]")]),
+    ("M3 the key is taken from beside the signature, not from --anchor-pub", "verify.py", "v.signature = asig.verify_signature(statement, sig_path, pub_path)", 'v.signature = asig.verify_signature(statement, sig_path, str(sig_path)[:-4] + ".pub")',
+     [t(ANCHOR, "test_a_signature_by_one_key_does_not_verify_with_another_key_and_no_key_from_beside_the_signature_is_used")]),
+    ("M4 the namespace is not passed to ssh-keygen -Y verify", "anchor_sig.py", '"-I", PRINCIPAL, "-n", NAMESPACE, "-s", sigfile]', '"-I", PRINCIPAL, "-s", sigfile]',
+     [t(ANCHOR, "test_a_signed_bundle_verifies_with_the_supplied_key_and_exits_with_the_runs_own_status[none-0]"), t(ANCHOR, "test_the_check_runs_in_a_clean_environment_with_no_agent_and_no_network_names")]),
+    ("M5 the run id and the plan digest are not part of the statement", "anchor_sig.py", '"schema_version": STATEMENT_VERSION, "run_id": run_id, "manifest_digest": manifest_digest, "plan_digest": plan_digest})',
+     '"schema_version": STATEMENT_VERSION, "manifest_digest": manifest_digest})',
+     [t(ANCHOR, "test_the_statement_is_deterministic_and_names_the_run_the_manifest_and_the_plan"), t(ANCHOR, "test_a_signature_made_for_another_run_or_plan_does_not_verify_for_this_bundle")]),
+    ("M6 --require-signed-anchor is not enforced", "verify.py", "    if sig_path is None:\n        if required:", "    if sig_path is None:\n        if False:",
+     [t(ANCHOR, "test_a_stripped_signature_is_refused_where_one_is_required_and_is_never_called_signed_otherwise")]),
+    ("M7a a matching --anchor value is reported as a signed anchor", "verify.py", 'return "matches-supplied-anchor" if self.qe.anchor.matches else "internal-consistency-only"',
+     'return "signed-anchor-verified" if self.qe.anchor.matches else "internal-consistency-only"',
+     [t(ANCHOR, "test_an_unsigned_run_or_one_that_only_matches_an_anchor_is_never_reported_as_signed_in_any_form")]),
+    ("M7b an unsigned run is reported as a signed anchor", "verify.py", "        if self.signature.state == asig.VERIFIED:\n            return \"signed-anchor-verified\"", "        if self.signature.state in (asig.VERIFIED, asig.ABSENT):\n            return \"signed-anchor-verified\"",
+     [t(ANCHOR, "test_the_unsigned_text_is_what_it_was_before_this_feature_and_the_new_json_key_is_the_only_addition"), t(ANCHOR, "test_a_stripped_signature_is_refused_where_one_is_required_and_is_never_called_signed_otherwise")]),
+    ("M8 an invalid signature is treated as no signature when none is required", "verify.py", '    elif v.signature.state != asig.VERIFIED:\n        v.add("ANCHOR_SIGNATURE_INVALID"', '    elif v.signature.state != asig.VERIFIED and required:\n        v.add("ANCHOR_SIGNATURE_INVALID"',
+     [t(ANCHOR, "test_a_signature_over_another_manifest_digest_is_refused_with_status_5"), t(ANCHOR, "test_a_bundle_rewritten_and_re_chained_after_signing_is_accepted_by_plain_verify_and_refused_by_the_signature[failing-lane-dropped]")]),
+    ("M9 a missing ssh-keygen is not a failure", "verify.py", '        v.unavailable = True\n        v.add("ANCHOR_SIGNATURE_UNAVAILABLE", "anchor_signature", safe_text(v.signature.message, 300))', "        pass",
+     [t(ANCHOR, "test_a_missing_ssh_keygen_is_status_7_and_never_accepted")]),
+    ("M10a a signing key of another type is accepted (and the signature of another type read as valid)", "anchor_sig.py", "    if key_type != KEY_TYPE:\n        raise", "    if False:\n        raise",
+     [t(ANCHOR, "test_a_key_of_another_type_is_refused_even_when_it_signed_correctly[rsa]")]),
+    ("M10b the public key type allow-list is removed", "anchor_sig.py", ['PUBLIC_KEY_LINE_RE = re.compile(r"^ssh-ed25519 ([A-Za-z0-9+/]{68}) ?([\\x20-\\x7e]{0,200})$")', "    if len(blob) != len(expected) + 32 or not blob.startswith(expected):",
+                                                                           "    if key_type != KEY_TYPE:\n        raise", '{KEY_TYPE} {base64.b64encode(self.blob).decode("ascii")}\\n\''],
+     ['PUBLIC_KEY_LINE_RE = re.compile(r"^(?:ssh-[a-z0-9]+|ecdsa-sha2-nistp256) ([A-Za-z0-9+/=]{20,800}) ?([\\x20-\\x7e]{0,200})$")', "    if False:", "    if False:\n        raise",
+      '{self.blob[4:4 + int.from_bytes(self.blob[:4], "big")].decode()} {base64.b64encode(self.blob).decode("ascii")}\\n\''],
+     [t(ANCHOR, "test_a_key_of_another_type_is_refused_even_when_it_signed_correctly[ecdsa]")]),
+    ("M11 a public key line with options is accepted", "anchor_sig.py", 'PUBLIC_KEY_LINE_RE = re.compile(r"^ssh-ed25519 (', 'PUBLIC_KEY_LINE_RE = re.compile(r"^(?:[^ ]+ )?ssh-ed25519 (',
+     [t(ANCHOR, "test_a_public_key_line_with_options_or_other_content_is_refused")]),
+    ("M12 the allowed_signers line does not restrict the namespace", "anchor_sig.py", "        return f'{PRINCIPAL} namespaces=\"{NAMESPACE}\" {KEY_TYPE} ", "        return f'{PRINCIPAL} {KEY_TYPE} ",
+     [t(ANCHOR, "test_the_allowed_signers_line_limits_the_key_to_the_namespace_even_if_the_namespace_option_of_the_command_were_changed")]),
+    ("M13 a bad signature does not exit with status 5", "cli.py", '    out.write(json.dumps(v.to_json(), sort_keys=True, indent=2) + "\\n" if args.json else verify_text(args.bundle, v))\n    return v.exit_code',
+     '    out.write(json.dumps(v.to_json(), sort_keys=True, indent=2) + "\\n" if args.json else verify_text(args.bundle, v))\n    return 1 if v.signature.state == "invalid" else v.exit_code',
+     [t(ANCHOR, "test_a_signature_over_another_manifest_digest_is_refused_with_status_5")]),
+    ("M14 a signature path that is a symbolic link is followed", "anchor_sig.py", "read_regular(path, max_bytes=limit, deadline_s=10.0, follow_symlinks=False)", "read_regular(path, max_bytes=limit, deadline_s=10.0, follow_symlinks=True)",
+     [t(ANCHOR, "test_a_damaged_or_unusable_signature_file_is_refused"), t(ANCHOR, "test_a_public_key_file_that_is_a_link_or_missing_is_refused")]),
+    ("M15 --anchor-sig without --anchor-pub is not a usage error", "cli.py", "    if sig is not None and pub is None:", "    if False:",
+     [t(ANCHOR, "test_a_signature_without_a_key_to_check_it_against_is_a_usage_error_before_anything_is_read")]),
+    ("M16 the check runs in the caller's environment", "anchor_sig.py", 'env={"PATH": TOOL_SEARCH_PATH, "HOME": work, "LANG": "C"}', "env=dict(os.environ)",
+     [t(ANCHOR, "test_the_check_runs_in_a_clean_environment_with_no_agent_and_no_network_names")]),
+    ("M17 a zero exit without the expected line is accepted", "anchor_sig.py", '            if done.stdout.decode("ascii", "replace").strip() == good:', "            if True:",
+     [t(ANCHOR, "test_an_ssh_keygen_that_does_not_answer_as_a_verifier_never_gives_an_acceptance[exit-0-without-the-good-line]")]),
+    ("M18 the signing command does not refuse to overwrite", "cli.py", '    if os.path.lexists(out_path):\n        raise PlanError("OUTPUT_EXISTS"', '    if False:\n        raise PlanError("OUTPUT_EXISTS"',
+     [t(ANCHOR, "test_the_sign_command_never_overwrites_and_refuses_a_key_it_cannot_use")]),
+    ("M19 the statement command names a statement for a bundle that does not verify", "cli.py", "    if not v.accepted:\n        print(f\"error: the bundle does not verify", "    if False:\n        print(f\"error: the bundle does not verify",
+     [t(ANCHOR, "test_the_statement_command_refuses_a_bundle_that_does_not_verify")]),
 ]
 
 @pytest.mark.parametrize("name,rel,old,new,tests", CASES, ids=[c[0] for c in CASES])
