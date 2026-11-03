@@ -431,7 +431,7 @@ jobs:
             python3 -m venv /opt/venv
             /opt/venv/bin/pip install -q "pytest>=8,<10" "pyyaml>=6,<7" "robotframework==7.5"
             id; grep -i seccomp /proc/self/status
-            env -i HOME=/tmp/home PATH=/opt/venv/bin:/usr/bin:/bin LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            env -i HOME=/root PATH=/opt/venv/bin:/usr/bin:/bin LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
               python -m pytest -q -m robot_egress packages/qa-runner/tests/robot_egress/test_qr_robot_egress_experiments.py packages/qa-runner/tests/robot_egress/test_qr_robot_egress_run.py \
               --junitxml=/out/junit-robot-egress-root.xml
           '
