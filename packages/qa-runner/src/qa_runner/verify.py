@@ -30,7 +30,7 @@ from qa_evidence.sources import SourceError
 from qa_evidence.verify import verify_bundle, verify_source
 
 from . import constants as K
-from .bundle import finalize_results
+from .bundle import extra_limitations, finalize_results
 from .corroborate import BundleBlobs, plain_json, lane_origin, record_contradicts_itself
 from .deps import Upstreams, pin_summary, verified_bootstrap
 from .errors import EnvironmentFault, PlanError
@@ -278,6 +278,11 @@ def _check_report_fields(frozen: FrozenPlan, files: Mapping[str, bytes], report:
             v.add("REPORT_FIELD_MISMATCH", safe_text(str(r.get("assertion_id")), 64), "the result names another native status than its lane's")
     if report.get("redaction") != REDACTION:
         v.add("REPORT_FIELD_MISMATCH", "redaction", "the redaction note is not the one the runner writes")
+    have = [(x.get("id"), x.get("text")) for x in report.get("limitations", []) if isinstance(x, dict) and x.get("id") == K.ROBOT_EGRESS_LIMITATION_ID]
+    want = [(x["id"], x["text"]) for x in extra_limitations(frozen)]
+    if have != want:
+        v.add("EGRESS_STATEMENT_MISSING" if not have and want else "EGRESS_STATEMENT_WRONG", "limitations",
+              "the report must state that egress is not enforced for the plan's Robot lane(s), in the runner's words, and only when the plan has one")
 
 
 def _check_native(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification, tol: Tolerance = Tolerance()) -> None:

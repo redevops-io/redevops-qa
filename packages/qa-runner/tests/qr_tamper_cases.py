@@ -234,6 +234,11 @@ CASES = [
          ("VERDICT_OUTCOME_MISMATCH",), "rechained"),
     Case("an assertion made inconclusive by the report over evidence that satisfies it", "none",
          lambda up, f: _forge_report_states(up, f, {"A-URL": ("INCONCLUSIVE", "EVIDENCE_UNUSABLE")}), ("VERDICT_RECOMPUTE_MISMATCH",), "forged"),
+    # ---- what the report says about egress ----------------------------------------------------------------------------------------------------
+    Case("the statement that egress is not enforced for the Robot lane removed from the report", "none",
+         lambda up, f: rechain(edit_json(f, "report.json", lambda r: r.update(limitations=[x for x in r["limitations"] if x["id"] != "egress-not-enforced-robot"]))), ("EGRESS_STATEMENT_MISSING",), "rechained"),
+    Case("the statement that egress is not enforced for the Robot lane reworded", "discount",
+         lambda up, f: rechain(edit_json(f, "report.json", lambda r: [x.update(text="Egress is enforced.") for x in r["limitations"] if x["id"] == "egress-not-enforced-robot"])), ("EGRESS_STATEMENT_WRONG",), "rechained"),
     # ---- the frozen assertions -------------------------------------------------------------------------------------------------------------
     Case("edited expected value in the plan lock", "none", lambda up, f: _edit_lock(f, lambda l: l["lanes"][1]["assertions"][0]["predicate"]["expected"]["observations"].update(order_101_total_cents=10500)),
          ("LOCK_REJECTED",), "rechained"),

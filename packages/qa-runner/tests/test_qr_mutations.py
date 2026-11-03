@@ -21,6 +21,8 @@ SCRIPT = "test_qr_judge_script.py"
 ROBOT = "test_qr_robot_lane.py"
 CORR = "test_qr_corroborate.py"
 CORRR = "test_qr_corroborate_robot.py"
+EGCFG = "test_qr_egress_config.py"
+CRASH = "test_qr_lane_crash.py"
 
 
 def t(file, name):
@@ -341,6 +343,34 @@ CASES = [
     # ---- egress.py -------------------------------------------------------------------------------------------------------------------
     ("only the http loopback origin is allowed", "egress.py", 'if parts.scheme != "http" or parts.hostname not in ("127.0.0.1",) or parts.port is None:', "if False:",
      [t(PARTS, "test_the_origin_only_profile_refuses_anything_else")]),
+    # ---- egress as configuration, the report's statement about it, and the gateway lost during a lane ------------------------------------------
+    ("a launch configuration must keep every protection", "egress.py", "        if need not in args:", "        if False:",
+     [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[quic allowed]"), t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[webrtc udp allowed]"),
+      t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[loopback bypass flag removed]")]),
+    ("an argument the launch configuration does not produce is refused", "egress.py", "        if a not in allowed:", "        if False:",
+     [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[a remote debugging port]"), t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[a later webrtc policy overrides the first]")]),
+    ("a switch given twice is refused", "egress.py", "if names.count(n) > 1}", "if False and names.count(n) > 1}",
+     [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[a switch given twice with the same value]")]),
+    ("nothing a killed child wrote is kept as the engine's record", "orchestrate.py", '    if proc.exit_code != 0 and raw_status != "lane-error":', "    if False:",
+     [t(CRASH, "test_nothing_the_killed_child_wrote_is_kept_as_the_engines_own_record_so_verify_accepts_the_bundle_as_honest")]),
+    ("the lane child leaves without the interpreter's shutdown", "lane_browser.py", "    os._exit(code)", "    sys.exit(code)",
+     [t(CHILD, "test_the_lane_child_leaves_without_running_the_interpreters_shutdown_and_keeps_its_exit_status_and_its_streams")]),
+    ("the Playwright proxy option must remove the loopback bypass", "egress.py", '    if proxy.get("bypass") != "<-loopback>":', "    if False:",
+     [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[playwright proxy bypass changed]")]),
+    ("a launch configuration for another gateway is refused", "egress.py", '    if proxy.get("server") != server:', "    if False:", [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[playwright proxy names another server]")]),
+    ("doctor fails on a launch configuration that is not enough", "doctor.py", "    if problems:\n        return Check(\"egress gateway\"", "    if False:\n        return Check(\"egress gateway\"",
+     [t(EGCFG, "test_doctor_fails_when_the_launch_configuration_does_not_force_loopback_through_the_gateway")]),
+    ("doctor fails when the launch configuration is unavailable", "doctor.py", "            except Exception as exc:\n                return Check(\"egress gateway\", \"FAIL\", f\"the gateway started but",
+     "            except ZeroDivisionError as exc:\n                return Check(\"egress gateway\", \"FAIL\", f\"the gateway started but", [t(EGCFG, "test_doctor_fails_when_the_launch_configuration_is_unavailable")]),
+    ("the lane refuses a launch configuration that is not enough", "lane_browser.py", "        if problems:                                      # fail closed", "        if False:                                         # fail closed",
+     [t(EGCFG, "test_the_lane_refuses_to_start_a_browser_with_a_launch_configuration_that_lets_loopback_go_direct")]),
+    ("a gateway that no longer answers is a lost gateway", "lane_browser.py", "    except Exception as exc:\n        raise GatewayLost(", "    except ZeroDivisionError as exc:\n        raise GatewayLost(",
+     [t(EGCFG, "test_a_gateway_that_does_not_answer_is_a_lost_gateway")]),
+    ("a stopped gateway is not asked anything", "lane_browser.py", "        if not gateway.running:", "        if False:", [t(EGCFG, "test_a_gateway_that_was_stopped_is_a_lost_gateway_not_an_empty_log")]),
+    ("the report states that egress is not enforced for a Robot lane", "bundle.py", "if robot else []", "if False else []", [t(ROBOT, "test_the_report_states_that_egress_is_not_enforced_for_the_robot_lane_in_json_text_and_html")]),
+    ("verify requires the egress statement for a Robot lane", "verify.py", "    if have != want:", "    if False:",
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement that egress is not enforced for the Robot lane removed from the report]"),
+      t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement that egress is not enforced for the Robot lane reworded]")]),
     # ---- cli.py and doctor.py --------------------------------------------------------------------------------------------------------
     ("an existing bundle is never overwritten", "cli.py", "    except FileExistsError:\n        raise PlanError(\"OUTPUT_EXISTS\", f\"{safe_text(str(target / run_id))}", "    except ZeroDivisionError:\n        raise PlanError(\"OUTPUT_EXISTS\", f\"{safe_text(str(target / run_id))}",
      [t(CLI, "test_an_existing_bundle_directory_is_never_overwritten"), t(CLI, "test_a_second_run_with_the_same_id_fails_fast_before_it_executes")]),

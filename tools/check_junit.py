@@ -2,7 +2,8 @@
 """Fail unless a JUnit XML report shows at least one collected test and no skip, failure or error.
 
 CI runs ``pytest --junitxml=...`` and then this script, so a job that collected nothing, or that skipped anything
-(including through a ``skip`` or ``xfail`` marker), is red. Usage: ``python tools/check_junit.py REPORT.xml``.
+(including through a ``skip`` or ``xfail`` marker), is red. Usage: ``python tools/check_junit.py REPORT.xml [--expect-tests N]``;
+with ``--expect-tests`` the report must hold exactly N test cases, so a test that was deleted or deselected cannot stay green.
 """
 from __future__ import annotations
 
@@ -38,8 +39,12 @@ def problems(totals: Dict[str, int]) -> List[Tuple[str, str]]:
 
 
 def main(argv: List[str]) -> int:
+    expect = None
+    if len(argv) == 4 and argv[2] == "--expect-tests" and argv[3].isdigit():
+        expect = int(argv[3])
+        argv = argv[:2]
     if len(argv) != 2:
-        print("usage: check_junit.py REPORT.xml", file=sys.stderr)
+        print("usage: check_junit.py REPORT.xml [--expect-tests N]", file=sys.stderr)
         return 2
     try:
         totals = summarize(argv[1])
@@ -47,6 +52,8 @@ def main(argv: List[str]) -> int:
         print(f"FAIL REPORT_UNREADABLE: {exc}")
         return 1
     found = problems(totals)
+    if expect is not None and totals["testcases"] != expect:
+        found.append(("UNEXPECTED_TEST_COUNT", f"the report holds {totals['testcases']} test case(s); {expect} were expected (a test was added, deleted or deselected: change the expectation on purpose)"))
     for code, message in found:
         print(f"FAIL {code}: {message}")
     if found:

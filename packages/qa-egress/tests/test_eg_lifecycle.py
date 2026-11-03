@@ -32,6 +32,16 @@ def test_stop_closes_the_listener_the_connections_the_tasks_and_the_thread():
         assert gateway.active_connections == 0 and not gateway._tasks and not gateway._writers and gateway._server is None
 
 
+def test_running_is_true_only_between_start_and_stop():
+    with Upstream() as up:
+        server, _ = make_gateway(up.port)
+        assert server.running is False
+        server.start()
+        assert server.running is True
+        server.stop()
+        assert server.running is False
+
+
 def test_stopping_mid_tunnel_ends_both_sides_and_leaks_nothing():
     with RawUpstream("echo") as raw:
         policy = EgressPolicy(entries=(private_entry("app.test", raw.port, schemes=("https",)),))
