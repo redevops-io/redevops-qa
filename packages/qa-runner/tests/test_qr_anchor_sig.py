@@ -842,3 +842,32 @@ def test_the_signature_file_is_created_before_ssh_keygen_is_started_and_removed_
     assert marker.exists() and code == K.EXIT_USAGE and not target.exists(), "a failed signing left a file behind"
     monkeypatch.setattr(A, "TOOL_SEARCH_PATH", A.TOOL_SEARCH_PATH.__class__("/usr/bin:/bin"))
     assert cli("anchor", "sign", path, "--key", priv, "--out", target)[0] == 0 and target.stat().st_size > 0              # the same path is usable afterwards
+
+
+def test_an_interrupted_signing_removes_the_output_file_it_created(tmp_path, none_files, monkeypatch):
+    """SIGINT while ssh-keygen is waiting (a passphrase, a touch): the run ends as cancelled (exit 3) and no empty signature file is left behind."""
+    import signal
+    import threading
+    path = archive(tmp_path, none_files)
+    priv, _ = keygen(tmp_path, "op")
+    target = tmp_path / "interrupted.sig"
+    monkeypatch.setattr(A, "TOOL_SEARCH_PATH", fake_tool(tmp_path, "sleep 30"))
+
+    def interrupt():
+        for _ in range(400):
+            if target.exists():
+                time.sleep(0.3)
+                os.kill(os.getpid(), signal.SIGINT)
+                return
+            time.sleep(0.05)
+    thread = threading.Thread(target=interrupt, daemon=True)
+    thread.start()
+    started = time.monotonic()
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)          # another test of the session may have left its own handler: this one needs Python's default (KeyboardInterrupt)
+    try:
+        code, out, err = cli("anchor", "sign", path, "--key", priv, "--out", target)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    thread.join(timeout=5)
+    assert code == K.EXIT_ENVIRONMENT and "cancelled" in err and time.monotonic() - started < 20, (code, err)
+    assert not target.exists(), "an interrupted signing left a file behind"

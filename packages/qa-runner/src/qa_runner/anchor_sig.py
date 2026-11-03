@@ -21,6 +21,7 @@ import hashlib
 import os
 import re
 import shutil
+import signal
 import struct
 import subprocess
 import tempfile
@@ -145,11 +146,34 @@ def _require_tool() -> str:
 def _run_tool(argv, data: bytes, *, cwd: Optional[str], env, timeout: float, own_session: bool) -> "subprocess.CompletedProcess":
     """``own_session`` for the check (no terminal, no agent, a clean environment); not for signing, where ``ssh-keygen`` may have to ask the operator for a passphrase on the terminal."""
     try:
-        return subprocess.run(argv, input=data, capture_output=True, cwd=cwd, env=env, timeout=timeout, start_new_session=own_session, close_fds=True)
-    except subprocess.TimeoutExpired:
-        raise AnchorSigError(UNAVAILABLE, f"'{TOOL_NAME}' did not answer within {timeout:g} seconds: nothing is accepted") from None
+        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, env=env, start_new_session=own_session, close_fds=True)
     except OSError as exc:
         raise AnchorSigError(UNAVAILABLE, f"'{TOOL_NAME}' could not be run ({type(exc).__name__}): nothing is accepted") from None
+
+    def end() -> None:
+        try:
+            if own_session:
+                os.killpg(proc.pid, signal.SIGKILL)       # the tool and anything it started
+            else:
+                proc.kill()
+        except (ProcessLookupError, PermissionError):
+            pass
+        proc.wait()
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            try:
+                if stream is not None:
+                    stream.close()
+            except OSError:
+                pass
+    try:
+        out, err = proc.communicate(input=data, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        end()
+        raise AnchorSigError(UNAVAILABLE, f"'{TOOL_NAME}' did not answer within {timeout:g} seconds: nothing is accepted") from None
+    except BaseException:                                  # an interrupt (SIGINT) or any other exit from here: the tool does not outlive this call
+        end()
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
 def verify_signature(statement: bytes, signature_path: str, public_key_path: str) -> SignatureResult:

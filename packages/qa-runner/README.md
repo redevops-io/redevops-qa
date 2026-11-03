@@ -80,7 +80,7 @@ unsigned bundle is unchanged; the JSON gains one key, `anchor_signature`, with s
   `redevops-qa/anchor-statement` 1.0. It refuses (exit 5) a bundle that does not verify. The statement can be taken to another machine: `ssh-keygen -Y sign -n redevops-qa-anchor@v1 -f <private key> FILE`
   writes `FILE.sig` (an OpenSSH SSHSIG signature in the namespace `redevops-qa-anchor@v1`).
 * `anchor sign BUNDLE --key PATH [--agent] [--out FILE]` does the same in one step by calling `ssh-keygen -Y sign` (with `--agent`, `--key` names the PUBLIC key file and the ssh-agent named by `SSH_AUTH_SOCK`
-  signs, and only the key named by `--key` signs). Without `--agent` no ssh-agent is used: `SSH_AUTH_SOCK` and `SSH_AGENT_PID` are removed from the environment of `ssh-keygen`. The signature is written outside the bundle
+  signs, and only the key named by `--key` signs). Without `--agent` no ssh-agent is used: `SSH_AUTH_SOCK` and `SSH_AGENT_PID` are removed from the environment of `ssh-keygen`. `anchor sign` keeps the operator's own environment otherwise, `SSH_ASKPASS` and the terminal included, so that a passphrase can be asked for; `verify` runs `ssh-keygen` with a fixed environment and ignores `SSH_ASKPASS`. The signature is written outside the bundle
   (default `<bundle path>.anchor.sig`, never overwritten, created before `ssh-keygen` is started so that an unusable location fails before a passphrase or a touch is asked for, and removed again if signing fails) and printed. For a
   bundle `DIR/r0-<id>` the default signature is a sibling `DIR/r0-<id>.anchor.sig` inside the evidence directory: a script that globs `DIR/r0-*` after signing would match it too (give `--out` to put it elsewhere). A signature by any key type but `ssh-ed25519` is refused and nothing is written.
   **Keys are the operator's: this package never generates, stores or reads a private key.** The path is handed to `ssh-keygen` as an argument and nothing else (a test watches every `open` of the process and
@@ -354,9 +354,9 @@ with the reason `EVIDENCE_INCOMPLETE` whenever the report says `evidence_incompl
 exit 3, never VERIFIED; `verify` recomputes the same downgrade and accepts it. A name in the list must be a file a run of the plan can write (the expected set, or a blob of a browser lane); a fabricated
 name is `NOT_KEPT_MALFORMED`; a listed blob must also be one the lane's kept run record refers to (its digest appears in the record), so a made-up hex name does not count as something the lane lost.
 
-Limits of this tolerance, stated plainly (each needs a rewrite of the whole bundle; only `--anchor`, a manifest digest supplied from outside, rejects all of them; `--plan-digest` does NOT, because these forgeries leave the plan untouched and its digest matches):
+Limits of this tolerance, stated plainly (each needs a rewrite of the whole bundle; only `--anchor` (a manifest digest supplied from outside) or a valid signature of the manifest digest by a key the forger does not hold (`--anchor-sig` with `--anchor-pub`) rejects all of them; `--plan-digest` does NOT, because these forgeries leave the plan untouched and its digest matches):
 * A bundle that is rebuilt consistently by the product's own builder can declare a lane `evidence-over-cap` (or any non-complete status) with a matching list and thereby lower a FAILED or VERIFIED run to
-  INCONCLUSIVE, exit 3, without an anchor. The result can only be lower; the orchestrator's log is not used to corroborate it (the Robot lane's over-cap label can come from the parent's budget, which the
+  INCONCLUSIVE, exit 3, without an anchor or a signature. The result can only be lower; the orchestrator's log is not used to corroborate it (the Robot lane's over-cap label can come from the parent's budget, which the
   child's log lines do not carry), so it is documented rather than checked.
 * Files an over-cap lane's own run wrote and that are not in the required set can be deleted without being listed: the browser lane's `lane-result.json` and `run-record.json`, the stdout and stderr tails
   (`logs/<lane>.stdout.txt`, `.stderr.txt`) and `observations.json`. A missing `lane-result.json` or `run-record.json` makes the lane's assertions inconclusive anyway; the tails and the observations
@@ -365,7 +365,7 @@ Limits of this tolerance, stated plainly (each needs a rewrite of the whole bund
   a VERIFIED run to INCONCLUSIVE/3; a FAILED run stays FAILED.
 * `EVIDENCE_INCOMPLETE` was added to qa-evidence's closed list of INCONCLUSIVE reasons without a format version (as `TEST_DOUBLE` and `NATIVE_FAIL_VERIFIED_ASSERTIONS` were before): an older qa-evidence
   refuses a bundle that uses it. Note it when the format is frozen.
-The list is written by the same run as everything else: without an anchor it shows nothing a forger could not also write, but with it a forger gains no higher status.
+The list is written by the same run as everything else: without an anchor (or a signature) it shows nothing a forger could not also write, but with one a forger gains no higher status.
 
 ## Reading limits: tested and inferred (summary)
 

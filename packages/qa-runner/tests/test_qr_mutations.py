@@ -453,6 +453,8 @@ CASES = [
      [t(ANCHOR, "test_the_verified_text_carries_the_limits_and_none_of_the_words_the_project_does_not_use")]),
     ("M28 a signed result has the unsigned first line", "verify.py", '"ACCEPTED (internally consistent; the manifest digest carries a valid signature, see the signed anchor line)" if signed else', '"ACCEPTED (internally consistent)" if signed else',
      [t(ANCHOR, "test_the_verified_text_carries_the_limits_and_none_of_the_words_the_project_does_not_use")]),
+    ("M29 an interrupted signing leaves the output file behind", "cli.py", "            except BaseException:\n                os.unlink(out_path)\n                raise", "            except BaseException:\n                raise",
+     [t(ANCHOR, "test_an_interrupted_signing_removes_the_output_file_it_created")]),
     ("M19 the statement command names a statement for a bundle that does not verify", "cli.py", "    if not v.accepted:\n        print(f\"error: the bundle does not verify", "    if False:\n        print(f\"error: the bundle does not verify",
      [t(ANCHOR, "test_the_statement_command_refuses_a_bundle_that_does_not_verify")]),
 ]
