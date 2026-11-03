@@ -620,3 +620,30 @@ def test_the_package_has_no_code_that_generates_or_stores_a_key():
     assert set(uses) <= {"anchor_sig.py", "cli.py"} and all(n == {"ssh-keygen"} for n in uses.values()), uses
     text = (root / "anchor_sig.py").read_text(encoding="utf-8")
     assert re.findall(r'"-Y", "(\w+)"', text) == ["verify", "sign"] and "keygen\", \"-t" not in text
+
+
+# ---- signed and unsigned results are different in EVERY output form -----------------------------------------------------------------------------------
+def every_form(path, *extra):
+    """The outputs of one bundle in every form that can show a result: verify text and JSON, report text/JSON/HTML, inspect."""
+    sign_flags = [a for a in extra if a != "--require-anchor"]
+    return {"verify-text": cli("verify", path, *extra)[1], "verify-json": cli("verify", path, "--json", *extra)[1], "report-text": cli("report", path, *sign_flags)[1],
+            "report-json": cli("report", path, "--format", "json", *sign_flags)[1], "report-html": cli("report", path, "--format", "html", *sign_flags)[1], "inspect": cli("inspect", path, *sign_flags)[1]}
+
+
+def test_a_signed_result_and_an_unsigned_or_anchor_only_result_cannot_be_mistaken_for_each_other_in_any_output_form(tmp_path, none_files, signed):
+    path, _, pub, sig = signed
+    anchor = manifest_digest(none_files)
+    signed_out = every_form(path, "--anchor-sig", sig, "--anchor-pub", pub)
+    marker = {"verify-text": "signed anchor: VERIFIED", "verify-json": '"assurance": "signed-anchor-verified"', "report-text": "signed anchor VERIFIED", "report-json": '"assurance": "signed-anchor-verified"',
+              "report-html": "signed anchor VERIFIED", "inspect": "signed anchor VERIFIED"}
+    for form, text in signed_out.items():
+        assert marker[form] in text, form
+    assert '"key_fingerprint": "SHA256:' in signed_out["report-json"] and '"key_fingerprint": "SHA256:' in signed_out["verify-json"]
+    for label, extra in (("unsigned", ()), ("anchor-only", ("--anchor", anchor)), ("anchor-required", ("--anchor", anchor, "--require-anchor"))):
+        unsigned_out = every_form(path, *extra)
+        for form, text in unsigned_out.items():
+            assert marker[form] not in text, (label, form)
+            assert "signed anchor VERIFIED" not in text and "signed-anchor-verified" not in text and "signed anchor: VERIFIED" not in text, (label, form)
+            assert unsigned_out[form] != signed_out[form], (label, form)
+        assert '"state": "absent"' in unsigned_out["verify-json"] and '"assurance": "signed-anchor-verified"' not in unsigned_out["report-json"]
+        assert '"key_fingerprint": null' in unsigned_out["verify-json"] and '"key_fingerprint": "SHA256' not in unsigned_out["report-json"]
