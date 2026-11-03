@@ -65,6 +65,11 @@ class GatewayServer:
         if self._thread.is_alive():
             raise TimeoutError("the egress gateway did not stop")
 
+    @property
+    def running(self) -> bool:
+        """True while the gateway thread is alive and has not been stopped (a stopped or crashed gateway answers nothing; its event loop is closed)."""
+        return self._thread is not None and self._thread.is_alive() and not self._stopped.is_set()
+
     def __enter__(self) -> "GatewayServer":
         return self.start()
 
