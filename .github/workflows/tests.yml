@@ -207,6 +207,10 @@ jobs:
         run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
       - name: Fail if the working tree is dirty
         run: test -z "$(git status --porcelain)"
+      - name: Show the OpenSSH client the signed-anchor tests use (ssh-keygen -Y needs OpenSSH 8.0 or later; the tests fail, never skip, if it is missing)
+        run: |
+          ssh -V
+          command -v ssh-keygen ssh-agent
       - name: Run the runner tests in a scrubbed environment (no browser is installed)
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
@@ -741,6 +745,16 @@ jobs:
           test "$status" -eq 5
           grep -q "^  ANCHOR_MISMATCH anchor:" "$RUNNER_TEMP/wrong-anchor.out"
           grep -q "^  ANCHOR_REQUIRED anchor:" "$RUNNER_TEMP/wrong-anchor.out"
+      - name: An unsigned bundle is refused where a signature of the anchor is required (the demo is not signed; this is the downgrade guard, it authenticates nothing)
+        run: |
+          cd "$RUNNER_TEMP"
+          status=0
+          "$RUNNER_TEMP/verifier/bin/redevops-qa" verify "$(ls -d "$RUNNER_TEMP"/evidence/r0-*)" --require-signed-anchor > "$RUNNER_TEMP/unsigned.out" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/unsigned.out"
+          echo "verify exit status with --require-signed-anchor on the unsigned demo bundle: $status"
+          test "$status" -eq 5
+          grep -q "^  ANCHOR_SIGNATURE_REQUIRED anchor_signature:" "$RUNNER_TEMP/unsigned.out"
+          ! grep -q "signed anchor: VERIFIED" "$RUNNER_TEMP/unsigned.out"
 
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
