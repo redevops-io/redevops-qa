@@ -7,21 +7,25 @@ silent fallback: the egress gateway that every browser lane depends on must star
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.metadata
+import importlib.util
 import json
+import os
 import platform
 import subprocess
 import sys
 import tempfile
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import constants as K
 from .deps import verified_bootstrap
 from .errors import EnvironmentFault
-from .procs import FixtureApp, child_env
+from .procs import CHILD_MODULES, FixtureApp, child_env
 
 PLAYWRIGHT_PIN = "1.64.1"
 ROBOT_PIN = "7.5"
@@ -67,6 +71,62 @@ def check_pins() -> Check:
     return Check("pinned dependencies", "OK", f"runtime-contracts {p.contracts.version} ({p.contracts.commit[:12]}), agent-harness {p.harness_qa.version} "
                  f"({p.harness_qa.commit[:12]}), pin set {p.pin_set}: tree digests and vector files match pins.toml" + ("; the git commits match too" if all(
                      (d.resolved_path / ".git").exists() for d in (p.contracts, p.harness_qa)) else "; a tree that is not a git checkout is not checked against its commit"))
+
+
+PINNED_FILES = "pinned-files.json"           # beside pins.toml in a bundle install: the sha256 of every file of the pinned trees as shipped
+_SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache"}
+_SKIP_SUFFIXES = {".pyc", ".pyo"}
+
+
+def _share(prefix: Optional[str]) -> Path:
+    return Path(prefix or sys.prefix) / "share" / "redevops-qa"
+
+
+def check_first_party_modules(prefix: Optional[str] = None, locate: Callable = importlib.util.find_spec) -> Check:
+    """In a bundle install every first-party package must be imported from the installation itself. A stale checkout on PYTHONPATH (or anything else that comes first on the
+    import path) that shadows an installed package is a failure here, not a silent replacement. Outside a bundle install (a checkout, a development environment) there is
+    nothing to compare with and the check says so."""
+    root = Path(prefix or sys.prefix)
+    if not (_share(prefix) / "pins.toml").is_file():
+        return Check("installed packages", "OK", "not a bundle install (no share/redevops-qa/pins.toml under this Python's prefix): the packages are imported from their source directories")
+    stray = []
+    for name in CHILD_MODULES:
+        spec = locate(name)
+        where = [str(Path(p).resolve()) for p in (spec.submodule_search_locations or [])] if spec is not None else []
+        if not where or not all(w == str(root.resolve()) or w.startswith(str(root.resolve()) + os.sep) for w in where):
+            stray.append(f"{name} ({where[0] if where else 'not found'})")
+    if stray:
+        return Check("installed packages", "FAIL", "first-party packages are imported from outside the installation: " + ", ".join(stray[:5]),
+                     "unset PYTHONPATH (the bin/redevops-qa launcher does: it runs python -E -s) and run the launcher of the installation; remove a stray copy that shadows an installed package")
+    return Check("installed packages", "OK", f"all {len(CHILD_MODULES)} first-party packages are imported from {root}")
+
+
+def check_pinned_files(prefix: Optional[str] = None) -> Check:
+    """In a bundle install, every file of the pinned trees (LICENSE and pyproject.toml included, not only the distribution directories and the vector files the pin digest covers) is
+    the one the bundle shipped, and no file was added. Not covered: bytecode (__pycache__, *.pyc: skipped, as in the pin digest), anything outside the pinned trees (the first-party
+    wheels were checked by pip against requirements.lock when they were installed, and are not re-checked here), and a change made together with pinned-files.json itself."""
+    share = _share(prefix)
+    manifest = share / PINNED_FILES
+    if not manifest.is_file():
+        return Check("pinned files", "OK", "not a bundle install (no pinned-files.json beside pins.toml): the pin check above covers the pinned trees")
+    try:
+        listed = json.loads(manifest.read_text(encoding="utf-8"))["files"]
+    except (OSError, ValueError, KeyError):
+        return Check("pinned files", "FAIL", "pinned-files.json cannot be read", "reinstall the bundle into a new directory")
+    base = share / ".pinned"
+    actual = {}
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+        for name in filenames:
+            p = Path(dirpath) / name
+            if p.suffix not in _SKIP_SUFFIXES:
+                actual[".pinned/" + p.relative_to(base).as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
+    changed = sorted(k for k in set(listed) & set(actual) if listed[k] != actual[k])
+    added, missing = sorted(set(actual) - set(listed)), sorted(set(listed) - set(actual))
+    if changed or added or missing:
+        parts = [f"changed {changed[:3]}" if changed else "", f"added {added[:3]}" if added else "", f"missing {missing[:3]}" if missing else ""]
+        return Check("pinned files", "FAIL", "the pinned trees differ from what the bundle shipped: " + "; ".join(p for p in parts if p), "reinstall the bundle into a new directory")
+    return Check("pinned files", "OK", f"{len(actual)} files of the pinned trees are the ones the bundle shipped (LICENSE and pyproject.toml included); bytecode and files outside the pinned trees are not covered")
 
 
 def _version(dist: str) -> Optional[str]:
@@ -156,7 +216,7 @@ def check_workdir() -> Check:
 
 
 def run_doctor(engines: Sequence[str] = (K.ENGINE_PLAYWRIGHT,), *, include: Optional[Sequence[Callable[[], Check]]] = None) -> List[Check]:
-    checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, check_pins]
+    checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, check_first_party_modules, check_pins, check_pinned_files]
     if K.ENGINE_PLAYWRIGHT in engines:
         checks.append(check_playwright)
     if K.ENGINE_ROBOT in engines:

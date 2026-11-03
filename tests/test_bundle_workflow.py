@@ -46,7 +46,8 @@ def test_the_manual_build_is_read_only_and_names_no_secret_or_write_path():
 
 def test_the_manual_build_uses_only_the_actions_the_repository_already_uses_and_keeps_an_artifact_only():
     uses = {s["uses"] for job in BUNDLE["jobs"].values() for s in job["steps"] if "uses" in s}
-    assert uses == {"actions/checkout@v4", "actions/setup-python@v5", "actions/upload-artifact@v4"}
+    assert {u.split("@")[0] for u in uses} == {"actions/checkout", "actions/setup-python", "actions/upload-artifact"}
+    assert all(re.fullmatch(r"[0-9a-f]{40}", u.split("@")[1]) for u in uses), uses                    # pinned by commit, not by a tag that can move
     uploads = [s for job in BUNDLE["jobs"].values() for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact")]
     assert len(uploads) == 1 and uploads[0]["with"]["name"] == "qa-bundle" and uploads[0]["with"]["if-no-files-found"] == "error"
     assert all(s.get("with", {}).get("persist-credentials") is False for job in BUNDLE["jobs"].values() for s in job["steps"] if str(s.get("uses", "")).startswith("actions/checkout"))
@@ -180,6 +181,9 @@ def test_the_verify_job_is_a_second_job_that_starts_from_the_kept_artifacts_in_a
     assert './install.sh --prefix "$RUNNER_TEMP/verifier"' in run and "install-browser" not in run and "--with-deps" not in run
     assert "verify \"$bundle\" --anchor \"$anchor\" --plan-digest \"$plan\" --require-anchor --require-plan-digest --json" in run
     assert "check_demo_outcome.py\" verify" in run and run.count('test "$status" -eq 5') == 2 and "printf 'x' >> \"$RUNNER_TEMP/changed/report.json\"" in run
+    # a refusal is checked by its finding codes, not only by the exit status (any crash that exits 5 would otherwise pass)
+    for code in ("SIZE_MISMATCH report.json", "REPORT_UNREADABLE report.json", "ANCHOR_MISMATCH anchor", "ANCHOR_REQUIRED anchor"):
+        assert f'grep -q "^  {code}:"' in run, code
     assert "--anchor \"sha256:$(printf '0%.0s' $(seq 64))\"" in run
     assert not any(str(s.get("uses", "")).startswith("actions/upload-artifact") for s in job["steps"])
 

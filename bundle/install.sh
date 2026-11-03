@@ -65,8 +65,8 @@ listed = {}
 with open(os.path.join(here, "SHA256SUMS"), encoding="utf-8") as fh:
     for line in fh:
         digest, _, rel = line.rstrip("\n").partition("  ")
-        if len(digest) != 64 or not rel or rel.startswith("/") or ".." in rel.split("/"):
-            print("install.sh: SHA256SUMS has a line this installer does not accept: %r" % line[:80], file=sys.stderr)
+        if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) or not rel or rel.startswith("/") or ".." in rel.split("/") or rel in listed:
+            print("install.sh: SHA256SUMS has a line this installer does not accept (malformed, empty, a path outside the bundle, or a path listed twice): %r" % line[:80], file=sys.stderr)
             sys.exit(4)
         listed[rel] = digest
 present = set()
@@ -89,6 +89,7 @@ if problems:
 PY
 [ "$status" -eq 0 ] || exit "$status"
 
+[ ! -L "$prefix" ] || fail 5 "$prefix is a symbolic link: name the directory itself"
 created=0
 if [ -e "$prefix" ]; then
   [ -d "$prefix" ] || fail 5 "$prefix exists and is not a directory"
@@ -122,9 +123,11 @@ mkdir "$prefix/bin"
 cat > "$prefix/bin/redevops-qa" <<EOF
 #!/bin/sh
 # Written by install.sh of the redevops-qa bundle: runs redevops-qa from this installation with the browser directory it uses.
+# The installation does not read the caller's Python environment: a PYTHONPATH that holds another copy of a package (a stale checkout, for one) must not replace what was installed.
+unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONINSPECT PYTHONBREAKPOINT
 PLAYWRIGHT_BROWSERS_PATH='$prefix/browsers'
 export PLAYWRIGHT_BROWSERS_PATH
-exec '$prefix/venv/bin/redevops-qa' "\$@"
+exec '$prefix/venv/bin/python' -E -s '$prefix/venv/bin/redevops-qa' "\$@"
 EOF
 chmod 755 "$prefix/bin/redevops-qa"
 
@@ -133,7 +136,7 @@ import hashlib, json, os, sys
 here, prefix = sys.argv[1:3]
 manifest = json.load(open(os.path.join(here, "BUNDLE.json"), encoding="utf-8"))
 doc = {"schema": "redevops-qa/install", "schema_version": "1.0", "bundle": manifest["name"], "bundle_json_sha256": hashlib.sha256(open(os.path.join(here, "BUNDLE.json"), "rb").read()).hexdigest(),
-       "python": "%d.%d.%d" % sys.version_info[:3], "entries": ["venv", "bin", "browsers", "INSTALL.json"]}
+       "python": "%d.%d.%d" % sys.version_info[:3], "prefix": os.path.realpath(prefix), "entries": ["venv", "bin", "browsers", "INSTALL.json"]}
 with open(os.path.join(prefix, "INSTALL.json"), "x", encoding="utf-8") as fh:
     fh.write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
 PY

@@ -4,7 +4,8 @@ version = "0.1.0.dev0"
 description = "Bridge between runtime-contracts qa/v1 and the agent-harness neutral QA module, plus the conformance suite"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
+license = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause"
+license-files = ["LICENSE*"]      # the family licence texts; tools/build_bundle.py copies them next to this file before it builds the wheel
 # No runtime dependency on pip-installable versions of runtime-contracts or agent-harness, on purpose: the exact
 # versions under test are named in the repository's pins.toml and checked by the conformance suite (see README.md).
 dependencies = []
@@ -16,7 +17,7 @@ dev = ["pytest>=8"]
 redevops-qa-conformance = "redevops_qa_bridge.conformance.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

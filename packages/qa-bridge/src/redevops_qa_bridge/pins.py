@@ -132,13 +132,18 @@ def find_pins_file(start: Optional[Path] = None) -> Path:
     if env:
         return Path(env)
     here = (start or Path(__file__)).resolve()
-    installed = installed_pins_file()
-    if installed is not None:
-        try:
-            here.relative_to(Path(sys.prefix).resolve())        # this module is installed into the environment that holds the file: a checkout that happens to lie above it is not what it was installed with
-            return installed
-        except ValueError:
-            pass
+    try:
+        here.relative_to(Path(sys.prefix).resolve())
+        under_prefix = True
+    except ValueError:
+        under_prefix = False
+    if under_prefix:
+        # This module is installed into the environment: its pins are the ones installed with it. A missing file is a failure, never a reason to look further up for another one (a stray
+        # pins.toml above the environment would name other trees).
+        installed = installed_pins_file()
+        if installed is None:
+            raise PinsInvalid(f"this package is installed under {sys.prefix} but {Path(sys.prefix) / 'share' / 'redevops-qa' / 'pins.toml'} is missing; reinstall the bundle, or set {PINS_FILE_ENV}")
+        return installed
     for parent in [here, *here.parents]:
         candidate = parent / "pins.toml"
         if candidate.is_file():
