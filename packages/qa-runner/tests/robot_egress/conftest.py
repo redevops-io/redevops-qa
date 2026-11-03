@@ -28,3 +28,11 @@ def robot_installed():
         pytest.fail(f"Robot Framework is not importable in the Robot egress lane ({type(exc).__name__})")
     assert version == "7.5", f"the lane is pinned to Robot Framework 7.5, found {version}"
     return version
+
+
+def pytest_terminal_summary(terminalreporter):
+    from lane_run import COUNTS                                       # numbers the experiments measure and do not assert: printed here so that a CI log shows them
+    if COUNTS:
+        terminalreporter.section("measured, not asserted")
+        for name, value in sorted(COUNTS.items()):
+            terminalreporter.write_line(f"{name}: {value}")

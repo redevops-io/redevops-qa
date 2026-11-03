@@ -20,6 +20,7 @@ from qa_runner.safe_read import Budget
 from hostile_world import World
 
 HERE = Path(__file__).resolve().parent
+COUNTS: Dict[str, Any] = {}                              # what the experiments measure and do not assert (see conftest.pytest_terminal_summary)
 FILES = ("hostile.robot", "HostileLib.py", "sneaky_import.py")
 
 

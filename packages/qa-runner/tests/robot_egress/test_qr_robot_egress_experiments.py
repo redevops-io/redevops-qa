@@ -217,12 +217,12 @@ def test_a_detached_process_that_rewrites_the_lanes_outcome_files_cannot_hide_a_
     assert not problems and el.denied(events) == o.egress["fence_denied"] and el.denied(events) > 100
 
 
-def test_the_number_of_connects_that_reached_another_address_on_the_allowed_port_is_counted(runs, record_property):
+def test_the_number_of_connects_that_reached_another_address_on_the_allowed_port_is_counted(runs):
     """Against a hostile library only the PORT is enforced: another address on it MAY be reached (counted per configuration, not asserted for the layers that cannot stop it). The unfenced
-    control and Landlock alone reach it (asserted in the matrix); the count of the lane's own layers is printed with the junit report."""
+    control and Landlock alone reach it (asserted in the matrix); the count of each configuration is printed in the terminal summary of the run (``conftest.pytest_terminal_summary``)."""
+    from lane_run import COUNTS
     for config in ("control", "both", "seccomp-only", "landlock-only"):
-        n = runs(config).world.hits("shadow2")
-        record_property(f"other_address_connects_{config.replace('-', '_')}", n)
+        COUNTS[f"connects that reached another address on the allowed port, {config}"] = runs(config).world.hits("shadow2")
     assert runs("control").world.hits("shadow2") > 0 and runs("landlock-only").world.hits("shadow2") > 0
 
 
