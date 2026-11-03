@@ -42,11 +42,7 @@ import sys
 import threading
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
-LAYER_SECCOMP = "seccomp-user-notification"
-LAYER_LANDLOCK = "landlock-tcp-connect"
-ALL_LAYERS = (LAYER_SECCOMP, LAYER_LANDLOCK)
-SUPPORTED_ARCHES = ("x86_64", "aarch64")             # aarch64: development only, see the module docstring
-MAX_EVENTS = 5000
+from .egresslog import ALL_LAYERS, LAYER_LANDLOCK, LAYER_SECCOMP, MAX_EVENTS
 
 # ---- kernel constants ---------------------------------------------------------------------------------------------------------------
 PR_SET_NO_NEW_PRIVS = 38
