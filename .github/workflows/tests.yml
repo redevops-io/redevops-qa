@@ -369,6 +369,158 @@ jobs:
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
+  bundle-tests:
+    name: bundle tools and install scripts (offline; the builder's parts, the checker, install, uninstall, rollback and every refusal against synthetic wheels, the pinned-trees wheel, the workflow guards; no skips, at least one test)
+    # No network after the pinned trees are fetched: the tests build bundles of synthetic wheels with the real builder functions and run the real scripts with the real bash, venv and pip
+    # (--no-index). The workflow guard tests, which no job ran before, run here too. Read-only, no secret.
+    runs-on: ubuntu-24.04
+    needs: pins
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Read the pinned commits
+        id: pins
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
+      - name: Fetch runtime-contracts at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.contracts_repo }}
+          ref: ${{ steps.pins.outputs.contracts_commit }}
+          path: ${{ steps.pins.outputs.contracts_path }}
+          persist-credentials: false
+      - name: Fetch agent-harness at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.harness_qa_repo }}
+          ref: ${{ steps.pins.outputs.harness_qa_commit }}
+          path: ${{ steps.pins.outputs.harness_qa_path }}
+          persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --verify-trees --require-git
+      - name: Install test tools
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7"
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the bundle and workflow tests in a scrubbed environment
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q tests/test_bundle_builder.py tests/test_bundle_install.py tests/test_bundle_pinned.py tests/test_bundle_workflow.py tests/test_workflow.py \
+              --junitxml="$RUNNER_TEMP/junit-bundle-tests.xml"
+      - name: Fail on zero collected tests or any skip
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-bundle-tests.xml"
+      - name: Fail if the tests left anything in the working tree
+        run: test -z "$(git status --porcelain)"
+
+  bundle:
+    name: bundle (CPython 3.12, linux x86_64; built twice from the same commit and compared; checked; the archives are kept as workflow artifacts)
+    # Builds the pinned bundle exactly as the manual workflow does, builds it a second time with an empty download cache and compares SHA256SUMS and the archive digest (the result is printed
+    # whatever it is), and builds a differently labelled one to stand in for "the previous bundle" of the rollback check. Network: the pinned, hash-checked wheels only. Read-only, no secret.
+    runs-on: ubuntu-24.04
+    needs: pins
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Read the pinned commits
+        id: pins
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
+      - name: Fetch runtime-contracts at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.contracts_repo }}
+          ref: ${{ steps.pins.outputs.contracts_commit }}
+          path: ${{ steps.pins.outputs.contracts_path }}
+          persist-credentials: false
+      - name: Fetch agent-harness at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.harness_qa_repo }}
+          ref: ${{ steps.pins.outputs.harness_qa_commit }}
+          path: ${{ steps.pins.outputs.harness_qa_path }}
+          persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --verify-trees --require-git
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Build the bundle
+        run: python tools/build_bundle.py build --out "$RUNNER_TEMP/build-1" --download-cache "$RUNNER_TEMP/cache-1"
+      - name: Build it again from the same commit with an empty download cache, and compare
+        run: |
+          python tools/build_bundle.py build --out "$RUNNER_TEMP/build-2" --download-cache "$RUNNER_TEMP/cache-2"
+          a="$(ls "$RUNNER_TEMP"/build-1/*.tar)"; b="$(ls "$RUNNER_TEMP"/build-2/*.tar)"
+          echo "build 1 SHA256SUMS sha256: $(sha256sum "$RUNNER_TEMP"/build-1/*/SHA256SUMS | cut -d' ' -f1)"
+          echo "build 2 SHA256SUMS sha256: $(sha256sum "$RUNNER_TEMP"/build-2/*/SHA256SUMS | cut -d' ' -f1)"
+          echo "build 1 archive sha256: $(sha256sum "$a" | cut -d' ' -f1)"
+          echo "build 2 archive sha256: $(sha256sum "$b" | cut -d' ' -f1)"
+          if diff -u "$RUNNER_TEMP"/build-1/*/SHA256SUMS "$RUNNER_TEMP"/build-2/*/SHA256SUMS && cmp "$a" "$b"; then
+            echo "REPRODUCIBILITY: two builds of this commit on this runner are byte for byte identical (SHA256SUMS and the archive)"
+          else
+            echo "REPRODUCIBILITY: the two builds differ (see the diff above)"; exit 1
+          fi
+      - name: Build the bundle that stands in for the previous one (another label, so another digest)
+        run: python tools/build_bundle.py build --out "$RUNNER_TEMP/build-previous" --label rollback-previous --download-cache "$RUNNER_TEMP/cache-1"
+      - name: Check both bundles with the standalone checker (a clean interpreter, away from the checkout)
+        run: |
+          cd "$RUNNER_TEMP"
+          for d in build-1 build-previous; do python -I "$GITHUB_WORKSPACE/tools/check_bundle.py" "$RUNNER_TEMP/$d"/redevops-qa-bundle-*-cp312-linux-x86_64; done
+      - name: Print the digest of the archive (the value to compare a download with)
+        run: |
+          sha256sum "$RUNNER_TEMP"/build-1/*.tar
+          cat "$RUNNER_TEMP"/build-1/*.tar.sha256
+      - name: Keep the bundle (a workflow artifact only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-bundle-current
+          path: |
+            ${{ runner.temp }}/build-1/*.tar
+            ${{ runner.temp }}/build-1/*.tar.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Keep the previous-bundle stand-in
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-bundle-previous
+          path: |
+            ${{ runner.temp }}/build-previous/*.tar
+            ${{ runner.temp }}/build-previous/*.tar.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  bundle-install:
+    name: bundle install on a clean runner (the README commands unchanged, doctor, demo, rollback, uninstall, directory clean; a tampered wheel, a wrong lock, another Python and another platform are refused)
+    # A fresh ubuntu-24.04 machine that has not built anything: it downloads the archives the bundle job kept and runs tools/bundle_acceptance.sh, which takes the commands from the bundle's own README
+    # and runs them as written. The browser step downloads Chromium (not part of the bundle). Read-only, no secret.
+    runs-on: ubuntu-24.04
+    needs: bundle
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download the bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: qa-bundle-current
+          path: ${{ runner.temp }}/current
+      - name: Download the previous-bundle stand-in
+        uses: actions/download-artifact@v4
+        with:
+          name: qa-bundle-previous
+          path: ${{ runner.temp }}/previous
+      - name: Run the acceptance script
+        run: bash tools/bundle_acceptance.sh --current "$RUNNER_TEMP/current" --previous "$RUNNER_TEMP/previous"
+      - name: Fail if the run left anything in the working tree
+        run: test -z "$(git status --porcelain)"
+
   bridge:
     name: bridge tests (${{ matrix.pin_set }}; exact pins, no skips, at least one test)
     runs-on: ubuntu-24.04

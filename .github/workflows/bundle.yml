@@ -1,0 +1,89 @@
+name: qa-bundle (manual build; publishes nothing)
+
+# Builds the pinned redevops-qa bundle (CPython 3.12, linux x86_64) from the commit it is started on and keeps it as a WORKFLOW ARTIFACT, nothing more.
+# Manual trigger only. No tag trigger, no schedule, no secret, no token input, no write permission: this workflow cannot create a tag, a release, a package or an image, and it
+# refuses the `publish` input when it is set to true. Publishing a bundle is a separate decision of the owner, taken after the release gates, outside this file.
+# The two pinned upstreams (public repositories) are fetched by exact commit SHA and verified against pins.toml before anything is built; the third-party wheels are the ones
+# bundle/third-party.lock.json names, downloaded with --require-hashes.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Not supported by this workflow: it only builds. Leave false; true is refused."
+        type: boolean
+        default: false
+      label:
+        description: "Free text recorded in BUNDLE.json (optional)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-bundle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build the bundle and keep it as a workflow artifact
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse the publish input
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          if [ "$PUBLISH" = "true" ]; then
+            echo "this workflow only builds a bundle and keeps it as a workflow artifact; it does not publish. Run it with publish=false."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Refuse a TEMP-PIN
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --forbid-temp-pin
+      - name: Read the pinned commits
+        id: pins
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
+      - name: Fetch runtime-contracts at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.contracts_repo }}
+          ref: ${{ steps.pins.outputs.contracts_commit }}
+          path: ${{ steps.pins.outputs.contracts_path }}
+          persist-credentials: false
+      - name: Fetch agent-harness at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.harness_qa_repo }}
+          ref: ${{ steps.pins.outputs.harness_qa_commit }}
+          path: ${{ steps.pins.outputs.harness_qa_path }}
+          persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --verify-trees --require-git
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Build the bundle
+        env:
+          LABEL: ${{ inputs.label }}
+        run: python tools/build_bundle.py build --out "$RUNNER_TEMP/bundle" --label "$LABEL" --download-cache "$RUNNER_TEMP/cache"
+      - name: Check the bundle with the standalone checker (a clean interpreter, away from the checkout)
+        run: |
+          cd "$RUNNER_TEMP"
+          python -I "$GITHUB_WORKSPACE/tools/check_bundle.py" "$RUNNER_TEMP"/bundle/redevops-qa-bundle-*-cp312-linux-x86_64
+      - name: Print the digest of the archive (the value to compare a download with)
+        run: |
+          sha256sum "$RUNNER_TEMP"/bundle/*.tar
+          cat "$RUNNER_TEMP"/bundle/*.tar.sha256
+      - name: Keep the bundle (a workflow artifact only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-bundle
+          path: |
+            ${{ runner.temp }}/bundle/*.tar
+            ${{ runner.temp }}/bundle/*.tar.sha256
+          if-no-files-found: error
+          retention-days: 30

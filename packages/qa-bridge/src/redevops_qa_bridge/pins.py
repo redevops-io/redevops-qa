@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,11 +120,25 @@ class Pins:
         return self.path.parent
 
 
+def installed_pins_file() -> Optional[Path]:
+    """The pins file of a bundle install: ``<prefix>/share/redevops-qa/pins.toml`` (the pinned trees it names lie next to it, under ``.pinned``). ``None`` when this
+    environment holds no such file."""
+    candidate = Path(sys.prefix) / "share" / "redevops-qa" / "pins.toml"
+    return candidate if candidate.is_file() else None
+
+
 def find_pins_file(start: Optional[Path] = None) -> Path:
     env = os.environ.get(PINS_FILE_ENV)
     if env:
         return Path(env)
     here = (start or Path(__file__)).resolve()
+    installed = installed_pins_file()
+    if installed is not None:
+        try:
+            here.relative_to(Path(sys.prefix).resolve())        # this module is installed into the environment that holds the file: a checkout that happens to lie above it is not what it was installed with
+            return installed
+        except ValueError:
+            pass
     for parent in [here, *here.parents]:
         candidate = parent / "pins.toml"
         if candidate.is_file():

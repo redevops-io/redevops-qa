@@ -21,3 +21,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The reviewed Robot suite is data the runner reads from its own directory (suites.py); without this a wheel would lack the .robot file.
+[tool.setuptools.package-data]
+"qa_runner.robot_suite" = ["*.robot"]

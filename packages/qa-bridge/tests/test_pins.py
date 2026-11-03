@@ -321,3 +321,61 @@ def test_the_cli_verify_trees_flag(tmp_path, capsys, monkeypatch):
     # without source overrides the default paths (tmp/c, tmp/h) are the checkouts, but the digests in the file are placeholders
     assert pins_mod.main(["--file", str(tmp_path / "pins.toml"), "--verify-trees", "--require-git"]) == 1
     assert "FAIL PIN_MISMATCH" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------------------------------------- where an installed bundle keeps pins.toml
+def _layout(tmp_path):
+    checkout = tmp_path / "checkout"
+    (checkout / "packages" / "x").mkdir(parents=True)
+    (checkout / "pins.toml").write_text("checkout")
+    prefix = tmp_path / "prefix"
+    share = prefix / "share" / "redevops-qa"
+    share.mkdir(parents=True)
+    (share / "pins.toml").write_text("installed")
+    installed_module = prefix / "lib" / "python3.12" / "site-packages" / "redevops_qa_bridge" / "pins.py"
+    installed_module.parent.mkdir(parents=True)
+    installed_module.write_text("")
+    checkout_module = checkout / "packages" / "x" / "pins.py"
+    checkout_module.write_text("")
+    return checkout, prefix, installed_module, checkout_module
+
+
+def test_an_installed_bridge_finds_the_pins_file_under_its_prefix(tmp_path, monkeypatch):
+    import sys
+    _checkout, prefix, installed_module, _ = _layout(tmp_path)
+    monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    assert pins_mod.find_pins_file(installed_module).read_text() == "installed"
+
+
+def test_an_installed_bridge_prefers_its_own_pins_file_to_a_checkout_that_lies_above_the_environment(tmp_path, monkeypatch):
+    import sys
+    checkout, _prefix, _, _ = _layout(tmp_path)
+    venv = checkout / ".venv"                               # a virtual environment inside a checkout that has its own pins.toml
+    (venv / "share" / "redevops-qa").mkdir(parents=True)
+    (venv / "share" / "redevops-qa" / "pins.toml").write_text("installed")
+    module = venv / "lib" / "python3.12" / "site-packages" / "redevops_qa_bridge" / "pins.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("")
+    monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
+    monkeypatch.setattr(sys, "prefix", str(venv))
+    assert pins_mod.find_pins_file(module).read_text() == "installed"
+
+
+def test_a_checkout_still_finds_its_own_pins_file_even_when_the_interpreter_has_an_installed_one(tmp_path, monkeypatch):
+    import sys
+    _checkout, prefix, _, checkout_module = _layout(tmp_path)
+    monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    assert pins_mod.find_pins_file(checkout_module).read_text() == "checkout"
+
+
+def test_without_an_installed_file_the_search_walks_up_as_before_and_the_environment_variable_wins(tmp_path, monkeypatch):
+    import sys
+    checkout, _prefix, _, checkout_module = _layout(tmp_path)
+    monkeypatch.delenv(pins_mod.PINS_FILE_ENV, raising=False)
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "empty-prefix"))
+    assert pins_mod.installed_pins_file() is None and pins_mod.find_pins_file(checkout_module).read_text() == "checkout"
+    other = tmp_path / "other.toml"
+    monkeypatch.setenv(pins_mod.PINS_FILE_ENV, str(other))
+    assert pins_mod.find_pins_file(checkout_module) == other

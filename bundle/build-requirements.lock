@@ -1,0 +1,3 @@
+# The build tool that turns the repository's packages into wheels, pinned and hash-checked (tools/build_bundle.py installs exactly this into a throwaway venv).
+setuptools==80.9.0 \
+    --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922
