@@ -12,8 +12,13 @@
 #              verified and before anything is placed in <prefix>/browsers.
 # --mirror     fetch <BASE>/<archive file name> instead of the URLs in the lock (BASE: an http(s):// or file:// URL, or an absolute directory). The bytes must still be the pinned ones.
 #
-# Exit status: 0 installed (or already installed and identical to the pin); 2 usage; 4 the bundle has no browser.lock.json or it is not the installation's; 5 the prefix is not an installation
-# made by install.sh; 6 the download, the check or the install failed (nothing was placed in <prefix>/browsers by this run; the message names the expected and the actual hash).
+# The archives are unpacked into <prefix>/browsers/.staging-<pid> and each install directory is renamed into place only after the whole tree matched the pin; a failure, or an INT, TERM or HUP
+# (forwarded to the download), removes the staging directory and anything this run placed. A kill with SIGKILL, a power loss or the like cannot be caught: the staging directory stays and the
+# next run removes a .staging-<pid> whose process is gone.
+#
+# Exit status: 0 installed (or already installed and identical to the pin); 2 usage (an unusable --mirror, for one); 4 the bundle has no browser.lock.json or it is not the installation's; 5 the
+# prefix is not an installation made by install.sh; 6 the download, the check or the install failed (nothing was placed in <prefix>/browsers by this run; the message names the expected and
+# the actual hash); 130, 143 or 129 stopped by INT, TERM or HUP.
 set -eu
 set -o pipefail
 umask 022
@@ -30,7 +35,7 @@ while [ "$#" -gt 0 ]; do
     --prefix) [ "$#" -ge 2 ] || fail 2 "--prefix needs a directory"; prefix="$2"; shift 2 ;;
     --with-deps) deps=1; shift ;;
     --mirror) [ "$#" -ge 2 ] || fail 2 "--mirror needs a base URL or an absolute directory"; mirror="$2"; shift 2 ;;
-    -h|--help) sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail 2 "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -53,28 +58,57 @@ created=0
 if [ ! -e "$browsers" ]; then mkdir "$browsers" || fail 6 "cannot create $browsers"; created=1; fi
 [ -d "$browsers" ] && [ ! -L "$browsers" ] || fail 5 "$browsers is not a directory"
 staging="$browsers/.staging-$$"
-committed=""
+fresh=""          # the install directories this run is going to place (the ones that are not there yet): removed again if the run does not end well
 done_ok=0
+child=0
+
+# A child (the download, apt) runs in the background and is waited for, so that a signal sent to this script alone is acted on at once and reaches the child.
+run_child() { "$@" & child=$!; local st=0; wait "$child" || st=$?; child=0; return "$st"; }
+on_signal() {
+  trap '' INT TERM HUP
+  if [ "$child" -ne 0 ]; then kill -TERM "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; fi
+  exit "$1"
+}
 cleanup() {
   rm -rf -- "$staging"
   if [ "$done_ok" -ne 1 ]; then
-    for d in $committed; do rm -rf -- "$browsers/$d"; done
+    for d in $fresh; do rm -rf -- "$browsers/$d"; done
     if [ "$created" -eq 1 ]; then rmdir "$browsers" 2>/dev/null || true; fi
   fi
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
+
+# A staging directory of an earlier run that was killed without a chance to clean up (SIGKILL, power loss): removed when its process is gone. Only real directories of this exact name, inside
+# the browsers directory; a link is left alone and never followed.
+for stale in "$browsers"/.staging-*; do
+  [ -d "$stale" ] && [ ! -L "$stale" ] || continue
+  n="${stale##*/.staging-}"
+  case "$n" in ''|*[!0-9]*) continue ;; esac
+  if kill -0 "$n" 2>/dev/null || [ -d "/proc/$n" ]; then continue; fi          # its run is still going (kill -0 fails for another user's process; /proc does not)
+  echo "removing the staging directory $stale left by an earlier run (process $n is gone)"
+  rm -rf -- "$stale"
+done
+
+dirs_out="$(pin dirs --lock "$installed_lock")" || fail 6 "the lock could not be read"
+for d in $dirs_out; do
+  if [ ! -e "$browsers/$d" ] && [ ! -L "$browsers/$d" ]; then fresh="$fresh $d"; fi
+done
 
 echo "browser step: Chromium into $browsers, checked against the pin in browser.lock.json (the operating system libraries are not covered by it)"
 mirror_args=()
 [ -z "$mirror" ] || mirror_args=(--mirror "$mirror")
-pin stage --lock "$installed_lock" --browsers "$browsers" --staging "$staging" ${mirror_args[@]+"${mirror_args[@]}"} || fail 6 "the browser could not be downloaded and verified; nothing was installed"
+st=0
+run_child "$py" -I -m qa_runner.browser_pin stage --lock "$installed_lock" --browsers "$browsers" --staging "$staging" ${mirror_args[@]+"${mirror_args[@]}"} || st=$?
+[ "$st" -ne 2 ] || fail 2 "the --mirror argument cannot be used (see above); nothing was changed"
+[ "$st" -eq 0 ] || fail 6 "the browser could not be downloaded and verified; nothing was installed"
 if [ "$deps" -eq 1 ]; then
   echo "installing the operating system libraries Chromium needs (apt; not covered by the pin)"
-  "$py" -m playwright install-deps chromium || fail 6 "the operating system libraries could not be installed; nothing was placed in $browsers"
+  run_child "$py" -m playwright install-deps chromium || fail 6 "the operating system libraries could not be installed; nothing was placed in $browsers"
 fi
 out="$(pin commit --lock "$installed_lock" --browsers "$browsers" --staging "$staging")" || fail 6 "the verified browser could not be moved into place"
-committed="$(printf '%s\n' "$out" | sed -n 's/^installed //p' | tr '\n' ' ')"
 printf '%s\n' "$out"
 # The same check `redevops-qa doctor` makes, on the installed tree.
 pin verify --lock "$installed_lock" --browsers "$browsers" || fail 6 "the installed tree does not match the pin; what this run installed was removed"

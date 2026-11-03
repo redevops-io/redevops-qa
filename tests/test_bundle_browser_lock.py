@@ -61,7 +61,7 @@ def test_the_builder_carries_the_lock_into_the_bundle_and_records_it(tmp_path, f
 def test_the_readme_of_the_bundle_says_what_is_verified_and_what_is_not(tmp_path, fake):
     text = " ".join((bundle_with(tmp_path, fake) / "README.md").read_text(encoding="utf-8").split())            # the README is wrapped: compare words, not line breaks
     assert "not hashed" not in text and "recorded, not hashed" not in text
-    for phrase in ("browser.lock.json", "before** it unpacks it", "the sha256 and the size of the three archives", "operating system libraries Chromium loads", "availability of the Playwright download host",
+    for phrase in ("browser.lock.json", "before** it unpacks that archive", "<prefix>/browsers/.staging-<pid>", "SIGKILL or a power loss", "recorded in `INSTALL.json`", "source checkout there is no pin", "does not guard the files", "docs/QA_BROWSER_PIN.md", "the sha256 and the size of the three archives", "operating system libraries Chromium loads", "availability of the Playwright download host",
                    "a change made to the tree after a check", "not a signature from the browser's publisher", "Playwright 1.0.0", "revision 1000 (Chromium 9.9.9.9)"):
         assert phrase in text, phrase
 
@@ -144,3 +144,12 @@ def test_the_committed_lock_is_the_one_a_real_build_would_carry():
     assert any(w["name"] == "playwright" and w["version"] == parsed.playwright_version for w in third["wheels"])
     rec = bb.browser_record(None, lock.read_bytes())
     assert rec["revision"] == parsed.revision and rec["lock_sha256"] == hashlib.sha256(lock.read_bytes()).hexdigest()
+
+
+def test_the_maintainer_procedure_names_when_where_how_and_what_evidence_and_the_review_rule():
+    text = " ".join((bh.ROOT / "docs" / "QA_BROWSER_PIN.md").read_text(encoding="utf-8").split())
+    for fragment in ("Every time the pinned Playwright version changes", "the browser step fails closed", "Linux x86_64 host", "playwright install --dry-run chromium", "tools/make_browser_lock.py",
+                     'cmp "$W/lock-1.json" "$W/lock-2.json"', "two independent fresh installs", "browser_pin.py urls --lock bundle/browser.lock.json", "CI run id", "SHA256SUMS", "read by a human reviewer",
+                     "not edited by hand", "builder refuses a lock that is not for the Playwright wheel", "check_bundle.py", "not a publisher signature"):
+        assert fragment in text, fragment
+    assert "docs/QA_BROWSER_PIN.md" in (bh.ROOT / "bundle" / "README.md").read_text(encoding="utf-8")

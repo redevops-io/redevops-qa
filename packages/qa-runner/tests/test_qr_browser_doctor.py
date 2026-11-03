@@ -38,7 +38,7 @@ def check(box, **kw):
 # ------------------------------------------------------------------------------------------------------------------------ the check
 def test_outside_a_bundle_install_there_is_no_pin_and_the_check_says_it_did_not_run(tmp_path):
     c = doctor.check_browser_pin(prefix=str(tmp_path), browsers=tmp_path / "nothing")
-    assert c.status == "OK" and c.name == "browser build" and "not checked" in c.detail and "not a bundle install" in c.detail
+    assert c.status == "WARN" and c.name == "browser build" and "not checked" in c.detail and "not a bundle install" in c.detail and "applies to bundle installs only" in c.detail
 
 
 def test_a_browser_that_was_never_installed_is_reported_as_not_installed_with_the_command_that_installs_it(box):
@@ -219,4 +219,70 @@ def test_the_real_check_in_a_development_environment_passes_and_says_it_was_not_
     """No bundle share directory under this Python's prefix: the same code path run and demo take in a checkout (the CI jobs that run the browser tests in one)."""
     monkeypatch.setattr(doctor, "_share", lambda prefix=None: tmp_path / "no-share")
     c = doctor.check_browser_pin()
-    assert c.status == "OK" and "not checked" in c.detail
+    assert c.status == "WARN" and "not checked" in c.detail and "bundle installs only" in c.detail
+
+
+# ------------------------------------------------------------------------------------------------------------------------ a bundle installation that lost its pin
+def make_install(box, **doc):
+    """INSTALL.json beside the prefix (the virtual environment): what makes a directory a bundle installation."""
+    (box.prefix.parent / "INSTALL.json").write_text(json.dumps({"schema": "redevops-qa/install", **doc}))
+
+
+def test_a_bundle_installation_whose_lock_is_missing_fails_and_is_not_called_not_a_bundle_install(box):
+    make_install(box)
+    lock = box.prefix / "share" / "redevops-qa" / bp.LOCK_NAME
+    lock.unlink()
+    c = check(box)
+    assert c.status == "FAIL" and "this is a bundle installation" in c.detail and "missing" in c.detail and "not a bundle install" not in c.detail and "reinstall" in c.remedy
+
+
+def test_a_bundle_installation_whose_lock_is_a_directory_unreadable_or_not_a_lock_fails(box):
+    make_install(box)
+    lock = box.prefix / "share" / "redevops-qa" / bp.LOCK_NAME
+    lock.unlink()
+    lock.mkdir()
+    assert check(box).status == "FAIL"
+    lock.rmdir()
+    lock.write_bytes(b"\xff\xfe")
+    assert check(box).status == "FAIL" and "cannot be used" in check(box).detail
+
+
+def test_run_and_demo_refuse_a_browser_lane_in_a_bundle_installation_that_lost_its_lock(box, monkeypatch, tmp_path):
+    make_install(box)
+    (box.prefix / "share" / "redevops-qa" / bp.LOCK_NAME).unlink()
+    box.fake.install(box.browsers)
+    (box.browsers / "ffmpeg-1000/COPYING.LGPLv2.1").write_bytes(b"changed")                 # a modified browser, and no pin to notice it by
+    monkeypatch.setattr(doctor.sys, "prefix", str(box.prefix))
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(box.browsers))
+    out_dir = tmp_path / "evidence"
+    for argv in (("run", str(plan_file(tmp_path, {K.ENGINE_PLAYWRIGHT})), "--out", str(out_dir)), ("demo", "--out", str(out_dir))):
+        reached, code, _out, err = reaches_run_plan(monkeypatch, tmp_path, *argv)
+        assert reached == [] and code == K.EXIT_ENVIRONMENT and "BROWSER_PIN" in err and "bundle installation" in err and not out_dir.exists()
+    code, out, _err = run_cli("doctor", "--plan", str(plan_file(tmp_path, {K.ENGINE_PLAYWRIGHT})))
+    assert code == K.EXIT_ENVIRONMENT and "[FAIL] browser build: this is a bundle installation" in out
+    reached, code, _out, err = reaches_run_plan(monkeypatch, tmp_path, "run", str(plan_file(tmp_path, {K.ENGINE_ROBOT})), "--out", str(out_dir))
+    assert reached == [1] and "BROWSER_PIN" not in err
+
+
+def test_a_lock_that_is_not_the_one_install_sh_recorded_fails_and_a_matching_or_absent_record_passes(box):
+    box.fake.install(box.browsers)
+    make_install(box, browser_lock_sha256="0" * 64)
+    c = check(box)
+    assert c.status == "FAIL" and "not the browser pin install.sh recorded" in c.detail and box.fake.lock.digest in c.detail
+    make_install(box, browser_lock_sha256=box.fake.lock.digest)
+    assert check(box).status == "OK"
+    make_install(box)                                    # an installation made before the record existed
+    assert check(box).status == "OK"
+    (box.prefix.parent / "INSTALL.json").write_text("not json")
+    assert check(box).status == "OK"
+
+
+def test_a_bundle_installation_without_playwright_browsers_path_is_a_failure_that_names_the_launcher(box, monkeypatch):
+    make_install(box)
+    monkeypatch.setattr(doctor.sys, "prefix", str(box.prefix))
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    c = doctor.check_browser_pin(registry=box.registry, playwright_version="1.0.0")
+    assert c.status == "FAIL" and "PLAYWRIGHT_BROWSERS_PATH is not set" in c.detail and "bin/redevops-qa" in c.remedy
+    box.fake.install(box.browsers)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(box.browsers))
+    assert doctor.check_browser_pin(registry=box.registry, playwright_version="1.0.0").status == "OK"

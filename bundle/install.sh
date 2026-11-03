@@ -204,6 +204,9 @@ here, prefix = sys.argv[1:3]
 manifest = json.load(open(os.path.join(here, "BUNDLE.json"), encoding="utf-8"))
 doc = {"schema": "redevops-qa/install", "schema_version": "1.0", "bundle": manifest["name"], "bundle_json_sha256": hashlib.sha256(open(os.path.join(here, "BUNDLE.json"), "rb").read()).hexdigest(),
        "python": "%d.%d.%d" % sys.version_info[:3], "prefix": os.path.realpath(prefix), "entries": ["venv", "bin", "browsers", "INSTALL.json"]}
+lock = os.path.join(here, "browser.lock.json")
+if os.path.isfile(lock):                      # the browser pin this installation was made with: doctor compares the installed copy with it
+    doc["browser_lock_sha256"] = hashlib.sha256(open(lock, "rb").read()).hexdigest()
 with open(os.path.join(prefix, "INSTALL.json"), "x", encoding="utf-8") as fh:
     fh.write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
 PY

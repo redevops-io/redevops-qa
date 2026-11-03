@@ -19,8 +19,9 @@ Command line (used by ``bundle/install-browser.sh``)::
     python -I -m qa_runner.browser_pin stage  --lock FILE --browsers DIR --staging DIR [--mirror BASE]
     python -I -m qa_runner.browser_pin commit --lock FILE --browsers DIR --staging DIR
     python -I -m qa_runner.browser_pin urls   --lock FILE [--fallbacks-only]
+    python -I -m qa_runner.browser_pin dirs   --lock FILE
 
-Exit status: 0 ok; 1 the check or the install failed (the message names what was expected and what was found); 2 usage.
+Exit status: 0 ok; 1 the check or the install failed (the message names what was expected and what was found); 2 usage (an unusable --mirror, for one).
 """
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ import re
 import shutil
 import stat
 import sys
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -50,6 +52,9 @@ _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 _MODE = re.compile(r"[0-7]{4}")
 CHUNK = 1 << 20
 USER_AGENT = "redevops-qa-install-browser"
+#: a download may take at most this long (seconds) plus the pinned size at this rate: a host that trickles bytes cannot stall the step for ever (each read also has its own timeout)
+DEADLINE_BASE_S = 300
+DEADLINE_MIN_RATE = 100_000          # bytes per second
 
 
 class LockError(ValueError):
@@ -58,6 +63,15 @@ class LockError(ValueError):
 
 class InstallError(RuntimeError):
     """The browser could not be installed as pinned; nothing was left behind by the failing step."""
+
+
+class UsageError(InstallError):
+    """An argument that cannot be used (for example a --mirror that is neither an http(s) or file URL nor an absolute directory): exit status 2, nothing was started."""
+
+
+def redact(url: str) -> str:
+    """The URL without its credentials (``user:password@``): a mirror URL may carry them and no log or error line shows them."""
+    return re.sub(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/?#\s]*@", r"\1", url)
 
 
 @dataclass(frozen=True)
@@ -313,23 +327,29 @@ def archive_urls(archive: Archive, mirror: Optional[str]) -> List[str]:
     if base.startswith("/"):
         base = Path(base).resolve().as_uri()
     if not re.match(r"(https?|file)://", base):
-        raise InstallError(f"--mirror takes an http(s):// or file:// base URL or an absolute directory, not {base[:40]!r}")
+        raise UsageError(f"--mirror takes an http(s):// or file:// base URL or an absolute directory, not {redact(base)[:40]!r}")
     return [base.rstrip("/") + "/" + archive.file]
 
 
 def fetch_archive(archive: Archive, dest: Path, mirror: Optional[str] = None, log: Callable[[str], None] = lambda s: None,
-                  opener: Callable = urllib.request.urlopen) -> str:
+                  opener: Callable = urllib.request.urlopen, clock: Callable[[], float] = time.monotonic) -> str:
     """Download ``archive`` to ``dest`` and return the URL that served the pinned bytes. A candidate whose size or sha256 is not the pinned one is discarded (and named in the error
-    if no URL serves the pinned bytes); reading stops one byte past the pinned size, so a host cannot fill the disk."""
+    if no URL serves the pinned bytes); reading stops one byte past the pinned size, so a host cannot fill the disk, and a download that takes longer than
+    ``DEADLINE_BASE_S`` plus the pinned size at ``DEADLINE_MIN_RATE`` is abandoned. Credentials in a mirror URL are not shown."""
     attempts: List[str] = []
     for url in archive_urls(archive, mirror):
-        log(f"downloading {archive.file} ({archive.size} bytes) from {url}")
+        shown_url = redact(url)
+        log(f"downloading {archive.file} ({archive.size} bytes) from {shown_url}")
         h = hashlib.sha256()
         got = 0
+        started = clock()
+        limit_s = DEADLINE_BASE_S + archive.size / DEADLINE_MIN_RATE
         try:
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with opener(req, timeout=120) as resp, open(dest, "wb") as out:
                 while got <= archive.size:
+                    if clock() - started > limit_s:
+                        raise TimeoutError(f"more than {int(limit_s)} s")
                     chunk = resp.read(min(CHUNK, archive.size + 1 - got))
                     if not chunk:
                         break
@@ -337,12 +357,12 @@ def fetch_archive(archive: Archive, dest: Path, mirror: Optional[str] = None, lo
                     out.write(chunk)
                     got += len(chunk)
         except (OSError, urllib.error.URLError, ValueError) as exc:
-            attempts.append(f"{url}: the download failed ({type(exc).__name__})")
+            attempts.append(f"{shown_url}: the download failed ({type(exc).__name__}{': ' + str(exc) if isinstance(exc, TimeoutError) else ''})")
             continue
         if got == archive.size and h.hexdigest() == archive.sha256:
             return url
         shown = "more than the pinned size" if got > archive.size else f"{got} bytes"
-        attempts.append(f"{url}: expected sha256 {archive.sha256} ({archive.size} bytes), got sha256 {h.hexdigest()} ({shown})")
+        attempts.append(f"{shown_url}: expected sha256 {archive.sha256} ({archive.size} bytes), got sha256 {h.hexdigest()} ({shown})")
         try:
             dest.unlink()
         except OSError:
@@ -390,8 +410,11 @@ def extract_archive(archive_path: Path, dest: Path, archive: Archive, lock: Lock
                 if str(parent) != "." and not (dest / parent).exists():
                     (dest / parent).mkdir()
                     os.chmod(dest / parent, 0o755)
+            pinned_size = lock.files[rel][1]
+            if info.file_size != pinned_size:
+                raise InstallError(f"{archive.file} has {rel} with {info.file_size} bytes; the lock pins {pinned_size}")
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, "wb") as out, zf.open(info) as src:
+            with os.fdopen(fd, "wb") as out, zf.open(info) as src:          # zipfile reads no more than the size in the header, which was just compared with the pinned size
                 shutil.copyfileobj(src, out, CHUNK)
                 os.fchmod(out.fileno(), mode)
 
@@ -419,7 +442,7 @@ def stage(lock: Lock, browsers: Path, staging: Path, mirror: Optional[str] = Non
             archive_path = staging / "downloads" / a.file
             url = fetch_archive(a, archive_path, mirror, log, opener)
             verify_archive(archive_path, a)                     # the bytes on disk, once more, before anything is unpacked
-            log(f"{a.file}: sha256 {a.sha256} matches the pin (served by {url})")
+            log(f"{a.file}: sha256 {a.sha256} matches the pin (served by {redact(url)})")
             (staging / a.dir).mkdir(mode=0o755)
             os.chmod(staging / a.dir, lock.directories[a.dir])
             extract_archive(archive_path, staging / a.dir, a, lock)
@@ -472,10 +495,10 @@ def check_urls(lock: Lock, log: Callable[[str], None] = lambda s: None, *, fallb
                 try:
                     fetch_archive(single, Path(tmp) / a.file, None, lambda s: None, opener)
                 except InstallError as exc:
-                    bad.append(url)
-                    log(f"MISMATCH {url}: {str(exc).splitlines()[-1].strip()}")
+                    bad.append(redact(url))
+                    log(f"MISMATCH {redact(url)}: {str(exc).splitlines()[-1].strip()}")
                 else:
-                    log(f"same bytes {url}: sha256 {a.sha256} ({a.size} bytes)")
+                    log(f"same bytes {redact(url)}: sha256 {a.sha256} ({a.size} bytes)")
                     (Path(tmp) / a.file).unlink()
     return bad
 
@@ -486,6 +509,8 @@ def main(argv: Optional[Sequence[str]] = None, out=None, err=None) -> int:
     err = err or sys.stderr
     p = argparse.ArgumentParser(prog="python -m qa_runner.browser_pin", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="command", required=True)
+    sp = sub.add_parser("dirs", help="print the install directories of the lock, one per line")
+    sp.add_argument("--lock", required=True)
     sp = sub.add_parser("urls", help="download every URL of the lock and say whether it serves the pinned bytes")
     sp.add_argument("--lock", required=True)
     sp.add_argument("--fallbacks-only", action="store_true")
@@ -508,6 +533,10 @@ def main(argv: Optional[Sequence[str]] = None, out=None, err=None) -> int:
     except LockError as exc:
         print(f"browser_pin: the lock file is not usable: {exc}", file=err)
         return 1
+    if args.command == "dirs":
+        for d in lock.dirs():
+            print(d, file=out)
+        return 0
     if args.command == "urls":
         bad = check_urls(lock, lambda s: print(s, file=out), fallbacks_only=args.fallbacks_only)
         print(f"browser_pin: {len(bad)} URL(s) do not serve the pinned bytes" if bad else "browser_pin: every URL checked serves the pinned bytes", file=err if bad else out)
@@ -532,6 +561,9 @@ def main(argv: Optional[Sequence[str]] = None, out=None, err=None) -> int:
         for d in commit(lock, browsers, staging):
             print(f"installed {d}", file=out)
         return 0
+    except UsageError as exc:
+        print(f"browser_pin: {exc}", file=err)
+        return 2
     except InstallError as exc:
         print(f"browser_pin: {exc}", file=err)
         return 1

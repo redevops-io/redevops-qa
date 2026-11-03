@@ -91,6 +91,16 @@ extra="$(dirname "$exe")/extra.so"
 tamper_case "an extra file" EXTRA "chrome-linux64/extra.so" 'printf x > "$extra"' 'mv -f "$extra" "$WORK/extra.removed"'
 tamper_case "a missing file" MISSING "chrome-linux64/ABOUT" 'mv -f "$victim" "$WORK/victim.moved"' 'mv -f "$WORK/victim.moved" "$victim"'
 need '[ "$(cat "$victim")" = "$(cat "$WORK/victim.orig")" ]' "the tampered file was not restored"
+echo "--- the installation loses its browser pin (browser.lock.json removed from share/redevops-qa): the browser is not checked, so it is not started"
+lock="$HOME/redevops-qa/venv/share/redevops-qa/browser.lock.json"
+mv -f "$lock" "$WORK/lock.moved"
+st=0; "$QA" doctor > "$WORK/nolock-doctor.out" 2>&1 || st=$?; grep "browser build" "$WORK/nolock-doctor.out"
+need "[ $st -eq 3 ]" "doctor must exit 3 for an installation without its browser pin (got $st)"
+need 'has "^\[FAIL\] browser build: this is a bundle installation" "$WORK/nolock-doctor.out"' "doctor did not fail for a bundle installation without its browser pin"
+st=0; "$QA" demo --out "$WORK/nolock-evidence" > "$WORK/nolock-demo.out" 2>&1 || st=$?; head -2 "$WORK/nolock-demo.out"
+need "[ $st -eq 3 ] && has BROWSER_PIN \"$WORK/nolock-demo.out\" && [ ! -e \"$WORK/nolock-evidence\" ]" "demo must refuse to start the browser lane without the browser pin, and make no evidence directory"
+mv -f "$WORK/lock.moved" "$lock"
+need '"$QA" doctor > "$WORK/relock-doctor.out" 2>&1 && has "^\[ OK \] browser build" "$WORK/relock-doctor.out"' "doctor did not pass again after restoring the browser pin"
 rm -rf "$WORK"/robot-evidence-*
 
 step "2. rollback: the previous bundle in its own directory, doctor with it, then the first one removed"

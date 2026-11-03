@@ -390,8 +390,8 @@ def test_an_archive_entry_that_names_a_path_outside_the_install_directory_is_ref
 
 @pytest.mark.parametrize("entries,match", [
     ([("ffmpeg-linux", 0o4755, b"x"), ("COPYING.LGPLv2.1", 0o644, b"x")], "setuid"),
-    ([("ffmpeg-linux", 0o755, b"x"), ("COPYING.LGPLv2.1", 0o644, b"x"), ("extra", 0o644, b"x")], "does not list"),
-    ([("ffmpeg-linux", 0o755, b"x"), ("COPYING.LGPLv2.1", 0o644, b"x"), ("COPYING.LGPLv2.1", 0o644, b"y")], "(or lists twice)"),
+    ([("ffmpeg-linux", 0o755, b"#!/bin/sh\necho fake ffmpeg\n"), ("COPYING.LGPLv2.1", 0o644, b"licence"), ("extra", 0o644, b"x")], "does not list"),
+    ([("ffmpeg-linux", 0o755, b"#!/bin/sh\necho fake ffmpeg\n"), ("COPYING.LGPLv2.1", 0o644, b"licence"), ("COPYING.LGPLv2.1", 0o644, b"licence")], "(or lists twice)"),
 ], ids=["setuid", "unlisted", "twice"])
 def test_an_archive_with_a_setuid_file_an_unlisted_file_or_a_repeated_name_is_refused(tmp_path, fake, entries, match):
     mirror, _ = lock_for_archive(tmp_path, fake, "ffmpeg-linux.zip", entries)
@@ -423,7 +423,7 @@ def test_the_tree_check_of_the_staged_files_catches_an_archive_whose_content_is_
     mirror.mkdir()
     for f in fake.archives_dir.iterdir():
         (mirror / f.name).write_bytes(f.read_bytes())
-    write_zip(mirror / "ffmpeg-linux.zip", [("ffmpeg-linux", 0o755, b"#!/bin/sh\necho changed\n"), ("COPYING.LGPLv2.1", 0o644, b"licence")], [])
+    write_zip(mirror / "ffmpeg-linux.zip", [("ffmpeg-linux", 0o755, b"#!/bin/sh\necho tampered!!!\n"), ("COPYING.LGPLv2.1", 0o644, b"licence")], [])           # same size, other bytes
     lock = relock(make_lock_doc(mirror))
     (tmp_path / "browsers").mkdir()
     with pytest.raises(bp.InstallError, match="not the pinned tree"):
@@ -575,3 +575,93 @@ def test_check_urls_can_skip_the_first_url_of_each_archive(fake):
         return _Body(good[req.full_url.rsplit("/", 1)[-1]])
     assert bp.check_urls(fake.lock, fallbacks_only=True, opener=opener) == []
     assert seen and all("/second/" in u for u in seen) and len(seen) == len(fake.lock.archives)
+
+
+# ------------------------------------------------------------------------------------------------------------------------------ review items: credentials, the second archive check, usage errors, limits
+def test_credentials_in_a_mirror_url_are_not_shown_anywhere(fake, tmp_path):
+    wanted = next(a for a in fake.lock.archives if a.file == "ffmpeg-linux.zip")
+    good = (fake.archives_dir / "ffmpeg-linux.zip").read_bytes()
+    mirror = "http://alice:s3cret@mirror.example:8080/base/"
+    log = []
+    served = bp.fetch_archive(wanted, tmp_path / "a.zip", mirror, log.append, opener=lambda req, timeout=0: _Body(good))
+    assert served.startswith("http://alice:s3cret@")                  # the real URL is what is fetched...
+    assert all("s3cret" not in line and "alice" not in line for line in log) and any("mirror.example:8080" in line for line in log)         # ...and never what is shown
+    for opener in (lambda req, timeout=0: _Body(b"junk"), lambda req, timeout=0: (_ for _ in ()).throw(OSError("down"))):
+        with pytest.raises(bp.InstallError) as exc:
+            bp.fetch_archive(wanted, tmp_path / "b.zip", mirror, log.append, opener=opener)
+        assert "s3cret" not in str(exc.value) and "alice" not in str(exc.value) and "mirror.example:8080" in str(exc.value)
+    assert all("s3cret" not in line for line in log)
+
+
+def test_stage_logs_a_mirror_without_credentials_and_check_urls_too(fake, tmp_path):
+    (tmp_path / "browsers").mkdir()
+    log = []
+    good = {a.file: (fake.archives_dir / a.file).read_bytes() for a in fake.lock.archives}
+    bp.stage(fake.lock, tmp_path / "browsers", tmp_path / "stage", mirror="https://bob:hunter2@m.example/x", log=log.append, opener=lambda req, timeout=0: _Body(good[req.full_url.rsplit("/", 1)[-1]]))
+    assert log and all("hunter2" not in line and "bob" not in line for line in log) and any("served by https://m.example/x/" in line for line in log)
+
+
+@pytest.mark.parametrize("url,shown", [("http://u:p@h/x", "http://h/x"), ("https://u@h:1/x?a=b@c", "https://h:1/x?a=b@c"), ("file:///abs/dir", "file:///abs/dir"), ("https://h/a@b", "https://h/a@b")])
+def test_redact_removes_only_the_userinfo(url, shown):
+    assert bp.redact(url) == shown
+
+
+def test_the_second_check_of_the_archive_on_disk_refuses_bytes_that_the_download_check_let_through(fake, tmp_path, monkeypatch):
+    """verify_archive is a second, independent read of the file before it is unpacked: if the download step returned without having checked (or the file changed on disk afterwards), the
+    archive is still refused."""
+    def careless_fetch(archive, dest, mirror=None, log=lambda s: None, opener=None, clock=None):
+        dest.write_bytes((fake.archives_dir / archive.file).read_bytes()[:-1] + b"X")
+        return "https://example.invalid/x"
+    monkeypatch.setattr(bp, "fetch_archive", careless_fetch)
+    (tmp_path / "browsers").mkdir()
+    with pytest.raises(bp.InstallError, match="does not match its pin: expected sha256"):
+        bp.stage(fake.lock, tmp_path / "browsers", tmp_path / "stage", mirror=str(fake.archives_dir))
+    assert os.listdir(tmp_path / "browsers") == [] and not (tmp_path / "stage").exists()
+
+
+def test_an_unusable_mirror_is_a_usage_error_with_exit_status_2_and_leaves_nothing(fake, tmp_path):
+    lock = tmp_path / "lock.json"
+    lock.write_bytes(fake.lock_bytes)
+    (tmp_path / "browsers").mkdir()
+    for bad in ("ftp://x/y", "relative/dir", "gopher://u:p@h/"):
+        code, _out, err = run_main("stage", "--lock", str(lock), "--browsers", str(tmp_path / "browsers"), "--staging", str(tmp_path / "s"), "--mirror", bad)
+        assert code == 2 and "--mirror takes" in err and "u:p" not in err and not (tmp_path / "s").exists()
+    with pytest.raises(bp.UsageError):
+        bp.archive_urls(fake.lock.archives[0], "ftp://x/y")
+
+
+def test_a_download_that_takes_longer_than_the_deadline_is_abandoned(fake, tmp_path):
+    wanted = next(a for a in fake.lock.archives if a.file == "ffmpeg-linux.zip")
+    good = (fake.archives_dir / "ffmpeg-linux.zip").read_bytes()
+    calls = []
+
+    def clock():                       # each download starts at 0 and its next look at the clock is far past the deadline
+        calls.append(1)
+        return 0.0 if len(calls) % 2 == 1 else 10.0 ** 9
+    with pytest.raises(bp.InstallError, match="the download failed .TimeoutError: more than") as exc:
+        bp.fetch_archive(wanted, tmp_path / "a.zip", opener=lambda req, timeout=0: _Body(good), clock=clock)
+    assert str(int(bp.DEADLINE_BASE_S + wanted.size / bp.DEADLINE_MIN_RATE)) in str(exc.value)
+    assert bp.fetch_archive(wanted, tmp_path / "b.zip", opener=lambda req, timeout=0: _Body(good), clock=lambda: 0.0)
+
+
+def test_an_entry_with_another_size_than_the_pin_is_refused_before_a_byte_of_it_is_written(tmp_path, fake):
+    mirror, _ = lock_for_archive(tmp_path, fake, "ffmpeg-linux.zip", [("ffmpeg-linux", 0o755, b"0" * 100_000), ("COPYING.LGPLv2.1", 0o644, b"licence")])
+    honest = fake.lock
+    # a lock that pins the honest sizes, and an archive (pinned by its own hash) whose entry is far bigger
+    doc = copy.deepcopy(fake.doc)
+    for a in doc["archives"]:
+        if a["file"] == "ffmpeg-linux.zip":
+            a["sha256"] = hashlib.sha256((mirror / "ffmpeg-linux.zip").read_bytes()).hexdigest()
+            a["size"] = (mirror / "ffmpeg-linux.zip").stat().st_size
+    lock = relock(doc)
+    (tmp_path / "browsers").mkdir()
+    with pytest.raises(bp.InstallError, match="has ffmpeg-1000/ffmpeg-linux with 100000 bytes; the lock pins"):
+        bp.stage(lock, tmp_path / "browsers", tmp_path / "stage", mirror=str(mirror))
+    assert os.listdir(tmp_path / "browsers") == [] and honest.files["ffmpeg-1000/ffmpeg-linux"][1] < 100_000
+
+
+def test_the_dirs_command_lists_the_install_directories(fake, tmp_path):
+    lock = tmp_path / "lock.json"
+    lock.write_bytes(fake.lock_bytes)
+    code, out, _err = run_main("dirs", "--lock", str(lock))
+    assert code == 0 and out.split() == fake.lock.dirs()

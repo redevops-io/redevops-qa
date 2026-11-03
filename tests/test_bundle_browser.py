@@ -295,6 +295,133 @@ def test_a_symbolic_link_as_the_browsers_directory_is_refused(w, fake, tmp_path)
 
 
 # ------------------------------------------------------------------------------------------------------------------------------ the checker and the builder
+# ------------------------------------------------------------------------------------------------------------------------------ signals sent to the script alone
+def children_of(pid):
+    out = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split()
+    return [int(x) for x in out]
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    # a zombie is not running
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+@pytest.mark.parametrize("sig_name,code", [("SIGTERM", 143), ("SIGINT", 130), ("SIGHUP", 129)])
+def test_a_signal_sent_to_the_script_alone_stops_the_download_at_once_and_cleans_up(w, fake, sig_name, code):
+    """Not to the process group: what `kill <pid>`, systemd and `timeout` do. The script exits promptly with the signal's status, the download process it started is gone too, and neither the
+    staging directory nor the browsers directory this run made is left."""
+    import signal
+    import time
+    before = tree_listing(w["prefix"])
+    with bh.serve(fake.archives_dir, delay=30) as url:
+        proc = subprocess.Popen(["bash", str(w["bundle"] / SCRIPT), "--prefix", str(w["prefix"]), "--mirror", url], env=clean_env(w["home"]), cwd=str(w["home"]), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        deadline = time.time() + 60
+        kids = []
+        while time.time() < deadline and not kids:
+            kids = children_of(proc.pid)
+            time.sleep(0.1)
+        assert kids, "the download process was never started"
+        time.sleep(0.5)
+        t0 = time.time()
+        os.kill(proc.pid, getattr(signal, sig_name))
+        proc.communicate(timeout=20)
+        elapsed = time.time() - t0
+    assert proc.returncode == code and elapsed < 10, (proc.returncode, elapsed)
+    time.sleep(0.5)
+    assert not any(alive(k) for k in kids), "the download process outlived the script"
+    assert prefix_entries(w) == ["INSTALL.json", "bin", "venv"] and tree_listing(w["prefix"]) == before
+
+
+# ------------------------------------------------------------------------------------------------------------------------------ a staging directory left by a killed run
+def dead_pid():
+    for pid in range(99990, 90000, -1):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return pid
+        except PermissionError:
+            continue
+    raise AssertionError("no unused pid")
+
+
+def test_the_next_run_removes_the_staging_directory_of_a_run_that_was_killed_and_leaves_the_rest(w, fake, tmp_path):
+    browsers = w["prefix"] / "browsers"
+    browsers.mkdir()
+    gone = dead_pid()
+    stale = browsers / f".staging-{gone}"
+    (stale / "downloads").mkdir(parents=True)
+    (stale / "downloads" / "partial.zip").write_bytes(b"x" * 1000)
+    other = browsers / ".staging-notapid"
+    other.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep")
+    os.symlink(outside, browsers / f".staging-{gone - 1}")
+    running = subprocess.Popen(["sleep", "120"])
+    try:
+        busy = browsers / f".staging-{running.pid}"
+        busy.mkdir()
+        done = browser_step(w, "--mirror", str(fake.archives_dir))
+        assert done.returncode == 0, done.stderr
+        assert not stale.exists() and f"removing the staging directory {stale}" in done.stdout
+        assert other.is_dir() and busy.is_dir(), "a directory that is not an earlier run's, or whose process is running, is not touched"
+        assert (browsers / f".staging-{gone - 1}").is_symlink() and (outside / "keep.txt").read_text() == "keep", "a link is never followed"
+    finally:
+        running.kill()
+        running.wait()
+    assert bh.pin_module().verify_tree(browsers, fake.lock) == []
+
+
+# ------------------------------------------------------------------------------------------------------------------------------ usage, credentials, a failed final check
+@pytest.mark.parametrize("bad", ["ftp://example.invalid/x", "relative/dir", "gopher://user:s3cret@host/"])
+def test_an_unusable_mirror_is_a_usage_error_with_exit_2_and_changes_nothing(w, bad):
+    before = tree_listing(w["prefix"])
+    done = browser_step(w, "--mirror", bad)
+    assert done.returncode == 2 and "--mirror takes" in done.stderr and "s3cret" not in done.stderr + done.stdout
+    assert_nothing_installed(w, before)
+
+
+def test_credentials_in_a_mirror_url_do_not_appear_in_the_output(w):
+    before = tree_listing(w["prefix"])
+    done = browser_step(w, "--mirror", "http://alice:s3cret@127.0.0.1:9/")
+    assert done.returncode == 6 and "127.0.0.1:9" in done.stderr
+    assert "s3cret" not in done.stderr + done.stdout and "alice" not in done.stderr + done.stdout
+    assert_nothing_installed(w, before)
+
+
+def test_a_failed_final_check_removes_what_this_run_placed_and_keeps_what_was_there(tmp_path, fake):
+    """The check after the placement is forced to fail (the installed copy of the module is edited to report a difference when asked): the install directories this run moved into place are
+    removed again, an install directory that was already there is not, and the exit status is 6."""
+    patch = ('problems = verify_tree(browsers, lock)\n            if args.json:', 'problems = verify_tree(browsers, lock) + ([Problem("CHANGED", "x", "forced")] if os.environ.get("QA_TEST_FAIL_VERIFY") else [])\n            if args.json:')
+    bundle = bh.make_browser_bundle(tmp_path / "b", fake, patch=patch)
+    home = tmp_path / "home"
+    home.mkdir()
+    prefix = tmp_path / "qa"
+    assert run_script(bundle, "install.sh", ["--prefix", str(prefix)], home).returncode == 0
+    env = clean_env(home)
+    argv = ["bash", str(bundle / SCRIPT), "--prefix", str(prefix), "--mirror", str(fake.archives_dir)]
+    done = subprocess.run(argv, env={**env, "QA_TEST_FAIL_VERIFY": "1"}, cwd=str(home), capture_output=True, text=True)
+    assert done.returncode == 6 and "the installed tree does not match the pin" in done.stderr
+    assert sorted(os.listdir(prefix)) == ["INSTALL.json", "bin", "venv"]
+    assert subprocess.run(argv, env=env, cwd=str(home), capture_output=True, text=True).returncode == 0           # without the forced failure the same run installs
+    shutil.rmtree(prefix / "browsers" / "ffmpeg-1000")
+    done = subprocess.run(argv, env={**env, "QA_TEST_FAIL_VERIFY": "1"}, cwd=str(home), capture_output=True, text=True)
+    assert done.returncode == 6 and sorted(os.listdir(prefix / "browsers")) == ["chromium-1000", "chromium_headless_shell-1000"]
+
+
+def test_install_sh_records_the_digest_of_the_browser_lock_it_installed(world, fake):
+    doc = json.loads((world["prefix"] / "INSTALL.json").read_text(encoding="utf-8"))
+    assert doc["browser_lock_sha256"] == hashlib.sha256(fake.lock_bytes).hexdigest()
+    assert doc["entries"] == ["venv", "bin", "browsers", "INSTALL.json"]
+
+
+
 def test_the_script_text_states_what_is_pinned_and_what_is_not():
     text = (bh.ROOT / "bundle" / SCRIPT).read_text(encoding="utf-8")
     assert "not hashed" not in text and "browser.lock.json" in text and "NOT covered by the pin" in text and "BEFORE unpacking" in text

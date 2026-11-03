@@ -15,7 +15,7 @@ Appium are not part of this workflow. Nothing here has been run on any other pla
 Installing: from a checkout, as the tests and the CI jobs do (the `src` directories on `PYTHONPATH`, the pinned trees fetched into `.pinned`); or from the pinned bundle (`bundle/README.md`,
 built by `tools/build_bundle.py`): a wheelhouse with a hash for every wheel, installed with `pip install --no-index --find-links wheelhouse --require-hashes -r requirements.lock` into a new
 directory, for CPython 3.12 on Linux x86_64 only. A bundle install keeps `pins.toml` and the pinned trees under `<prefix>/share/redevops-qa/` and the pin check runs against those copies
-(`REDEVOPS_QA_PINS` still overrides; a checkout above the environment is not used instead). Chromium is downloaded by the bundle's separate browser step and checked against `browser.lock.json` (`qa_runner.browser_pin`): `doctor` and `run` compare the installed Chromium tree with the pin, and a browser lane is not started against a tree that differs.
+(`REDEVOPS_QA_PINS` still overrides; a checkout above the environment is not used instead). Chromium is downloaded by the bundle's separate browser step and checked against `browser.lock.json` (`qa_runner.browser_pin`): in a bundle installation `doctor` and `run` compare the installed Chromium tree with the pin, and a browser lane is not started against a tree that differs or against an installation whose pin is missing. In a source checkout there is no pin: `doctor` says so (`WARN`) and no browser check is made.
 
 ## The public CI demo
 

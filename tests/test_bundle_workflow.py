@@ -243,7 +243,8 @@ def test_the_acceptance_script_tampers_with_the_installed_browser_and_requires_t
                      'tamper_case "a missing file" MISSING', "doctor must exit 3", "doctor did not fail the browser build", "doctor launched a browser that failed the pin check",
                      "demo must refuse to start the browser lane with exit status 3", "BROWSER_PIN", "demo made an evidence directory although the browser lane was refused",
                      "a plan with only a Robot lane must still run with a tampered browser", "doctor did not pass again after restoring", "doctor did not say that the browser is not installed",
-                     "doctor did not report the browser build as matching the pin", "the tampered file was not restored"):
+                     "doctor did not report the browser build as matching the pin", "the tampered file was not restored",
+                     "doctor did not fail for a bundle installation without its browser pin", "demo must refuse to start the browser lane without the browser pin", "doctor did not pass again after restoring the browser pin"):
         assert fragment in ACCEPT, fragment
     assert ACCEPT.index("1b. the browser pin") < ACCEPT.index('step "2. rollback')
 

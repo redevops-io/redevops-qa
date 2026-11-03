@@ -35,12 +35,21 @@ def pin_module():
     return importlib.import_module("qa_runner.browser_pin")
 
 
-def make_runner_wheel(directory: Path, lock_bytes: bytes, *, ship_lock: bool = True) -> Path:
+def pin_source(patch: tuple | None) -> bytes:
+    """The real browser_pin.py, or with one edit (old, new) that a test uses to make a step fail on purpose."""
+    text = (RUNNER_SRC / "qa_runner" / "browser_pin.py").read_text(encoding="utf-8")
+    if patch:
+        assert text.count(patch[0]) == 1, patch[0]
+        text = text.replace(*patch)
+    return text.encode("utf-8")
+
+
+def make_runner_wheel(directory: Path, lock_bytes: bytes, *, ship_lock: bool = True, patch: tuple | None = None) -> Path:
     name, version = "redevops_qa_testbrowser", "1.0"
     dist = f"{name}-{version}"
     files = {
         "qa_runner/__init__.py": b"",
-        "qa_runner/browser_pin.py": (RUNNER_SRC / "qa_runner" / "browser_pin.py").read_bytes(),
+        "qa_runner/browser_pin.py": pin_source(patch),
         "playwright/__init__.py": b"",
         "playwright/__main__.py": STUB_PLAYWRIGHT.encode(),
         f"{dist}.dist-info/METADATA": f"Metadata-Version: 2.1\nName: {name.replace('_', '-')}\nVersion: {version}\n".encode(),
@@ -57,12 +66,13 @@ def make_runner_wheel(directory: Path, lock_bytes: bytes, *, ship_lock: bool = T
     return out
 
 
-def make_browser_bundle(out_dir: Path, fake: FakeBrowser, *, lock_bytes: bytes | None = None, name: str = "redevops-qa-bundle-test", ship_lock_in_wheel: bool = True) -> Path:
+def make_browser_bundle(out_dir: Path, fake: FakeBrowser, *, lock_bytes: bytes | None = None, name: str = "redevops-qa-bundle-test", ship_lock_in_wheel: bool = True,
+                        patch: tuple | None = None) -> Path:
     lock = lock_bytes if lock_bytes is not None else fake.lock_bytes
     wheels = out_dir / "wheels"
     wheels.mkdir(parents=True)
     entries = [bb.WheelEntry(make_wheel(wheels, "1.0"), "first-party", "test"), bb.WheelEntry(make_kit_wheel(wheels), "first-party", "test"),
-               bb.WheelEntry(make_runner_wheel(wheels, lock, ship_lock=ship_lock_in_wheel), "first-party", "test")]
+               bb.WheelEntry(make_runner_wheel(wheels, lock, ship_lock=ship_lock_in_wheel, patch=patch), "first-party", "test")]
     return bb.assemble(out_dir, name=name, entries=entries, target=host_target(), epoch=1_700_000_000, label="", version="1.0", commit="0" * 40, pins_info=None, licences_from={}, build_tools={},
                        readme_template=(ROOT / "bundle" / "README.md").read_text(encoding="utf-8"), browser_lock=lock)
 

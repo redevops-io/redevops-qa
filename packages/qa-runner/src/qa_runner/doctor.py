@@ -258,12 +258,26 @@ def check_browser_pin(prefix: Optional[str] = None, browsers: Optional[Path] = N
     the browser step was not run); a tree that differs is a FAIL and the browser is not launched. Not covered: the operating system libraries Chromium loads (apt, ``--with-deps``),
     anything outside the install directories, and any change made after this check. Outside a bundle install there is no lock to compare with and the check says it did not run."""
     lock_path = _share(prefix) / browser_pin.LOCK_NAME
+    install_json = Path(prefix or sys.prefix).parent / "INSTALL.json"           # written by install.sh beside the virtual environment: this is a bundle installation
+    bundle_install = os.path.lexists(install_json)
     if not lock_path.is_file():
-        return Check("browser build", "OK", f"not checked: no share/redevops-qa/{browser_pin.LOCK_NAME} under this Python's prefix, so this is not a bundle install and there is no pin to compare the browser with")
+        if bundle_install:
+            return Check("browser build", "FAIL", f"this is a bundle installation ({install_json.parent}) but {lock_path} is missing or is not a file: the browser cannot be checked against its pin, "
+                         "and a browser that is not checked is not started", "reinstall the bundle into a new directory")
+        return Check("browser build", "WARN", f"not checked: no share/redevops-qa/{browser_pin.LOCK_NAME} under this Python's prefix, so this is not a bundle install (a source checkout or a development "
+                     "environment). The browser pin applies to bundle installs only: the Chromium that a run here launches is not compared with anything")
     try:
         lock = browser_pin.load_lock(lock_path)
     except browser_pin.LockError as exc:
         return Check("browser build", "FAIL", f"{browser_pin.LOCK_NAME} cannot be used: {exc}", "reinstall the bundle into a new directory")
+    if bundle_install:
+        try:
+            recorded = json.loads(install_json.read_text(encoding="utf-8")).get("browser_lock_sha256")
+        except (OSError, ValueError, AttributeError):
+            recorded = None
+        if recorded is not None and recorded != lock.digest:
+            return Check("browser build", "FAIL", f"{lock_path} is not the browser pin install.sh recorded in INSTALL.json (sha256 {lock.digest}, recorded {recorded}): the pin was changed after the install",
+                         "reinstall the bundle into a new directory")
     have = playwright_version if playwright_version is not None else _version("playwright")
     if have != lock.playwright_version:
         return Check("browser build", "FAIL", f"the browser pin is for playwright {lock.playwright_version}; this environment has {have or 'no playwright'}", "reinstall the bundle into a new directory")
@@ -275,6 +289,10 @@ def check_browser_pin(prefix: Optional[str] = None, browsers: Optional[Path] = N
     if reg_digest != lock.browsers_json_sha256:
         return Check("browser build", "FAIL", f"the browser revision the installed Playwright expects (its browsers.json, sha256 {reg_digest or 'unreadable'}) is not the pinned one "
                      f"(revision {lock.revision}, sha256 {lock.browsers_json_sha256})", "reinstall the bundle into a new directory")
+    if browsers is None and bundle_install and not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        return Check("browser build", "FAIL", "PLAYWRIGHT_BROWSERS_PATH is not set: the lane children of a run get a temporary HOME and would look for the browser there, not in the directory this check "
+                     "would read, so no browser could be launched from the one that is checked", f"run through the launcher {install_json.parent}/bin/redevops-qa, which sets PLAYWRIGHT_BROWSERS_PATH to "
+                     f"{install_json.parent}/browsers")
     where = browsers if browsers is not None else browsers_directory()
     problems = browser_pin.verify_tree(where, lock)
     absent = [p for p in problems if p.code == "NOT_INSTALLED"]
