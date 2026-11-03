@@ -21,14 +21,15 @@ from qa_egress import GatewayServer, build_launch_config, policy_off_config
 from qa_egress.resolver import SystemResolver
 from qa_playwright import ContextSpec, PlaywrightDriver, ProxySettings
 from qa_runner.egress import policy_config
-from hostile_world import PATHS, HostileWorld
+from hostile_world import HTTPS_PAGE, PATHS, WSS_PAGE, HostileWorld
 
 SETTLE_MS = 4000          # a protected browser has nothing to wait for: it is given this long to do something it should not
 CONTROL_WAIT_S = 30.0     # a control is waited for until it has reached every path (and sent a datagram), so a slow host cannot make a path look unreachable
 
 
-def run_config(world, gateway, name, launch_args, proxy, *, wait_for_all=False):
-    """One browser session loading the hostile page; returns what the hostile listeners and the gateway saw."""
+def run_config(world, gateway, name, launch_args, proxy, *, until=None):
+    """One browser session loading the hostile page; returns what the hostile listeners and the gateway saw. ``until`` (controls only): waited for, up to CONTROL_WAIT_S, until it is true of what
+    the hostile listeners have seen, so a slow host cannot make something look unreachable."""
     world.reset()
     gateway.drain_records()
     driver = PlaywrightDriver()
@@ -36,12 +37,9 @@ def run_config(world, gateway, name, launch_args, proxy, *, wait_for_all=False):
     try:
         session.goto(world.origin + "/page", 15000)
         session.settle(SETTLE_MS)
-        if wait_for_all:
+        if until is not None:
             end = time.monotonic() + CONTROL_WAIT_S
-            while time.monotonic() < end:
-                now = world.snapshot()
-                if set(PATHS) <= now["b_hits"] and now["udp"] > 0:
-                    break
+            while time.monotonic() < end and not until(world.snapshot()):
                 session.settle(500)
         gateway.wait_idle(15)
     finally:
@@ -52,20 +50,34 @@ def run_config(world, gateway, name, launch_args, proxy, *, wait_for_all=False):
     return seen
 
 
+def run_three(up, page, *, until):
+    """The protected configuration and the two controls, one after the other, against one world that serves ``page``."""
+    results = {}
+    with HostileWorld(page) as world:
+        policy = up.harness.egress.EgressPolicy.from_config(policy_config("origin-only", world.origin))
+        with GatewayServer(policy, SystemResolver()) as gateway:
+            fields = build_launch_config("127.0.0.1", gateway.port).profile_fields()
+            results["protected"] = run_config(world, gateway, "protected", fields["launch_args"], ProxySettings(**fields["proxy"]))
+            results["control-noproxy"] = run_config(world, gateway, "control-noproxy", policy_off_config().chromium_args, None, until=until)
+            results["control-proxy-only"] = run_config(world, gateway, "control-proxy-only", (f"--proxy-server=http://127.0.0.1:{gateway.port}",), None, until=until)
+        results["ports"] = {"a": world.a_port, "b": world.b_port}
+    return results
+
+
 @pytest.fixture(scope="module")
 def table(up):
     """Each configuration once, in order, against one world; the policy lists the allowed origin and nothing else."""
-    results = {}
-    with HostileWorld() as world:
-        policy = up.harness.egress.EgressPolicy.from_config(policy_config("origin-only", world.origin))
-        with GatewayServer(policy, SystemResolver()) as gateway:
-            cfg = build_launch_config("127.0.0.1", gateway.port)
-            fields = cfg.profile_fields()
-            results["protected"] = run_config(world, gateway, "protected", fields["launch_args"], ProxySettings(**fields["proxy"]))
-            results["control-noproxy"] = run_config(world, gateway, "control-noproxy", policy_off_config().chromium_args, None, wait_for_all=True)
-            results["control-proxy-only"] = run_config(world, gateway, "control-proxy-only", (f"--proxy-server=http://127.0.0.1:{gateway.port}",), None, wait_for_all=True)
-        results["ports"] = {"a": world.a_port, "b": world.b_port}
-    return results
+    from hostile_world import PAGE
+    return run_three(up, PAGE, until=lambda now: set(PATHS) <= now["b_hits"] and now["udp"] > 0 and now["b_connections"] > 0)
+
+
+#: pages that make only a TCP connection to the hostile origin (no HTTP request line it could count): the row is the page, the evidence is the number of connections the origin accepted
+CONNECTION_ROWS = {"https-image": HTTPS_PAGE, "wss-websocket": WSS_PAGE}
+
+
+@pytest.fixture(scope="module", params=sorted(CONNECTION_ROWS))
+def connection_row(request, up):
+    return request.param, run_three(up, CONNECTION_ROWS[request.param], until=lambda now: now["b_connections"] > 0)
 
 
 def is_loopback_name(host):
@@ -91,6 +103,34 @@ def test_the_hostile_origin_is_reached_by_the_path_only_when_the_protections_are
 
 def test_the_protected_browser_sent_the_hostile_origin_nothing_at_all(table):
     assert table["protected"]["b_hits"] == frozenset(), sorted(table["protected"]["b_hits"])
+
+
+def test_the_protected_browser_opened_no_connection_at_all_to_the_hostile_origin_and_the_controls_did(table):
+    """Connections, not request lines: a bare TCP connect, a preconnect and a TLS ClientHello are not HTTP requests and would not show in the paths above."""
+    assert table["control-noproxy"]["b_connections"] > 0 and table["control-proxy-only"]["b_connections"] > 0
+    assert table["protected"]["b_connections"] == 0, table["protected"]["b_connections"]
+
+
+def test_a_page_that_can_only_open_a_tls_connection_reaches_the_hostile_origin_only_when_the_protections_are_off(connection_row):
+    row, result = connection_row
+    assert result["control-noproxy"]["b_connections"] > 0, f"control (no proxy) opened no connection for the {row} page: the row proves nothing"
+    assert result["control-proxy-only"]["b_connections"] > 0, f"control (--proxy-server only) opened no connection for the {row} page: the row proves nothing"
+    assert result["protected"]["b_connections"] == 0, f"the PROTECTED browser opened {result['protected']['b_connections']} connection(s) to the hostile origin ({row})"
+    assert result["protected"]["b_hits"] == frozenset()
+    assert {d["verdict"] for d in decisions(result["protected"]) if d["port"] == result["ports"]["b"]} <= {"DENY"}
+
+
+def test_a_bare_tcp_connection_to_the_hostile_origin_is_counted_though_no_request_line_follows():
+    """The counter itself: a connect that sends nothing (or a TLS ClientHello) leaves no request path, and must still be a connection."""
+    import socket
+    with HostileWorld() as world:
+        socket.create_connection(("127.0.0.1", world.b_port), timeout=5).close()
+        socket.create_connection(("127.0.0.1", world.b_port), timeout=5).close()
+        end = time.monotonic() + 5
+        while time.monotonic() < end and world.snapshot()["b_connections"] < 2:
+            time.sleep(0.05)
+        seen = world.snapshot()
+    assert seen["b_connections"] == 2 and seen["b_hits"] == frozenset()
 
 
 def test_the_protected_browser_sent_the_hostile_udp_listener_nothing_and_the_controls_did(table):

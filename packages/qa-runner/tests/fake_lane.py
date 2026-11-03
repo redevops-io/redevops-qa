@@ -2,7 +2,7 @@
 """A TEST DOUBLE for the lane child process. It exists only in the tests, to exercise what the parent does with a child that finishes, fails, hangs, crashes or
 spawns a stray process, without a browser. The product has no such mode: nothing in ``qa_runner`` can produce a result without running the engine.
 
-usage: python fake_lane.py MODE INPUT.json [PIDFILE]     (modes: pass, env-fail, settings-bug, hang, exit7, garbage, orphan, disagree, native-fail-verified, unknown-field, junk-rows, bulk, blobs-symlink, forged-verdict)
+usage: python fake_lane.py MODE INPUT.json [PIDFILE]     (modes: crash-before-result, crash-after-result, pass, env-fail, settings-bug, hang, exit7, garbage, orphan, disagree, native-fail-verified, unknown-field, junk-rows, bulk, blobs-symlink, forged-verdict)
 """
 import json
 import os
@@ -76,5 +76,13 @@ elif mode == "orphan":
     code = "import os,signal,time,sys; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(600)"
     subprocess.Popen([sys.executable, "-c", code, sys.argv[3]])
     time.sleep(600)
+elif mode in ("crash-before-result", "crash-after-result"):
+    # a stray grandchild that ignores SIGTERM (its pid is recorded), then the child itself is killed by a signal: before it wrote anything, or after it wrote a complete PASS result
+    code = "import os,signal,time,sys; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(600)"
+    subprocess.Popen([sys.executable, "-c", code, sys.argv[3]])
+    time.sleep(0.5)
+    if mode == "crash-after-result":
+        result("PASS", 0, ALL_PASS, rows())
+    os.kill(os.getpid(), signal.SIGKILL)
 else:
     sys.exit(9)

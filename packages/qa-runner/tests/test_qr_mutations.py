@@ -22,6 +22,7 @@ ROBOT = "test_qr_robot_lane.py"
 CORR = "test_qr_corroborate.py"
 CORRR = "test_qr_corroborate_robot.py"
 EGCFG = "test_qr_egress_config.py"
+CRASH = "test_qr_lane_crash.py"
 
 
 def t(file, name):
@@ -346,6 +347,12 @@ CASES = [
     ("a launch configuration must keep every protection", "egress.py", "        if need not in args:", "        if False:",
      [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[quic allowed]"), t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[webrtc udp allowed]"),
       t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[loopback bypass flag removed]")]),
+    ("an argument the launch configuration does not produce is refused", "egress.py", "        if a not in allowed:", "        if False:",
+     [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[a remote debugging port]"), t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[a later webrtc policy overrides the first]")]),
+    ("a switch given twice is refused", "egress.py", "if names.count(n) > 1}", "if False and names.count(n) > 1}",
+     [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[a switch given twice with the same value]")]),
+    ("nothing a killed child wrote is kept as the engine's record", "orchestrate.py", '    if proc.exit_code != 0 and raw_status != "lane-error":', "    if False:",
+     [t(CRASH, "test_nothing_the_killed_child_wrote_is_kept_as_the_engines_own_record_so_verify_accepts_the_bundle_as_honest")]),
     ("the Playwright proxy option must remove the loopback bypass", "egress.py", '    if proxy.get("bypass") != "<-loopback>":', "    if False:",
      [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[playwright proxy bypass changed]")]),
     ("a launch configuration for another gateway is refused", "egress.py", '    if proxy.get("server") != server:', "    if False:", [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[playwright proxy names another server]")]),

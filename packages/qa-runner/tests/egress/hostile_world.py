@@ -22,6 +22,7 @@ PAGE = """<!doctype html><title>hostile</title><body>
 <link rel=prefetch href="http://127.0.0.1:PB/prefetch"><link rel=preconnect href="http://127.0.0.1:PB">
 <iframe src="http://127.0.0.1:PB/iframe"></iframe>
 <script src="http://127.0.0.1:PB/script.js"></script>
+<img src="https://127.0.0.1:PB/tls.png">
 <script>
 const B='http://127.0.0.1:PB';
 fetch(B+'/fetch-nocors',{mode:'no-cors'}).catch(()=>{});
@@ -48,16 +49,31 @@ assert WEBSOCKET_LINE in PAGE
 #: step times out (the lane is INCONCLUSIVE, never a pass); without it the lane runs to the end, which is what the lane test needs to show the allowed origin working.
 PAGE_WITHOUT_WEBSOCKET = PAGE.replace(WEBSOCKET_LINE, "")
 
+#: pages that can only make a TCP CONNECTION to the hostile origin, with no HTTP request line that the origin could count (a TLS ClientHello is not an HTTP request): an image over https and a secure
+#: WebSocket. A ``<link rel=preconnect>`` is NOT such a row: the pinned Chromium opened no connection for it even with every protection off (probed with the hint in the head, over http and https, with
+#: ``crossorigin`` and added by script: 0 connections), so a row for it could not show anything. The main page keeps its preconnect lines; the connection count covers them.
+HTTPS_PAGE = '<!doctype html><title>https</title><body><img src="https://127.0.0.1:PB/tls.png"></body>'
+WSS_PAGE = "<!doctype html><title>wss</title><body><script>try{new WebSocket('wss://127.0.0.1:PB/ws')}catch(e){}</script></body>"
+
 
 class _Server(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
+    on_accept = None
+
+    def get_request(self):
+        """Every ACCEPTED connection, before any request line is read: a bare TCP connect, a preconnect and a TLS ClientHello are connections too, and none of them is an HTTP request line."""
+        conn = super().get_request()
+        if self.on_accept is not None:
+            self.on_accept()
+        return conn
 
 
 class HostileWorld:
     def __init__(self, page=PAGE):
         self.page = page
         self.b_hits = []
+        self.b_connections = 0
         self.a_seen = []
         self.udp_datagrams = []
         self._lock = threading.Lock()
@@ -106,6 +122,7 @@ class HostileWorld:
                 self.wfile.write(body)
 
         self._b = _Server(("127.0.0.1", 0), HostileB)
+        self._b.on_accept = self._count_connection
         self._a = _Server(("127.0.0.1", 0), AllowedA)
         self.b_port = self._b.server_address[1]
         self.a_port = self._a.server_address[1]
@@ -119,6 +136,10 @@ class HostileWorld:
         for t in self._threads:
             t.start()
         return self
+
+    def _count_connection(self):
+        with self._lock:
+            self.b_connections += 1
 
     def _udp_loop(self):
         while not self._stop.is_set():
@@ -148,9 +169,10 @@ class HostileWorld:
     def reset(self):
         with self._lock:
             self.b_hits.clear()
+            self.b_connections = 0
             self.a_seen.clear()
             self.udp_datagrams.clear()
 
     def snapshot(self):
         with self._lock:
-            return {"b_hits": frozenset(self.b_hits), "a_seen": frozenset(self.a_seen), "udp": len(self.udp_datagrams)}
+            return {"b_hits": frozenset(self.b_hits), "b_connections": self.b_connections, "a_seen": frozenset(self.a_seen), "udp": len(self.udp_datagrams)}

@@ -46,6 +46,13 @@ EDITS = [
     ("a pac url added", lambda f: f.update(launch_args=f["launch_args"] + ("--proxy-pac-url=http://127.0.0.1:1/x",))),
     ("playwright proxy bypass changed", lambda f: f.update(proxy={**f["proxy"], "bypass": "localhost"})),
     ("playwright proxy names another server", lambda f: f.update(proxy={**f["proxy"], "server": "http://127.0.0.1:1"})),
+    # a later switch overrides an earlier one: presence is not enough
+    ("a later webrtc policy overrides the first", lambda f: f.update(launch_args=f["launch_args"] + ("--force-webrtc-ip-handling-policy=default",))),
+    ("a later host resolver rule gives the browser names back", lambda f: f.update(launch_args=f["launch_args"] + ("--host-resolver-rules=MAP * 127.0.0.1",))),
+    ("features switched on again", lambda f: f.update(launch_args=f["launch_args"] + ("--disable-features=NetworkService",))),
+    ("a proxy bypass rule", lambda f: f.update(launch_args=f["launch_args"] + ("--proxy-bypass-rules=*",))),
+    ("a remote debugging port", lambda f: f.update(launch_args=f["launch_args"] + ("--remote-debugging-port=9222",))),
+    ("a switch given twice with the same value", lambda f: f.update(launch_args=f["launch_args"] + ("--disable-quic",))),
 ]
 
 
