@@ -5,8 +5,9 @@ record the independent verifier reads derived from that report.
 Robot records observations (``qa-observe`` tags); it never judges them for the verifier. The engine's own result (``NATIVE_PASS``/``NATIVE_FAIL``: did the suite's own
 checks hold) is kept apart from the verdict, which comes from comparing the record with the value frozen in the plan.
 
-Not enforced here, and stated in the lane's egress profile: network egress of a Robot library. The reviewed library connects to the target's loopback origin by
-itself; nothing makes that traffic pass the gateway."""
+Network egress of a Robot library does not pass the egress gateway: a Robot library opens its own sockets. A lane whose plan says ``origin-only`` is limited by the kernel layers of
+``netfence`` instead, installed on this process before the engine starts and inherited by everything the engine starts; a lane that names ``not-enforced`` runs with nothing, and its egress
+profile says so. A requested limit that cannot be provided means the engine is never started."""
 from __future__ import annotations
 
 import hashlib
@@ -27,8 +28,9 @@ from qa_adapter_kit.supervisor import CancelToken
 from qa_evidence.canon import CanonError, dumps_canonical, loads_strict
 from qa_robot import RobotConfig, RobotSuiteAdapter, observation_document, parse_observations, suite_manifest
 
-from . import constants as K, suites, watchdog
+from . import constants as K, netfence, suites, watchdog
 from .bundle import NATIVE_STATUSES, LaneOutcome
+from .egress import policy_config
 from .judge import observation_path
 from .natives import native_from_adapter_result
 from .plan import FrozenLane
@@ -49,15 +51,25 @@ def _outcome(fl: FrozenLane, version: str, status: str, raw: str, **kw: Any) -> 
     return LaneOutcome(lane_id=fl.lane_id, engine_name=fl.engine, engine_version=version, native_status=status, raw_status=raw, exit_code=kw.pop("exit_code", None), **kw)
 
 
+EGRESS_LOG = "egress-log.jsonl"
+
+
+def egress_log_bytes(fence: "netfence.Fence") -> bytes:
+    """The lane's audit file: the mechanism that was installed (one line), then every decision of the supervisor in order, one JSON object per line."""
+    rows = [fence.header()] + fence.events()
+    return b"".join(json.dumps(r, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n" for r in rows)
+
+
 def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, deadline_s: float, log: List[str],
-               launcher: Optional[Sequence[str]] = None, budget: Optional[Budget] = None) -> LaneOutcome:
+               launcher: Optional[Sequence[str]] = None, budget: Optional[Budget] = None, fence: Optional["netfence.Fence"] = None,
+               policy: Optional[Mapping[str, Any]] = None) -> LaneOutcome:
     budget = budget if budget is not None else Budget(K.DEFAULT_MAX_EVIDENCE_BYTES)
     dropped_before = len(budget.dropped)
     try:
         version = importlib.metadata.version("robotframework")
     except importlib.metadata.PackageNotFoundError:
         version = "not-installed"
-    egress_file = (f"lanes/{fl.lane_id}/egress-profile.json", (dumps_canonical(EGRESS_NOT_ENFORCED), "record"))
+    egress_file = (f"lanes/{fl.lane_id}/egress-profile.json", (dumps_canonical(dict(policy) if fence is not None and policy is not None else EGRESS_NOT_ENFORCED), "record"))
     lane_dir = Path(workdir) / "lanes" / fl.lane_id
     ws, out = lane_dir / "workspace", lane_dir / "output"
     (ws / "suite").mkdir(parents=True)
@@ -77,6 +89,8 @@ def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, 
     request = SuiteRunRequest(run_id=f"{run_id}.{fl.lane_id}", adapter_id=manifest.adapter_id, workspace=str(ws), suite_path="suite", output_dir=str(out),
                               env={"QA_BASE_URL": origin})
     result = SuiteRunner(adapter).run(request, cancel)
+    if fence is not None:
+        fence.close()                                               # the engine and everything it started is done (the supervisor group was ended): what the supervisor saw is complete
 
     native: Dict[str, bytes] = {}
     for name in ("output.xml", "robot-summary.json"):
@@ -88,11 +102,21 @@ def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, 
     files: Dict[str, Tuple[bytes, str]] = {egress_file[0]: egress_file[1]}
     for rel, data in sorted(copies.items()):
         files[f"lanes/{fl.lane_id}/suite/{rel}"] = (data, "record")
+    if fence is not None:
+        files[f"lanes/{fl.lane_id}/{EGRESS_LOG}"] = (egress_log_bytes(fence), "log")
     files[f"logs/{fl.lane_id}.stdout.txt"] = (result.stdout_tail.encode("utf-8", "replace")[-65536:], "log")
     files[f"logs/{fl.lane_id}.stderr.txt"] = (result.stderr_tail.encode("utf-8", "replace")[-65536:], "log")
 
     mapped = native_from_adapter_result(result.status.value, result.error_code.value if result.error_code else None)
     status, raw = mapped if mapped is not None else ("NATIVE_ERROR", "error")
+    egress: Dict[str, int] = {}
+    if fence is not None:
+        egress["fence_denied"] = fence.denied
+        if status in ("NATIVE_PASS", "NATIVE_FAIL", "NATIVE_SKIPPED") and (fence.lost or fence.denied):
+            # what the lane's code tried to reach and was refused (or a supervisor that was lost, so that what it did is not known) is part of the lane's result: never a pass, and no verdict on it
+            status, raw = "NATIVE_ERROR", ("egress-fence-lost" if fence.lost else "egress-denied")
+            log.append(f"lane {fl.lane_id}: the kernel layers refused {fence.denied} attempt(s) of the Robot code to reach an address outside the allow-list" if not fence.lost
+                       else f"lane {fl.lane_id}: the egress supervisor was lost during the run")
     if len(budget.dropped) > dropped_before:
         status, raw = "NATIVE_ERROR", "evidence-over-cap"
         log.append(f"lane {fl.lane_id}: the evidence budget is used up: not kept: {', '.join(budget.dropped[dropped_before:][:5])}")
@@ -116,7 +140,7 @@ def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, 
             log.append(f"lane {fl.lane_id}: the observations could not be imported ({type(exc).__name__})")
     log.append(f"lane {fl.lane_id}: native {status} ({raw}), exit {exit_code}")
     return LaneOutcome(lane_id=fl.lane_id, engine_name=fl.engine, engine_version=version, native_status=status, raw_status=raw, exit_code=exit_code,
-                       native_files=native, files=files, counts=counts)
+                       native_files=native, files=files, counts=counts, egress=egress)
 
 
 # ---- the lane as a supervised child process ------------------------------------------------------------------------------------------------
@@ -128,6 +152,7 @@ class _Lane:
     engine: str
     suite: str
     suite_files: Mapping[str, str]
+    egress: str = "not-enforced"
 
 
 def _write_outcome(outcome: LaneOutcome, log: List[str], out: Path, not_kept: Sequence[str] = ()) -> None:
@@ -142,6 +167,7 @@ def _write_outcome(outcome: LaneOutcome, log: List[str], out: Path, not_kept: Se
         return f"data/{n}.bin"
     doc = {"schema": K.LANE_RESULT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "status": "COMPLETED", "engine_version": outcome.engine_version,
            "native_status": outcome.native_status, "raw_status": outcome.raw_status, "exit_code": outcome.exit_code, "counts": dict(outcome.counts) if outcome.counts else None,
+           "egress": dict(outcome.egress),
            "log": log, "not_kept": [str(x)[:160] for x in not_kept][:MAX_NOT_KEPT],
            "native": {rel: put(blob) for rel, blob in outcome.native_files.items()},
            "files": {path: {"role": role, "data": put(blob)} for path, (blob, role) in outcome.files.items()}}
@@ -182,6 +208,9 @@ def _read_outcome(fl: Any, out: Path, budget: Budget, limit: int = 64 * 1024 * 1
         if counts is not None and not (isinstance(counts, dict) and set(counts) <= {"passed", "failed", "errored", "skipped"}
                                        and all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 1_000_000 for v in counts.values())):
             return None, []
+        egress = doc.get("egress", {})
+        if not (isinstance(egress, dict) and set(egress) <= {"fence_denied"} and all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 1_000_000 for v in egress.values())):
+            return None, []
         if doc.get("exit_code") is not None and (not isinstance(doc["exit_code"], int) or isinstance(doc["exit_code"], bool) or not -256 <= doc["exit_code"] <= 255):
             return None, []
         native = {str(rel): budget.read(out / ref, limit, f"native/{rel}") for rel, ref in native_refs.items()}
@@ -192,7 +221,7 @@ def _read_outcome(fl: Any, out: Path, budget: Budget, limit: int = 64 * 1024 * 1
                               raw_status=raw_status, exit_code=doc["exit_code"] if isinstance(doc["exit_code"], int) else None,
                               native_files={k: v for k, v in native.items() if v is not None},
                               files={k: (d, r) for k, (d, r) in files.items() if d is not None},
-                              counts=doc["counts"] if isinstance(doc["counts"], dict) and not over else None)
+                              counts=doc["counts"] if isinstance(doc["counts"], dict) and not over else None, egress=dict(egress))
         return outcome, [str(x)[:300] for x in doc.get("log", [])][:50]
     except (OSError, ValueError, KeyError, TypeError, AttributeError, CanonError, UnsafeRead):
         return None, []
@@ -219,7 +248,8 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
     out.mkdir(parents=True)
     cfg = {"schema": K.LANE_INPUT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "lane_id": fl.lane_id, "engine": fl.engine, "suite": fl.suite, "suite_files": dict(fl.suite_files),
            "run_id": run_id, "origin": origin, "deadline_s": max(1, math.ceil(deadline_s)), "out_dir": str(out), "workdir": str(workdir), "suite_dir": str(suites.SUITE_DIR),
-           "launcher": list(launcher) if launcher else None, "parent_pid": os.getpid(), "evidence_budget": budget.remaining}
+           "launcher": list(launcher) if launcher else None, "parent_pid": os.getpid(), "evidence_budget": budget.remaining,
+           "egress": fl.egress, "egress_policy": policy_config(fl.egress, origin) if fl.egress == "origin-only" else None}
     spec_in = lane_dir / "input.json"
     spec_in.write_bytes(dumps_canonical(cfg))
     proc = run_child([sys.executable, "-s", "-m", "qa_runner.lane_robot", str(spec_in)], cwd=str(lane_dir), env=child_env(str(home)), deadline_s=max(1, math.ceil(deadline_s)) + 20, cancel=cancel, kill_grace_s=12.0)   # the engine runs in its own session: give the child time to end it first
@@ -243,7 +273,25 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
                     files={f"logs/{fl.lane_id}.stdout.txt": (proc.stdout[-65536:], "log"), f"logs/{fl.lane_id}.stderr.txt": (proc.stderr[-65536:], "log")})
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def _engine_version() -> str:
+    try:
+        return importlib.metadata.version("robotframework")
+    except importlib.metadata.PackageNotFoundError:
+        return "not-installed"
+
+
+def _fence_unavailable(lane: _Lane, exc: "netfence.FenceUnavailable", policy: Mapping[str, Any], lines: List[str]) -> LaneOutcome:
+    """The plan asks for the kernel layers and they cannot be provided here: the engine is not started (a lane with a weaker limit than the plan's is never run). The reason and the facts the
+    decision rested on are kept in the lane's egress log."""
+    lines.append(f"lane {lane.lane_id}: not started: the egress layers the plan asks for cannot be provided here ({exc.reason}); the engine was not started")
+    row = {"event": "unavailable", "reason": exc.reason, "message": exc.message[:300], "facts": netfence.kernel_facts()}
+    return LaneOutcome(lane_id=lane.lane_id, engine_name=lane.engine, engine_version=_engine_version(), native_status="NATIVE_UNAVAILABLE", raw_status="egress-unavailable", exit_code=None,
+                       files={f"lanes/{lane.lane_id}/egress-profile.json": (dumps_canonical(dict(policy)), "record"),
+                              f"lanes/{lane.lane_id}/{EGRESS_LOG}": (json.dumps(row, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n", "log")})
+
+
+def main(argv: Optional[List[str]] = None, *, layers: Sequence[str] = netfence.ALL_LAYERS) -> int:
+    """``layers`` is a seam for the experiments that show what each kernel layer does alone; the command line of the lane child never changes it."""
     argv = sys.argv[1:] if argv is None else argv
     try:
         cfg = loads_strict(read_regular(argv[0], max_bytes=K.MAX_CHILD_JSON_BYTES, deadline_s=10.0, follow_symlinks=False))
@@ -258,12 +306,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     if isinstance(cfg.get("parent_pid"), int):
         watchdog.start(cfg["parent_pid"], lambda: (cancel.cancel(), watchdog.kill_after(8.0)()))
     suites.SUITE_DIR = Path(cfg["suite_dir"])
-    lane = _Lane(lane_id=cfg["lane_id"], engine=cfg["engine"], suite=cfg["suite"], suite_files=dict(cfg["suite_files"]))
+    lane = _Lane(lane_id=cfg["lane_id"], engine=cfg["engine"], suite=cfg["suite"], suite_files=dict(cfg["suite_files"]), egress=str(cfg.get("egress", "not-enforced")))
     lines: List[str] = []
     try:
         budget = Budget(int(cfg["evidence_budget"]) if isinstance(cfg.get("evidence_budget"), int) else K.DEFAULT_MAX_EVIDENCE_BYTES)
+        policy = cfg.get("egress_policy")
+        fence: Optional[netfence.Fence] = None
+        if lane.egress == "origin-only":
+            try:
+                fence = netfence.install(policy, layers=layers)             # before anything the plan limits exists: the engine is started by this process, so it carries the layers
+            except netfence.FenceUnavailable as exc:
+                _write_outcome(_fence_unavailable(lane, exc, policy if isinstance(policy, dict) else {}, lines), lines, Path(cfg["out_dir"]))
+                return 0
         outcome = _run_inner(lane, run_id=cfg["run_id"], origin=cfg["origin"], workdir=cfg["workdir"], cancel=cancel, deadline_s=float(cfg["deadline_s"]), log=lines,
-                             launcher=cfg.get("launcher"), budget=budget)
+                             launcher=cfg.get("launcher"), budget=budget, fence=fence, policy=policy if isinstance(policy, dict) else None)
         _write_outcome(outcome, lines, Path(cfg["out_dir"]), budget.dropped)
         return 0
     except Exception as exc:

@@ -232,7 +232,7 @@ def test_the_paths_on_the_lane_command_lines_are_the_ones_the_check_looks_at_and
 
 def test_a_prefix_under_a_refused_directory_fails_doctor_with_exit_3_naming_the_path_and_the_rule(monkeypatch):
     monkeypatch.setattr(doctor.sys, "executable", "/root/redevops-qa/venv/bin/python")
-    monkeypatch.setattr(doctor, "run_doctor", lambda engines=(): [doctor.check_path_policy()])
+    monkeypatch.setattr(doctor, "run_doctor", lambda engines=(), **kw: [doctor.check_path_policy()])
     code, out, _err = run_cli("doctor")
     assert code == 3 and "[FAIL] adapter path policy: the interpreter is /root/redevops-qa/venv/bin/python (the prefix /root is on the refused list)" in out
 
@@ -240,7 +240,7 @@ def test_a_prefix_under_a_refused_directory_fails_doctor_with_exit_3_naming_the_
 def test_a_prefix_outside_with_a_tmpdir_under_a_refused_directory_fails_doctor_with_exit_3_naming_the_path_and_the_rule(monkeypatch):
     monkeypatch.setattr(doctor.sys, "executable", "/opt/redevops-qa/venv/bin/python")
     monkeypatch.setattr(tempfile, "gettempdir", lambda: "/root/tmp")
-    monkeypatch.setattr(doctor, "run_doctor", lambda engines=(): [doctor.check_path_policy()])
+    monkeypatch.setattr(doctor, "run_doctor", lambda engines=(), **kw: [doctor.check_path_policy()])
     code, out, _err = run_cli("doctor")
     assert code == 3 and "the temporary working directory of a run (from TMPDIR) is /root/tmp/redevops-qa-<random> (the prefix /root is on the refused list)" in out
     assert "Robot lane's workspace is /root/tmp/redevops-qa-<random>/lanes/robot/workspace/suite" in out and "TMPDIR" in out
@@ -353,7 +353,7 @@ def test_doctor_with_a_browser_only_plan_does_not_fail_on_paths_only_the_robot_l
     names = []
     real = doctor.run_doctor
 
-    def only_policy(engines=(K.ENGINE_PLAYWRIGHT,), include=None):
+    def only_policy(engines=(K.ENGINE_PLAYWRIGHT,), include=None, **kw):
         names.append(tuple(engines))
         return real(engines, include=[lambda: doctor.check_path_policy(robot=K.ENGINE_ROBOT in engines)])
     monkeypatch.setattr(doctor, "run_doctor", only_policy)
@@ -377,3 +377,52 @@ def test_run_starts_a_browser_only_plan_whatever_the_robot_paths_are_and_refuses
     for engines in ({K.ENGINE_ROBOT}, {K.ENGINE_PLAYWRIGHT, K.ENGINE_ROBOT}):
         reached, code, _out, err = reaches_run_plan(monkeypatch, tmp_path, "run", str(plan_file(tmp_path, engines)), "--out", str(tmp_path / ("evidence" + "-".join(sorted(engines)))))
         assert reached == [] and code == 3 and "Nothing was started" in err and f"the temporary working directory of a run (from TMPDIR) is {refused_tmp}/redevops-qa-<random> (a path component named .config" in err, engines
+
+
+# ------------------------------------------------------------------------------------------------------------------------ the kernel layers of the Robot lane (a requested protection that cannot be provided)
+UNAVAILABLE = {"ok": False, "reason": "landlock-network-rules-unavailable", "message": "Landlock network rules need ABI 4 or later", "facts": {"landlock_abi": 0}}
+
+
+def open_plan_file(tmp_path):
+    from qa_runner.golden import robot_plan
+    path = tmp_path / "plan-open.json"
+    path.write_text(json.dumps(robot_plan("not-enforced")))
+    return path
+
+
+def test_run_refuses_a_plan_whose_robot_lane_asks_for_the_layers_when_they_are_unavailable_and_starts_nothing(monkeypatch, tmp_path):
+    from qa_runner import constants as K, netfence
+    monkeypatch.setattr(netfence, "probe", lambda *a, **k: UNAVAILABLE)
+    for engines in ({K.ENGINE_ROBOT}, {K.ENGINE_PLAYWRIGHT, K.ENGINE_ROBOT}):
+        out_dir = tmp_path / ("evidence-" + "-".join(sorted(engines)))
+        reached, code, _out, err = reaches_run_plan(monkeypatch, tmp_path, "run", str(plan_file(tmp_path, engines)), "--out", str(out_dir))
+        assert reached == [] and code == K.EXIT_ENVIRONMENT, engines
+        assert "ROBOT_EGRESS_UNAVAILABLE" in err and "landlock-network-rules-unavailable" in err and "Nothing was started and no evidence directory was made" in err and "no weaker mode" in err
+        assert not out_dir.exists()
+
+
+def test_run_starts_a_plan_that_does_not_ask_for_the_layers_whatever_the_probe_says(monkeypatch, tmp_path):
+    from qa_runner import constants as K, netfence
+    monkeypatch.setattr(netfence, "probe", lambda *a, **k: UNAVAILABLE)
+    for path in (plan_file(tmp_path, {K.ENGINE_PLAYWRIGHT}), open_plan_file(tmp_path)):
+        reached, code, _out, err = reaches_run_plan(monkeypatch, tmp_path, "run", str(path), "--out", str(tmp_path / ("evidence-" + path.stem)))
+        assert reached == [1] and "ROBOT_EGRESS_UNAVAILABLE" not in err
+
+
+def test_the_demo_does_not_start_where_the_layers_are_unavailable(monkeypatch, tmp_path):
+    from qa_runner import constants as K, netfence
+    monkeypatch.setattr(netfence, "probe", lambda *a, **k: UNAVAILABLE)
+    reached, code, _out, err = reaches_run_plan(monkeypatch, tmp_path, "demo", "--out", str(tmp_path / "evidence"))
+    assert reached == [] and code == K.EXIT_ENVIRONMENT and "Nothing was started" in err and not (tmp_path / "evidence").exists()
+
+
+def test_doctor_fails_for_a_plan_that_needs_the_layers_and_not_for_one_that_does_not(monkeypatch, tmp_path):
+    from qa_runner import constants as K, netfence
+    monkeypatch.setattr(netfence, "probe", lambda *a, **k: UNAVAILABLE)
+    code, out, _ = run_cli("doctor", "--plan", str(plan_file(tmp_path, {K.ENGINE_ROBOT})))
+    line = next(l for l in out.splitlines() if "robot egress layers" in l)
+    assert code == K.EXIT_ENVIRONMENT and line.startswith("[FAIL]") and "landlock-network-rules-unavailable" in line
+    _code, out, _ = run_cli("doctor", "--plan", str(open_plan_file(tmp_path)))
+    assert next(l for l in out.splitlines() if "robot egress layers" in l).startswith("[ OK ]")
+    _code, out, _ = run_cli("doctor", "--plan", str(plan_file(tmp_path, {K.ENGINE_PLAYWRIGHT})))
+    assert "] robot egress layers:" not in out

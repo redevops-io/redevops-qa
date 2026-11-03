@@ -23,6 +23,8 @@ CORR = "test_qr_corroborate.py"
 CORRR = "test_qr_corroborate_robot.py"
 EGCFG = "test_qr_egress_config.py"
 CRASH = "test_qr_lane_crash.py"
+UNITS = "test_qr_robot_egress_units.py"
+DOCTOR = "test_qr_doctor_bundle.py"
 
 
 def t(file, name):
@@ -142,7 +144,7 @@ CASES = [
     ("an engine timeout is a timeout", "natives.py", '        if error_code == "TIMEOUT":', "        if False:", [t(ROBOT, "test_an_engine_that_hangs_is_a_timeout_and_never_verified")]),
     ("a target that did not start leaves the lane unavailable", "lane_robot.py", "    if origin is None:\n", "    if False:\n", [t(ROBOT, "test_a_target_that_does_not_start_leaves_the_robot_lane_unavailable")]),
     ("a cancelled run skips the lane", "lane_robot.py", "    if cancel is not None and cancel.cancelled:", "    if False:", [t(ROBOT, "test_a_run_cancelled_before_the_lane_starts_skips_it")]),
-    ("the egress profile of a Robot lane says not enforced", "lane_robot.py", '"profile": "not-enforced"', '"profile": "gateway"', [t(ROBOT, "test_the_egress_profile_of_a_robot_lane_says_it_is_not_enforced")]),
+    ("the egress profile of a Robot lane says not enforced", "lane_robot.py", '"profile": "not-enforced"', '"profile": "gateway"', [t(ROBOT, "test_the_egress_profile_of_a_robot_lane_that_says_not_enforced_says_it_is_not_enforced")]),
     # ---- freeze, report, inspect and the child plumbing ---------------------------------------------------------------------------------
     ("the run summary carries the anchor sentence", "cli.py", '    print(f"  external anchor: {ANCHOR_ABSENT_NOTICE} (a manifest digest', '    pass; print(f"  (a manifest digest',
      [t(FREEZE, "test_the_run_summary_says_that_integrity_against_re_forging_is_not_established")]),
@@ -367,10 +369,29 @@ CASES = [
     ("a gateway that no longer answers is a lost gateway", "lane_browser.py", "    except Exception as exc:\n        raise GatewayLost(", "    except ZeroDivisionError as exc:\n        raise GatewayLost(",
      [t(EGCFG, "test_a_gateway_that_does_not_answer_is_a_lost_gateway")]),
     ("a stopped gateway is not asked anything", "lane_browser.py", "        if not gateway.running:", "        if False:", [t(EGCFG, "test_a_gateway_that_was_stopped_is_a_lost_gateway_not_an_empty_log")]),
-    ("the report states that egress is not enforced for a Robot lane", "bundle.py", "if robot else []", "if False else []", [t(ROBOT, "test_the_report_states_that_egress_is_not_enforced_for_the_robot_lane_in_json_text_and_html")]),
+    ("the report states that egress is not enforced for a Robot lane that says so", "bundle.py", "    if open_lanes:\n", "    if False:\n",
+     [t(ROBOT, "test_the_report_states_that_egress_is_not_enforced_for_a_not_enforced_robot_lane_in_json_text_and_html"), t(UNITS, "test_extra_limitations_follow_each_lanes_profile")]),
+    ("the report states the layers and their limits for a Robot lane that asks for them", "bundle.py", "    if fenced:\n", "    if False:\n",
+     [t(ROBOT, "test_the_report_states_the_layers_and_what_they_do_not_stop_for_a_robot_lane_that_asks_for_them"), t(UNITS, "test_extra_limitations_follow_each_lanes_profile")]),
     ("verify requires the egress statement for a Robot lane", "verify.py", "    if have != want:", "    if False:",
-     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement that egress is not enforced for the Robot lane removed from the report]"),
-      t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement that egress is not enforced for the Robot lane reworded]")]),
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement of the egress layers of the Robot lane removed from the report]"),
+      t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement of the egress layers of the Robot lane reworded]")]),
+    # ---- the Robot lane's egress layers (what needs no kernel feature) ------------------------------------------------------------------
+    ("a Robot lane may ask for the layers", "plan.py", 'K.ENGINE_ROBOT: ("origin-only", "not-enforced")', 'K.ENGINE_ROBOT: ("not-enforced",)', [t(UNITS, "test_a_robot_lane_may_ask_for_the_layers_or_for_nothing_and_nothing_else")]),
+    ("the supervisor's default is deny", "netfence.py", 'if family != AF_INET or address is None or port is None:', "if False:", [t(UNITS, "test_the_decision_of_a_connect_is_deny_unless_the_address_and_port_are_the_allow_lists")]),
+    ("the supervisor allows the address only with the allowed port", "netfence.py", "ip in net and port == p for net, p in allowed", "ip in net for net, p in allowed",
+     [t(UNITS, "test_the_decision_of_a_connect_is_deny_unless_the_address_and_port_are_the_allow_lists")]),
+    ("the filter refuses another architecture", "netfence.py", 'a.jeq(spec["audit"], None, "kill")', 'a.jeq(spec["audit"], None, None)', [t(UNITS, "test_the_filter_begins_by_refusing_any_other_architecture_and_every_jump_stays_inside_it")]),
+    ("the filter refuses the x32 call numbers", "netfence.py", '    if spec["x32"]:\n', "    if False:\n", [t(UNITS, "test_the_x86_64_filter_also_refuses_the_x32_call_numbers")]),
+    ("the audit file's sequence is checked", "egresslog.py", 'e.get("seq") != n or', "False or", [t(UNITS, "test_a_malformed_log_is_reported_never_repaired")]),
+    ("the audit file holds no float", "egresslog.py", "parse_float=refuse", "parse_float=float", [t(UNITS, "test_a_malformed_log_is_reported_never_repaired")]),
+    ("doctor passes the layers only on a measured ok", "doctor.py", '    if result.get("ok") is True:', "    if True:", [t(UNITS, "test_a_failed_probe_is_a_fail_not_a_pass"), t(UNITS, "test_doctor_fails_clearly_when_the_plan_needs_the_layers_and_they_are_unavailable")]),
+    ("doctor does not need the layers for a plan that does not ask for them", "doctor.py", "    if not needed:\n", "    if False:\n", [t(UNITS, "test_doctor_does_not_fail_for_a_plan_that_does_not_need_the_layers")]),
+    ("a run whose Robot egress cannot be limited does not start", "cli.py", '    if check.status == "FAIL":\n        raise EnvironmentFault("ROBOT_EGRESS_UNAVAILABLE"', '    if False:\n        raise EnvironmentFault("ROBOT_EGRESS_UNAVAILABLE"',
+     [t(DOCTOR, "test_run_refuses_a_plan_whose_robot_lane_asks_for_the_layers_when_they_are_unavailable_and_starts_nothing"), t(DOCTOR, "test_the_demo_does_not_start_where_the_layers_are_unavailable")]),
+    ("a plan that does not ask for the layers is not refused for lacking them", "cli.py", "    if not has_limited_robot_lane:\n        return", "    if False:\n        return", [t(DOCTOR, "test_run_starts_a_plan_that_does_not_ask_for_the_layers_whatever_the_probe_says")]),
+    ("a lane whose layers cannot be installed is not started", "lane_robot.py", "            except netfence.FenceUnavailable as exc:", "            except ZeroDivisionError as exc:",
+     [t(ROBOT, "test_a_lane_that_asks_for_layers_that_cannot_be_installed_is_not_started")]),
     # ---- cli.py and doctor.py --------------------------------------------------------------------------------------------------------
     ("an existing bundle is never overwritten", "cli.py", "    except FileExistsError:\n        raise PlanError(\"OUTPUT_EXISTS\", f\"{safe_text(str(target / run_id))}", "    except ZeroDivisionError:\n        raise PlanError(\"OUTPUT_EXISTS\", f\"{safe_text(str(target / run_id))}",
      [t(CLI, "test_an_existing_bundle_directory_is_never_overwritten"), t(CLI, "test_a_second_run_with_the_same_id_fails_fast_before_it_executes")]),

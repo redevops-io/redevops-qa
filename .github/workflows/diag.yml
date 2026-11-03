@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 jobs:
-  host:
+  regen:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -14,21 +14,33 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: environment
-        run: bash diag/env.sh
-      - name: probe as the runner user
-        run: bash diag/probe.sh
-      - name: probe under the system python as runner
-        run: PYTHONPATH=$PWD/diag /usr/bin/python3 -s -m qa_runner.netfence --probe
-  container-root:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
+      - name: Read the pinned commits
+        id: pins
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
+      - name: Fetch runtime-contracts at the pinned commit
+        uses: actions/checkout@v4
         with:
+          repository: ${{ steps.pins.outputs.contracts_repo }}
+          ref: ${{ steps.pins.outputs.contracts_commit }}
+          path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
-      - name: ubuntu 24.04 container as root (default docker options)
+      - name: Fetch agent-harness at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.harness_qa_repo }}
+          ref: ${{ steps.pins.outputs.harness_qa_commit }}
+          path: ${{ steps.pins.outputs.harness_qa_path }}
+          persist-credentials: false
+      - run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "playwright==1.64.1" "robotframework==7.5"
+      - run: PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers" python -m playwright install --with-deps chromium
+      - name: Regenerate the golden bundles from real runs
         run: |
-          docker run --rm -v "$PWD/diag":/d:ro ubuntu:24.04 bash -c 'apt-get update -qq >/dev/null && apt-get install -y -qq python3 curl >/dev/null; bash /d/env.sh; cd /d; PYTHONPATH=/d python3 -s -m qa_runner.netfence --probe'
-      - name: ubuntu 24.04 container, nobody
-        run: |
-          docker run --rm -v "$PWD/diag":/d:ro ubuntu:24.04 bash -c 'apt-get update -qq >/dev/null && apt-get install -y -qq python3 >/dev/null; su -s /bin/bash nobody -c "cd /d; PYTHONPATH=/d python3 -s -m qa_runner.netfence --probe"'
+          mkdir -p /tmp/qa-golden
+          export PYTHONPATH="$(ls -d $PWD/packages/*/src | tr '\n' ':')"
+          TMPDIR=/tmp/qa-golden PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers" python packages/qa-runner/tests/golden/regen_bundles.py
+          TMPDIR=/tmp/qa-golden python packages/qa-runner/tests/golden/regen_robot.py
+          ls -la packages/qa-runner/tests/golden
+      - uses: actions/upload-artifact@v4
+        with:
+          name: golden
+          path: packages/qa-runner/tests/golden/*.tar

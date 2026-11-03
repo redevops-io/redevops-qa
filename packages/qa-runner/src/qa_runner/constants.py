@@ -34,6 +34,20 @@ def robot_egress_limitation_text(lane_ids) -> str:
             "lanes' traffic was limited to the allowed origin; each such lane's egress-profile.json records not-enforced.")
 
 
+#: the statement of a run whose Robot lane asks for the kernel layers (profile ``origin-only``): what limits it, and what does not. Derived from the plan alone, so ``verify`` can require the exact text
+ROBOT_EGRESS_LAYERS_ID = "egress-layers-robot"
+
+
+def robot_egress_layers_text(lane_ids) -> str:
+    return ("Network egress of the Robot Framework lane(s) of this run (" + ", ".join(sorted(lane_ids)) + ") is limited by kernel layers on the lane's process, not by the egress gateway: "
+            "a seccomp filter with a supervising thread lets TCP connect() through only to the plan's allow-list (one loopback address and port), refuses UDP, raw, IPv6, netlink and other "
+            "socket kinds, connect() to a local socket path, TCP Fast Open and io_uring, and records every refusal; Landlock limits TCP connect() to the allowed port. Every process the lane "
+            "starts inherits both, and the lane does not start if they cannot be installed. What this does not stop: a second thread that changes the address of a connect() between the check "
+            "and the call can reach another address on the allowed port; files, pipes and processes reachable without a socket are not confined; a caller with CAP_SYS_PTRACE or a kernel bug "
+            "defeats it; the library allowlist is a guard, not a sandbox. Each such lane's egress-log.jsonl lists the layers that were installed and every attempt the filter refused; a refused "
+            "attempt ends the lane as an engine error (egress-denied), never a pass.")
+
+
 ORIGIN_PLACEHOLDER = "{origin}"
 DEFECTS = ("none", "discount", "settings")
 

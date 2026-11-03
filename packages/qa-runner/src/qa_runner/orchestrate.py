@@ -343,7 +343,7 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         extensions["no_independent_probe"] = ",".join(ui_only)[:500]           # assertions the plan declares ui-only: what the browser shows, nothing independent behind them
     if any(o.double for o in outcomes):
         extensions["test_double"] = "lane-command"
-    for key in ("gateway_denied", "gate_denied"):
+    for key in ("gateway_denied", "gate_denied", "fence_denied"):
         if any(key in o.egress for o in outcomes):
             extensions["egress_" + key] = sum(o.egress.get(key, 0) for o in outcomes)
     if budget.dropped:

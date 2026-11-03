@@ -11,6 +11,8 @@ from .errors import PlanError
 
 
 def policy_config(profile: str, origin: str) -> Dict[str, Any]:
+    """The allow-list of the ``origin-only`` profile for the origin of a target: one loopback address, one port, plain http. The browser lane gives it to the gateway; the Robot lane
+    gives it to the kernel layers (``netfence``), which read the address and the port from it."""
     if profile != "origin-only":
         raise PlanError("BAD_EGRESS_PROFILE", f"unknown egress profile {profile!r}")
     parts = urllib.parse.urlsplit(origin)

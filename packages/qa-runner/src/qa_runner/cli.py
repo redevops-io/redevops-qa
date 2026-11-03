@@ -114,7 +114,10 @@ def _doctor(args, out: TextIO, err: TextIO) -> int:
         up = verified_bootstrap()
         frozen, _ = load_plan_or_lock(up, _read_plan(args.plan))
         engines = tuple(sorted({l.engine for l in frozen.lanes}))
-    checks = run_doctor(engines)
+    needs_layers = True
+    if args.plan:
+        needs_layers = any(l.engine == K.ENGINE_ROBOT and l.egress == "origin-only" for l in frozen.lanes)
+    checks = run_doctor(engines, robot_egress=needs_layers)
     out.write(json.dumps([c.to_json() for c in checks], indent=2, sort_keys=True) + "\n" if args.json else render(checks))
     return K.EXIT_ENVIRONMENT if any(c.status == "FAIL" for c in checks) else 0
 
@@ -174,6 +177,7 @@ def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text:
         raise PlanError("BAD_RUN_ID", "a run id is 1 to 40 characters: letters, digits, '.', '_' and '-', starting with a letter or digit")
     up = verified_bootstrap()
     _refuse_a_run_the_path_policy_would_end_inconclusive(any(lane.engine == K.ENGINE_ROBOT for lane in frozen.lanes))
+    _refuse_a_run_whose_robot_egress_cannot_be_limited(any(lane.engine == K.ENGINE_ROBOT and lane.egress == "origin-only" for lane in frozen.lanes))
     reserved = _reserve(target, run_id)
     cancel = CancelToken()
     previous = {}
@@ -209,6 +213,17 @@ def _refuse_a_run_the_path_policy_would_end_inconclusive(has_robot_lane: bool) -
     check = check_path_policy(robot=has_robot_lane)          # only the Robot lane's command line carries these paths
     if check.status == "FAIL":
         raise EnvironmentFault("ADAPTER_PATH_POLICY", f"{check.detail}. To fix: {check.remedy}. Nothing was started and no evidence directory was made.")
+
+
+def _refuse_a_run_whose_robot_egress_cannot_be_limited(has_limited_robot_lane: bool) -> None:
+    """The check of ``doctor`` for the kernel layers, made before anything starts: a plan whose Robot lane asks for them (``origin-only``) does not run where they cannot be provided, and no
+    weaker mode is substituted. An environment fault (exit 3) that says what to do, before any lane starts and before an evidence directory exists."""
+    if not has_limited_robot_lane:
+        return
+    from .doctor import check_robot_egress
+    check = check_robot_egress()
+    if check.status == "FAIL":
+        raise EnvironmentFault("ROBOT_EGRESS_UNAVAILABLE", f"{check.detail}. To fix: {check.remedy}. Nothing was started and no evidence directory was made.")
 
 
 def _verify_in_a_new_process(bundle_dir: Path, plan_digest: str, expected_exit: int, run_exit: int, out: TextIO) -> int:
@@ -261,6 +276,9 @@ def _print_summary(summary, bundle_dir: Path, out: TextIO, *, recomputed: bool =
     ext = report.get("extensions") or {}
     if "egress_gateway_denied" in ext or "egress_gate_denied" in ext:
         print(f"  egress: the gateway denied {ext.get('egress_gateway_denied', 0)} request(s), the in-browser request gate denied {ext.get('egress_gate_denied', 0)} (details in the lane's logs)", file=out)
+    if "egress_fence_denied" in ext:
+        print(f"  egress: the kernel layers of the Robot lane refused {ext['egress_fence_denied']} attempt(s) to reach an address outside the allow-list (details in the lane's egress-log.jsonl); "
+              "a refused attempt ends the lane as an engine error", file=out)
     if ext.get("no_independent_probe"):
         print(f"  no independent probe (declared ui-only in the plan; the verdict rests on the engine's record and the target's request log): {safe_text(ext['no_independent_probe'], 200)}", file=out)
     if ext.get("test_double"):
