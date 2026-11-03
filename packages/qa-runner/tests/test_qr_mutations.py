@@ -401,6 +401,8 @@ CASES = [
     ("the runner ignores the refusals in the log the child sent", "lane_robot.py", '    return refused(outcome, egresslog.refusals(events), any(e.get("verdict") == "lost" for e in events), fl.lane_id), rest', "    return outcome, rest",
      [t(UNITS, "test_the_log_the_child_sent_over_its_standard_output_decides_the_lane_s_status_not_the_files")]),
     ("the log the child sent does not replace the file's copy", "lane_robot.py", '    files[path] = (log, "log")\n', "", [t(UNITS, "test_the_log_the_child_sent_over_its_standard_output_decides_the_lane_s_status_not_the_files")]),
+    ("the piped log is put back into a bundle that did not keep the file", "lane_robot.py", "    if path in files:  ", "    if True:  ",
+     [t(UNITS, "test_a_log_the_evidence_budget_did_not_keep_is_not_put_back_by_the_piped_copy_but_its_refusals_still_count")]),
     ("a lane that sent no log is not an engine error", "lane_robot.py", "    if log is None:\n        return replace(outcome, native_status=", "    if False:\n        return replace(outcome, native_status=",
      [t(UNITS, "test_a_log_that_is_missing_or_malformed_on_the_pipe_is_an_engine_error_and_a_clean_one_changes_nothing_but_the_count")]),
     ("a lane whose layers cannot be installed is not started", "lane_robot.py", "            except netfence.FenceUnavailable as exc:", "            except ZeroDivisionError as exc:",

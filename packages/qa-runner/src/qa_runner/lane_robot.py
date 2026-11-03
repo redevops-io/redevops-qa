@@ -107,7 +107,8 @@ def apply_pipe_record(fl: Any, outcome: LaneOutcome, stdout: bytes) -> Tuple[Lan
     if problems:
         return replace(outcome, native_status="NATIVE_ERROR", raw_status="egress-record-malformed", counts=None, exit_code=None), rest
     files = dict(outcome.files)
-    files[path] = (log, "log")
+    if path in files:                                                       # a file the evidence budget did not keep stays out (the run lists it as not kept): the piped copy only replaces one that is there
+        files[path] = (log, "log")
     outcome = replace(outcome, files=files)
     if header.get("event") == "unavailable":
         return outcome, rest
@@ -135,7 +136,11 @@ def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, 
         copies[rel] = data
     if {rel: _sha(d) for rel, d in copies.items()} != fl.suite_files:
         log.append(f"lane {fl.lane_id}: not started: the suite files are not the frozen ones")
-        return _outcome(fl, version, "NATIVE_ERROR", "suite-hash-mismatch", files={egress_file[0]: egress_file[1]})
+        early = {egress_file[0]: egress_file[1]}
+        if fence is not None:                                       # the engine was never started, but the layers were installed: the log says so
+            fence.close()
+            early[f"lanes/{fl.lane_id}/{EGRESS_LOG}"] = (egress_log_bytes(fence), "log")
+        return _outcome(fl, version, "NATIVE_ERROR", "suite-hash-mismatch", files=early)
     library = str(spec["library"])
     config = RobotConfig(allowed_library_files={f"suite/{library}": hashlib.sha256(copies[library]).hexdigest()}, keep_raw_output=True)
     manifest = suite_manifest(sys.executable, limits=Limits(deadline_s=deadline_s, output_limit_bytes=2_000_000, kill_grace_s=5))

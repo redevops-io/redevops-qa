@@ -323,3 +323,12 @@ def test_the_probe_judges_each_layer_alone_and_both_and_a_layer_that_does_not_en
     bad = False
     r = netfence.probe()
     assert r["ok"] is True and seen == ["landlock", "seccomp", "both"] and set(r["per_set"]) == {"landlock", "seccomp", "both"}
+
+
+def test_a_log_the_evidence_budget_did_not_keep_is_not_put_back_by_the_piped_copy_but_its_refusals_still_count():
+    from qa_runner.lane_robot import apply_pipe_record, egress_frame
+    dropped = _outcome(log=b"")
+    files = {k: v for k, v in dropped.files.items() if not k.endswith("egress-log.jsonl")}
+    from dataclasses import replace
+    out, _ = apply_pipe_record(_fl(), replace(dropped, files=files), egress_frame(_file(HEADER, DENY_ROW)))
+    assert "lanes/robot/egress-log.jsonl" not in out.files and (out.native_status, out.raw_status) == ("NATIVE_ERROR", "egress-denied")

@@ -584,8 +584,6 @@ def install(policy: Mapping[str, Any], *, layers: Sequence[str] = ALL_LAYERS) ->
             raise _fail("self-test-port-clash", "the self-test listener got a port of the allow-list")
         if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
             raise _fail("no-new-privs-failed", f"PR_SET_NO_NEW_PRIVS failed ({os.strerror(ctypes.get_errno())})")
-        if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:                    # a same-user engine cannot open /proc/<this process>/mem or attach to it, whatever the host's ptrace policy
-            raise _fail("dumpable-failed", f"PR_SET_DUMPABLE failed ({os.strerror(ctypes.get_errno())})")
         if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:             # what the engine detaches and orphans becomes a child of this process, to be ended by reap_descendants
             raise _fail("subreaper-failed", f"PR_SET_CHILD_SUBREAPER failed ({os.strerror(ctypes.get_errno())})")
         if LAYER_SECCOMP in layers:
@@ -596,6 +594,8 @@ def install(policy: Mapping[str, Any], *, layers: Sequence[str] = ALL_LAYERS) ->
             fence._fd = _install_seccomp(libc, arch)
             fence._ready.set()
         fence.selftest = _selftest(fence, canary.getsockname(), layers)
+        if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:                    # AFTER the self-test (the supervisor must be able to read this process's own address while it is tested): from here a
+            raise _fail("dumpable-failed", f"PR_SET_DUMPABLE failed ({os.strerror(ctypes.get_errno())})")   # same-user engine cannot open /proc/<this process>/mem or attach to it, whatever the host's ptrace policy
         fence._reset()
     except BaseException:
         fence.close()
@@ -644,6 +644,50 @@ def all_ok(checks: Mapping[str, Any]) -> bool:
     return bool(checks) and all(v is True for v in checks.values())
 
 
+_PROBE_CHECKS = r"""
+import json, socket, sys
+port, other, seccomp, landlock = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3] == "1", sys.argv[4] == "1"
+checks = {}
+def refused(fn):
+    try:
+        fn().close()
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+c = socket.socket(); c.settimeout(3)
+try:
+    c.connect(("127.0.0.1", port)); checks["allowed_connect_works"] = True
+except OSError:
+    checks["allowed_connect_works"] = False
+finally:
+    c.close()
+checks["other_port_refused"] = refused(lambda: socket.create_connection(("127.0.0.1", other), timeout=3))
+def listen_socket():
+    b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        b.listen(1)
+    except BaseException:
+        b.close(); raise
+    return b
+def bind_port_0():
+    b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        b.bind(("127.0.0.1", 0))
+    except BaseException:
+        b.close(); raise
+    return b
+if seccomp:
+    checks["udp_refused"] = refused(lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM))
+    checks["ipv6_refused"] = refused(lambda: socket.socket(socket.AF_INET6, socket.SOCK_STREAM))
+    checks["listen_refused"] = refused(listen_socket)
+if landlock:
+    checks["bind_refused"] = refused(bind_port_0)
+print(json.dumps(checks))
+"""
+
+
 def probe_main(which: str = "both") -> int:
     """Run in a throwaway child: install one set of layers (both, or each alone: whether Landlock enforces by itself is measured here, where the seccomp layer cannot refuse first) around a
     synthetic allow-list (one loopback listener), then try what must pass and what must be refused, and print one JSON line."""
@@ -664,50 +708,15 @@ def probe_main(which: str = "both") -> int:
             out.update(ok=False, reason=exc.reason, message=exc.message[:300])
             print(json.dumps(out, sort_keys=True))
             return 0
-        checks: Dict[str, bool] = {}
-        c = socket.socket()
-        c.settimeout(3)
+        # the checks run in a child process: this process is not dumpable by now, and the supervisor reads the address of a connect from the memory of the process that makes it (the engine of a lane
+        # is such a child, started after the layers)
+        import subprocess
+        done = subprocess.run([sys.executable, "-I", "-c", _PROBE_CHECKS, str(port), str(other_l.getsockname()[1]), "1" if LAYER_SECCOMP in layers else "0", "1" if LAYER_LANDLOCK in layers else "0"],
+                              capture_output=True, text=True, timeout=30)
         try:
-            c.connect(("127.0.0.1", port))
-            checks["allowed_connect_works"] = True
-        except OSError:
-            checks["allowed_connect_works"] = False
-        finally:
-            c.close()
-
-        def refused(fn: Any) -> bool:
-            try:
-                fn().close()
-                return False
-            except PermissionError:
-                return True
-            except OSError:
-                return False
-
-        def bind_port_0() -> socket.socket:
-            b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                b.bind(("127.0.0.1", 0))
-            except BaseException:
-                b.close()
-                raise
-            return b
-
-        def listen_socket() -> socket.socket:
-            b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                b.listen(1)
-            except BaseException:
-                b.close()
-                raise
-            return b
-        checks["other_port_refused"] = refused(lambda: socket.create_connection(("127.0.0.1", other_l.getsockname()[1]), timeout=3))
-        if LAYER_SECCOMP in layers:
-            checks["udp_refused"] = refused(lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM))
-            checks["ipv6_refused"] = refused(lambda: socket.socket(socket.AF_INET6, socket.SOCK_STREAM))
-            checks["listen_refused"] = refused(listen_socket)
-        if LAYER_LANDLOCK in layers:
-            checks["bind_refused"] = refused(bind_port_0)
+            checks = json.loads(done.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            checks = {"checks_ran": False}
         out.update(ok=all_ok(checks), checks=checks, layers=list(fence.layers), selftest=fence.selftest)
         fence.close()
     finally:

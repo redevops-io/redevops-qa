@@ -245,3 +245,14 @@ def test_a_lost_supervisor_ends_the_lane_as_egress_fence_lost_and_lets_nothing_t
 def test_with_no_layer_nothing_ends_the_detached_process(runs):
     """The control of the test above: the process the library detached is still there after an unfenced lane (it is ended by the fixture afterwards)."""
     assert runs("control").control_survivor_alive is True
+
+
+def test_the_doctor_probe_passes_on_this_host_for_each_layer_alone_and_for_both():
+    """The probe of ``doctor`` on a real kernel: each layer alone first, then both, each in a throwaway process, each with a connect to the allowed listener that must work (a layer that refuses
+    the allowed address too is not a working layer) and refusals that must happen."""
+    from qa_runner import netfence
+    r = netfence.probe()
+    assert r["ok"] is True, r
+    assert set(r["per_set"]) == {"landlock", "seccomp", "both"} and all(d["ok"] is True for d in r["per_set"].values())
+    assert all(d["checks"]["allowed_connect_works"] is True and d["checks"]["other_port_refused"] is True for d in r["per_set"].values())
+    assert r["per_set"]["landlock"]["checks"]["bind_refused"] is True and r["per_set"]["seccomp"]["checks"]["listen_refused"] is True and "udp_refused" not in r["per_set"]["landlock"]["checks"]
