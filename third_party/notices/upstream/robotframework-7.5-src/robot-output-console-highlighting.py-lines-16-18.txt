@@ -1,0 +1,3 @@
+# Windows highlighting code adapted from color_console.py. It is copyright
+# Andre Burgaud, licensed under the MIT License, and available here:
+# http://www.burgaud.com/bring-colors-to-the-windows-console-with-python/

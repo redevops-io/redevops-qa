@@ -69,16 +69,56 @@ def make_kit_wheel(directory: Path, paths_text: str | None = None, version: str 
     return out
 
 
+def make_third_party_wheel(directory: Path, name: str = "thirdlib", version: str = "2.0", licence_text: bytes = b"Permission is hereby granted, free of charge, to any person: the licence text of thirdlib\n") -> Path:
+    """A synthetic third-party wheel that carries one licence file (what the real ones do), so the notices of a test bundle have a wheel to come from."""
+    dist = f"{name}-{version}"
+    files = {f"{name}/__init__.py": b"", f"{dist}.dist-info/METADATA": f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\nLicense: MIT\n".encode(),
+             f"{dist}.dist-info/WHEEL": b"Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n", f"{dist}.dist-info/licenses/LICENSE": licence_text}
+    files[f"{dist}.dist-info/RECORD"] = ("\n".join(bb.record_line(n, d) for n, d in sorted(files.items())) + f"\n{dist}.dist-info/RECORD,,\n").encode()
+    out = directory / f"{dist}-py3-none-any.whl"
+    bb.write_wheel(out, files, 1_700_000_000)
+    return out
+
+
+def make_notices(out_dir: Path, wheel: Path) -> tuple:
+    """(lock, root, notices): a notices lock for a tiny repository tree (one upstream text and the authored README) and the licence file of ``wheel``, and the tree bb.build_notices makes of it."""
+    import json
+    import zipfile
+    root = out_dir / "repo"
+    (root / "third_party" / "notices" / "upstream" / "x-1").mkdir(parents=True)
+    up = root / "third_party" / "notices" / "upstream" / "x-1" / "LICENSE"
+    up.write_bytes(b"upstream licence text of x 1\n")
+    readme = root / "third_party" / "notices" / "README.md"
+    readme.write_bytes(b"# THIRD_PARTY_NOTICES\n")
+    name, version = bb.wheel_name_version(wheel.name)
+    member = f"{name.replace('-', '_')}-{version}.dist-info/licenses/LICENSE"
+    with zipfile.ZipFile(wheel) as zf:
+        wheel_sha = bb.sha256_bytes(zf.read(member))
+    lock = {"schema": "redevops-qa/third-party-notices-lock", "version": 1, "files": [
+        {"id": "readme", "dest": "README.md", "sha256": bb.sha256_file(readme), "origin": {"kind": "authored", "path": "third_party/notices/README.md"}, "covers": []},
+        {"id": "x-license", "dest": "upstream/x-1/LICENSE", "sha256": bb.sha256_file(up), "origin": {"kind": "upstream", "path": "third_party/notices/upstream/x-1/LICENSE", "url": "https://example.org/x/LICENSE", "retrieved_on": "2026-11-03"}, "covers": ["x"]},
+        {"id": "thirdlib-license", "dest": f"wheels/{name}-{version}/{member}", "sha256": wheel_sha, "origin": {"kind": "wheel", "wheel": name, "version": version, "member": member}, "covers": []}]}
+    (root / "third_party" / "notices" / "notices.lock.json").write_text(json.dumps(lock))
+    return lock, root, bb.build_notices(lock, {f"{name}=={version}": wheel}, root)
+
+
 def make_mini_bundle(out_dir: Path, version: str = "1.0", *, target: Dict[str, str] | None = None, label: str = "", name: str = "redevops-qa-bundle-test",
-                     kit_paths_text: str | None = None, with_kit: bool = True) -> Path:
-    """A bundle of one synthetic wheel, built by ``assemble``. Its target is this host unless given."""
+                     kit_paths_text: str | None = None, with_kit: bool = True, with_notices: bool = False) -> Path:
+    """A bundle of one synthetic wheel, built by ``assemble``. Its target is this host unless given. With ``with_notices`` it also holds a synthetic third-party wheel, the notices built from it and
+    the notices wheel (the shape of a real bundle)."""
     wheels = out_dir / f"wheels-{version}"
     wheels.mkdir(parents=True)
     entries = [bb.WheelEntry(make_wheel(wheels, version), "first-party", "test")]
     if with_kit:                    # the installer reads the path policy from the adapter-kit wheel and refuses a bundle without one
         entries.append(bb.WheelEntry(make_kit_wheel(wheels, kit_paths_text), "first-party", "test"))
+    notices = None
+    if with_notices:
+        third = make_third_party_wheel(wheels)
+        entries.append(bb.WheelEntry(third, "third-party", "MIT"))
+        _lock, _root, notices = make_notices(out_dir / f"notices-{version}", third)
+        entries.append(bb.WheelEntry(bb.build_notices_wheel(notices, version, 1_700_000_000, wheels), "notices", "test"))
     return bb.assemble(out_dir, name=name, entries=entries, target=target or host_target(), epoch=1_700_000_000, label=label, version=version, commit="0" * 40, pins_info=None,
-                       licences_from={}, build_tools={}, readme_template=(ROOT / "bundle" / "README.md").read_text(encoding="utf-8"))
+                       licences_from={}, build_tools={}, readme_template=(ROOT / "bundle" / "README.md").read_text(encoding="utf-8"), notices=notices)
 
 
 def clean_env(home: Path) -> Dict[str, str]:

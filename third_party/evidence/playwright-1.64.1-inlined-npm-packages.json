@@ -1,0 +1,1228 @@
+{
+ "count": 81,
+ "derived_digests": {
+  "npm-table:licence-files": "117d512c28ad6127ad568e490624396b4f6e537171f53cdd766cf4e6d27eac73",
+  "npm-table:tarballs": "3434bed7ccf81028a0bc45cce38a6bce2f5da468bb9bd17480a968adf656c676"
+ },
+ "distinct": 79,
+ "note": "one row per notice section (chokidar and readdirp have a section in both sidecar files); for each npm package inlined into the Playwright driver: the registry entry of that exact version, its tarball (checked against the registry's sha512 integrity value) and whether the notice text of the wheel contains the licence file of the tarball",
+ "packages": [
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "6895190430d809c4c57a7582ecc2f99acbc2ea39a5dfad20262a41d5b3e91733"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "35d16fc259cf940287dbd8f7106d6e80f5316e00a51b46b399c26d4c4b377574",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "@hono/node-server@1.19.14",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/@hono%2Fnode-server/1.19.14",
+   "tarball_sha256": "0b956f346f96d8b89d03ee4e586e267a2d3877f4393fb97eb068572fd7a5b9ad",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "5e13dbbc1d120fc2a03cecde7c91424ae2d7de11b63d58ded2f4431e261ee50d"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "8694aa57bec3f3e9ad0559e91c63a795904e967104efb9d6fc9d153e56f567c2",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "@modelcontextprotocol/sdk@1.29.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/@modelcontextprotocol%2Fsdk/1.29.0",
+   "tarball_sha256": "1c51470eca288ae744a5d8bb48e217d3eab5869eb2cbaf587fc29f336d6b096c",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "7e32638e170fa7342000a703a8ed950e05095b2f73fc689992a82776a3c3bd3c"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "bb55cf05a8cd895b69183b231313567192eca69e6b21055e60e714989047c991",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "@sec-ant/readable-stream@0.4.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/@sec-ant%2Freadable-stream/0.4.1",
+   "tarball_sha256": "fc54d8496938e7fdf01b09719253ff3643b31a4793c5bbfd3743baca53535da6",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "agent-base@9.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/agent-base/9.0.0",
+   "tarball_sha256": "2361fece924ff86b49991de66bd8e8db0e3bbfcb8d9e1a4443bae89a23cba89f",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "9df3bb69929a3b650ed73b3bfa1756725aaff0ac296461605753547004eafeaf"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "0eb7e0538bf86badc8cc36fc66164d495630f21f6998529188406fb00c782a5e",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "ajv-formats@3.0.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/ajv-formats/3.0.1",
+   "tarball_sha256": "f4d6980fd367381fd29199066911e863db8d97496613b6c2c5b91563a150acc5",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "a05350a88e318e4f5f2c2a1ff1e2e88daa4dd38e6e78b71cccae422bdc762cc3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "f2fde84e6c1f177681e152a4459f025a87e855c0aa374238ba79b2e72a15b57c",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "ajv@8.20.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/ajv/8.20.0",
+   "tarball_sha256": "b2f0b3a893bbb8cc5efb6814f08b1499e19e31d5dd73683f5893382f48f6e7b3",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "94e1923e52409cfd50e97988d9772c0de15f65700097e3227fec367a39e82b94"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "11444e32fb9aa8cd1d0c3656879384afcf1efb1227a9975feadf0aab0f9d9d83",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "ansi-colors@4.1.3",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/ansi-colors/4.1.3",
+   "tarball_sha256": "8e8874d92e1805e62ae3e17846521c70c68eaf16d2c977ba9c8d3e2cebbd8931",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "c9808a775260db5602f6a0c29f5f8b78e81f9666a33623fedfa34a22208b1063",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "ansi-regex@5.0.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/ansi-regex/5.0.1",
+   "tarball_sha256": "0e0eadcdaada805db5d85b53ad5cdca0760b996ee199ec9658e7b34aa6c8e0d9",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE.md": "d408f38ffa3355c5faec517153295338892eb0f1ea43f57874bb23c6075979b5"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "23b57495a1f9bfc39b3641e8731cec7bc0d21ae332d472530e6c427cbaea46ed",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE.md"
+   ],
+   "package": "balanced-match@4.0.4",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/balanced-match/4.0.4",
+   "tarball_sha256": "9025508d9125eee531bbc49ce3ae560183975ad595f058c378bd56af4152fb16",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "f36e2da26df2488bf0d0ecf2f54a4ba02e2372cdd27ee07974da85a0975e29c3",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "brace-expansion@5.0.7",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/brace-expansion/5.0.7",
+   "tarball_sha256": "e6f29666db5a9503146d8fd93a2a492a64694bc819ce158b18c584610f240fba",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "ddc9158fa20e427bc12fa8e1e6d07c642ed4d2c618607df768b30ae2986b3b7c"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "696568bf81c2a4c3ac62d551aec817da60d3855824e6a980c9031087188ae633",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "buffer-crc32@1.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/buffer-crc32/1.0.0",
+   "tarball_sha256": "bbedaab7c94b9d392ea85da0a77c18c3a0bce3d47a1ca1685af11a747b2883ee",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "14275f5c8139d02054c5259d52a88ccbba662a86af18c30f071c8d082dc6004c"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "46b1051c617c1cb9f284d15c9bfc9837d03d89c34aa9e955da756a20fae29668",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "buffer-from@1.1.2",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/buffer-from/1.1.2",
+   "tarball_sha256": "9c2b03d59eca8f463a1927e07273ddaa87785fe3f61626c42b005540e962e343",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "bundle-name@4.1.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/bundle-name/4.1.0",
+   "tarball_sha256": "35e49d4240c91cbe4ca29926139feea848302e9eea317f31d9e81b972ce90911",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "e3b44af066615de2ea48d18d852d0762f18c0b2efcea714fa48a6f729d405b85"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "811223f2d33910a962de4d6dc12bcb545252992e9d004f78936b94afde443749",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "bytes@3.1.2",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/bytes/3.1.2",
+   "tarball_sha256": "835e37ad5a40da45eaed6e32d99847627a15b2a4671741182521fe48dee3c581",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "bdfd5e0edb6089e6586c8f15e6a86fab83ffbeeda3b3b7b33734ccb8c5906965"
+   },
+   "notice_file": "serverRegistry.js.LICENSE",
+   "notice_section_sha256": "bc77badaede6898848b509a222eb5399fa077f77c7b53ec81a9ee53898d26f30",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "chokidar@4.0.3",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/chokidar/4.0.3",
+   "tarball_sha256": "61a29da9d314c2cd33a7be7327014814c4620673e3d4be41b120aa8544868389",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "bdfd5e0edb6089e6586c8f15e6a86fab83ffbeeda3b3b7b33734ccb8c5906965"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "bc77badaede6898848b509a222eb5399fa077f77c7b53ec81a9ee53898d26f30",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "chokidar@4.0.3",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/chokidar/4.0.3",
+   "tarball_sha256": "61a29da9d314c2cd33a7be7327014814c4620673e3d4be41b120aa8544868389",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "77ffe84006509949525fd57df06f4a6a80ad862c5314b66ab5bb6ac4cee6280b"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "52f76e02a6a9bf94a7675a6a3e1bf9c6b2ac21c69a512bf35db9a0be57ce478e",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "colors@1.4.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/colors/1.4.0",
+   "tarball_sha256": "b50eb83eda7cc37519809e240338fded8e625169945bbfe6d4156445c6610498",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "4cc9c2af4eb0056cd4d2297b7404819e3816b4c44b7f8012c42d5fd671d783d3",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "commander@15.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/commander/15.0.0",
+   "tarball_sha256": "632c1e039b31e98fa79c4fae5b10a5ffbbf9df0f21c9ffb3d74e95734b30696f",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "257aed98914108e91a337912727b6a802eef218248507f74b76faffaff517a38"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "fb06d5b872e5eac1ab3d21198d91270a3073ff08ba87fab2a9f4e32ccf573884",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "content-type@1.0.5",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/content-type/1.0.5",
+   "tarball_sha256": "ac31d098405f0242dd712218f38a14a6202bd4eb01067db05db765d9a9bd12c8",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "aaa78451b6fecd1b9c4594c796c133c0e90cad100372ff8bc6de615e9ef9adf1"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "5e7b89989b946961a7f3a87fc689adf92798f4322e2a27f1852c94ff2f9fa7f6",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "cross-spawn@7.0.6",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/cross-spawn/7.0.6",
+   "tarball_sha256": "188c320cdc413adfec03098fda72af7a9b02152ba13d3a8f87f172d93ced38ea",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "d9e5aa2747f30eae5b2e977871c30b8638266900c131efa16e4caa844e89402e",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "debug@4.4.3",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/debug/4.4.3",
+   "tarball_sha256": "89c1ac9c946ee8905a875837114528e97eeae35e03be3190584b2216af43e4a7",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "default-browser-id@5.0.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/default-browser-id/5.0.1",
+   "tarball_sha256": "3c94fbe0d90b610de6dc068180c780cbb7ef0ade6d2f3a7b5401f99f215d7429",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "default-browser@5.5.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/default-browser/5.5.0",
+   "tarball_sha256": "efe35ce84f4b4aad7d7125435562f3207a429353423c4643b4c982f5ea8612b7",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "define-lazy-prop@3.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/define-lazy-prop/3.0.0",
+   "tarball_sha256": "bbe9fe67a229c64ff9b8c77ace12278e2d44048a2a5af96e5fc95abbc94c49b5",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "eda81a415869e67809f6a9f3fd6056062cb83a462118e07eec5e92b2e0c40ce9"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "ef7eb99d9a97cb70eea06d108eb68f0448dac208ed55f1c56a147252cc4328fa",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "diff@9.0.0",
+   "registry_license": "BSD-3-Clause",
+   "registry_url": "https://registry.npmjs.org/diff/9.0.0",
+   "tarball_sha256": "b898bf23c95594607576e25ddd4013f1d51ed0e862aaf0732815830c87b3b58f",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "74b629b24865e1e83c5277ee84590b7937644d6fd959d0c7bdce758676cd2ced"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "f02e65819ea320eb92759a609b6397ae3025a05ae4226c6f554026c7c0bf64b8",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "dotenv@17.4.2",
+   "registry_license": "BSD-2-Clause",
+   "registry_url": "https://registry.npmjs.org/dotenv/17.4.2",
+   "tarball_sha256": "8648852be8209110b34dca75dcc3ed12ce7fae9fcc8edd1ef9e180e708af1398",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "6be6dd088b7136b4e5d99223e88d5d49ea6587b8d81e634548fec49b95ee140b"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "80349f69c5debaf957a1efdd2d05df9932557efb59a65f3a0f70b8e8efce1d61",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "enquirer@2.4.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/enquirer/2.4.1",
+   "tarball_sha256": "fe11d9bf8cb6b4144db236b56fa6991c60bb8b5f49dcc7d9cfd23687981bdb78",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "835eb611a23301b27115ca1be9f754c876e643ceb7fe63049c6b50609a1cafeb"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "39813fa23b1960640775d387e448bd83fe86c53bf502db509570fdf18a39b4f4",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "eventsource-parser@3.1.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/eventsource-parser/3.1.0",
+   "tarball_sha256": "eca84ce0e9314076ea17bcc8bbdfed0316cc5b4a291565b347a275ffdac5053a",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "f683a72ffe6a9675b5507af22fe0f448d8c8de3da1e14f139d370a7e6a54a23e"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "e4f413b3ca5e13fb438a0527202f4f8c13c8c222513bc34a38663d5383994a18",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "eventsource@3.0.7",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/eventsource/3.0.7",
+   "tarball_sha256": "7c62d4bb196e59b39c5af79e550d6fe4261649a74d9f5e605b071e1da6081c92",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "aa407ee69b3f646286f5162d0679256a0fe5b7fcc51f104ffb647efe167715ea",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "fast-deep-equal@3.1.3",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/fast-deep-equal/3.1.3",
+   "tarball_sha256": "b019a0980f27638dc3f85836b0e478f188e00d7a6e5852c0819fa86f56e47b8f",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "fast-uri@3.1.7",
+   "registry_license": "BSD-3-Clause",
+   "registry_url": "https://registry.npmjs.org/fast-uri/3.1.7",
+   "tarball_sha256": "3fa380284be4ecbf471c1dbb8c5da6f517c95f54279f88c2037985d03fdc6d92",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "get-east-asian-width@1.6.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/get-east-asian-width/1.6.0",
+   "tarball_sha256": "4451f58e2f5a4ef27ae8b4ba25b64be97d3a8413dc8614a4321a10d418eee6d7",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "get-stream@9.0.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/get-stream/9.0.1",
+   "tarball_sha256": "8e676f6d730ce38f01d0772936df1b33750c38e5dec6ad18c522a6a1622124c6",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "f65c5d9f22a317b2a10803bd1868461ce6499c2ed7217bc80c0cc772a748789c"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "740bb4e91297defa503f6fb1055b164be677e5e7eeb1ae7d9535f8dc7934f50c",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "graceful-fs@4.2.11",
+   "registry_license": "ISC",
+   "registry_url": "https://registry.npmjs.org/graceful-fs/4.2.11",
+   "tarball_sha256": "3961374aa161e6fed80d6f4b6aaf2fb7eafd2c9e5be34e865b375f0114dd099c",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "c9808a775260db5602f6a0c29f5f8b78e81f9666a33623fedfa34a22208b1063",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "has-flag@4.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/has-flag/4.0.0",
+   "tarball_sha256": "77a7eb1411d927bb8a5ca7069dbe168886d63c88f446f0b81500a2cf23ddb5b1",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "https-proxy-agent@9.1.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/https-proxy-agent/9.1.0",
+   "tarball_sha256": "f05f86b8d218916a4e8396ce375dcbd547e4ca5aec8fd9adeb2528b5dde940ed",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "0ae52fe329ccfd23fedbd688361bd0dedaf5cae3e3516eb2ad17831f2d8b347c",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "ini@7.0.0",
+   "registry_license": "ISC",
+   "registry_url": "https://registry.npmjs.org/ini/7.0.0",
+   "tarball_sha256": "7e7c8f2d6d0511237ac1d9e728483d8e6c9ecf3c7e16f55e9be4a59782327442",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "02d42589c6442c0408b2ed382ffd4eca16ba62565ba748fd08a1e5c07bd1a42e",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "ip-address@10.7.2",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/ip-address/10.7.2",
+   "tarball_sha256": "4301746e43e8a85a6a41e268f02178b27e6ba58e78e6913ab105d3871618083b",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "is-docker@3.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/is-docker/3.0.0",
+   "tarball_sha256": "1a230b0b25c81eff06bdee3856a742fd17260169b0bf958de9368c4b3ce2ddee",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "is-in-ssh@1.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/is-in-ssh/1.0.0",
+   "tarball_sha256": "cd159ae41854fe8d71bd408f2d9786de0033feda519f084ccd176d5ac605d954",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "is-inside-container@1.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/is-inside-container/1.0.0",
+   "tarball_sha256": "dbde95b8434fc4757624974d4139c4f32391d08c4153565ae91a5f3fd772e07b",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "is-stream@4.0.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/is-stream/4.0.1",
+   "tarball_sha256": "b8f4acd481d7324aa120b33a7a5c6784a986e3acdb670832976b9a2c5f298d19",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "is-wsl@3.1.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/is-wsl/3.1.1",
+   "tarball_sha256": "f0f93f9796c2e768a487a35bbe8f96c0b703edeb01add088686ba91a72b92eb2",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "0ae52fe329ccfd23fedbd688361bd0dedaf5cae3e3516eb2ad17831f2d8b347c",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "isexe@2.0.0",
+   "registry_license": "ISC",
+   "registry_url": "https://registry.npmjs.org/isexe/2.0.0",
+   "tarball_sha256": "47cfe872e088e28c53b736fef305324b57cc1cfc9f72a9b0f769f92731cb8359",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "c0a8512eabe960492fefd4f287523eb3b5ca1518ca37ef0ec83344cd7f089cb8"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "a03fb79e84bb578c636de4c527c015ecf81a8bfa66b318af792b7c4e08b3cf05",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "jpeg-js@0.4.4",
+   "registry_license": "BSD-3-Clause",
+   "registry_url": "https://registry.npmjs.org/jpeg-js/0.4.4",
+   "tarball_sha256": "269f988267bc71efe58baf97e8b2da064b5bbbbb8b0eab11e2149049935e1160",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "aa407ee69b3f646286f5162d0679256a0fe5b7fcc51f104ffb647efe167715ea",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "json-schema-traverse@1.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/json-schema-traverse/1.0.0",
+   "tarball_sha256": "023222622df29fc274bde5d3590e47aa1d4a8e3c1d6e2aba029948ed79799b21",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE.md": "53e59feb13058722d977c699eb0407c7bce2f93c949b681bbd2ff31698535927"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "5b43c9cb06b2f11a0a141c88a9f2852452240d208bfcd5d00d67c2e8e2e4f480",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE.md"
+   ],
+   "package": "json5@2.2.3",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/json5/2.2.3",
+   "tarball_sha256": "08afb33db600d11fc89b98fac4054f19d5d3e0fe527063116150e1ecc2d2377b",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "68e28d2ab9d180b8fc3d93fac0cc3e5275e4d19a23ab3dcf5458cf4e31e2233b"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "68e28d2ab9d180b8fc3d93fac0cc3e5275e4d19a23ab3dcf5458cf4e31e2233b",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "mime@4.1.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/mime/4.1.0",
+   "tarball_sha256": "7686ba9bdce35ec11afbb9d9a37168915aeab92304ada81fc057cd4b9f151f42",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE.md": "2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "aa4c6585f201d6525bf712407f54c84fd7d607f1c129a25294b0969fbfba6863",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE.md"
+   ],
+   "package": "minimatch@10.2.5",
+   "registry_license": "BlueOak-1.0.0",
+   "registry_url": "https://registry.npmjs.org/minimatch/10.2.5",
+   "tarball_sha256": "a6cea46915bfc6c3fae60f9bd003ea4f9d6a4233aa59a9ca729474d3824ca9e5",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license.md": "1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "e91069c31b4e4daee9db0e946308531fe585f091b655bb68fee44a83830ab9b6",
+   "notice_text_contains_tarball_licence_file": [
+    "license.md"
+   ],
+   "package": "ms@2.1.3",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/ms/2.1.3",
+   "tarball_sha256": "f6616e15e530ed552f9daa2d3ce71963947c6bc7c98c9b64fd3e673fd02622c6",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "open@11.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/open/11.0.0",
+   "tarball_sha256": "b8d4c664ab12fefd68d9d06c5e2472937c5a614cd535a5d97fb2c69f8bda4c1d",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "c9808a775260db5602f6a0c29f5f8b78e81f9666a33623fedfa34a22208b1063",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "path-key@3.1.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/path-key/3.1.1",
+   "tarball_sha256": "4b8999acb914830edcd3c5b8fec632b32c6bc759ac3edc86336f5a9e08ba7b92",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "7e64acffcb0d20d33f5a86949ffd4a99ae045b10c7332a9c3a58635876c16880"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "92832e59724a11084eeb483058f27197d06a4d4f34a18cedb462892001c74d60",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "pend@1.2.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/pend/1.2.0",
+   "tarball_sha256": "a12f279b25a9df710b52a9892bad00bdeeb862a9b5d1e4f4db77131129436d7f",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "feb87a2e0c305de3464cc44077da5393c52d8ca6362d37427157d04ec6f4510d"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "9d4132ed751e497e7fd3a7654a17f5e92605a3a4bf5fb157c14ec419a229bf99",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "pkce-challenge@5.0.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/pkce-challenge/5.0.1",
+   "tarball_sha256": "d1fcbbae5bc05562d13de7c520c2951699e8262a8317fa6c8bbcd8dcff3bea70",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "be75ef59c5cf59715588a17a82dff7dd3e83c4dba3c458676bb9311e05fbedc5"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "6c638538bce703631813b20bbe119dc66120591e0a0c24f6d406e6bb2dae71a0",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "pngjs@7.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/pngjs/7.0.0",
+   "tarball_sha256": "c4b71873d48a692dd5eeb1dcb62185c7aafe40f2180c7cc7f30ec71e89a080be",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "powershell-utils@0.1.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/powershell-utils/0.1.0",
+   "tarball_sha256": "abb9eb373e2173d6ad288186b30618833a060a63b3629a761c30ac58da92192b",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "d7d2a7786de7c7cfd96f920c6f12927d74e1d2a861ca4498bf465c3bc3f4c21c"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "b3d63451b0d3231890bb1df74f49210576d1d3810b410cc9ffb30139d941c5f3",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "progress@2.0.3",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/progress/2.0.3",
+   "tarball_sha256": "701865e18ff6c0e3ba778756ddef8db1dc05c00a901babe57bc7a0a7e0e82aa4",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {},
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "18ed2eb99435c619854e2727680d5cdcba14beb5133540c69c8cdbd4eecb6207",
+   "notice_text_contains_tarball_licence_file": [],
+   "package": "proxy-agent-negotiate@1.1.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/proxy-agent-negotiate/1.1.0",
+   "tarball_sha256": "6eec23d5d381a8b0ffafe91c19876d3a052e463618695981a7529f3a8bca1997",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "f55828df4b8752c48e765a806465b76a103e3cb363379c569b15a1df2ba2d79e"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "6e2ce8b28e108ee2d1e2b6b552d8237a19268936ae8fb408e8e4c47ca6af78da",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "proxy-from-env@2.1.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/proxy-from-env/2.1.0",
+   "tarball_sha256": "e9c52dbf1e382319d5da00b8d964805859b7eb1424450e049d12743d7e19fc9a",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "dffec71d93f273d2af7b54c6c7e7e70b3289c632ec0d7253210ec21ac336d5ac"
+   },
+   "notice_file": "serverRegistry.js.LICENSE",
+   "notice_section_sha256": "ddb4986a4ed37c90fadf8ec4ad83ce242c55e913af3fdde273581b05154d1c8e",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "readdirp@4.1.2",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/readdirp/4.1.2",
+   "tarball_sha256": "766ea2ba6314aefe6b939c9bbe3999cc473286578aeb1c3805338c2dbd655f5a",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "dffec71d93f273d2af7b54c6c7e7e70b3289c632ec0d7253210ec21ac336d5ac"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "ddb4986a4ed37c90fadf8ec4ad83ce242c55e913af3fdde273581b05154d1c8e",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "readdirp@4.1.2",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/readdirp/4.1.2",
+   "tarball_sha256": "766ea2ba6314aefe6b939c9bbe3999cc473286578aeb1c3805338c2dbd655f5a",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "License": "01ad164273e8e095abc9dbd1c21e194594a671af7d528cb43ee7b4c903ba7da3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1418710b026fba5ae364100975702fddc0867d17b13940e3779a62cea33258d4",
+   "notice_text_contains_tarball_licence_file": [
+    "License"
+   ],
+   "package": "retry@0.13.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/retry/0.13.1",
+   "tarball_sha256": "7521d8445e845475e888ccb7af473c4afb17aabafefe35a23371a8a8c79b8084",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "run-applescript@7.1.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/run-applescript/7.1.0",
+   "tarball_sha256": "d29ace7117aaa0d6b119027e9a157c238e6899bbb35d03f508ae8d4fa9ca8c9d",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "69dee148a2cc470554dfa7142e830662062394d0fe67cddd379aba90dc60d6b3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1407925f61282a6b72650585a14e4ab3674773c2ebee389fb2d0e4d11c21b5c1",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "shebang-command@2.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/shebang-command/2.0.0",
+   "tarball_sha256": "9acba5bd18a51e9cdf5898380e4df63f803e1844def64ae1a46f88cff86d556e",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "c9808a775260db5602f6a0c29f5f8b78e81f9666a33623fedfa34a22208b1063",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "shebang-regex@3.0.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/shebang-regex/3.0.0",
+   "tarball_sha256": "fedbabaa6db26c6be0183f82777dfa852d59a62f8885de93bd32ebc28758958f",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE.txt": "b173e19b9a78df305577ace0e52ef45a4bcc915ea28b47b256dc3b68dcb1f7e7"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "9db336a14e18c80407347ba9de2f671c6c973d87c03622576e00f428fdf7bd36",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE.txt"
+   ],
+   "package": "signal-exit@4.1.0",
+   "registry_license": "ISC",
+   "registry_url": "https://registry.npmjs.org/signal-exit/4.1.0",
+   "tarball_sha256": "9d3b58a811ecf6a641537387289274cd14f5bb912a27e4f1f2a74182bca8b795",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "c46e2c333e1c9e6fcfd130cf91b8e54bf67b60fabbc04996f7e199b990353ff3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "3065255dab8c2013104f7bb7ccfe8f7481671789c552cde1e6b7fcd0c5a23dfc",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "smart-buffer@4.2.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/smart-buffer/4.2.0",
+   "tarball_sha256": "3d9815e4cbd1beb947ac6bc8e33eb7d4d380e781fff696c2c9b55096af6450a1",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "socks-proxy-agent@10.1.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/socks-proxy-agent/10.1.0",
+   "tarball_sha256": "476155b5c3dfcfdf81d681e1fd85662a0a44c2a8c87ef2201d7ee36ae8e5aac1",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "4f4f28866154c8d758241a64296e8790d45d7d912ff7b029930778c06d8f2a72"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "6830463c2795eced9ede706c0d8c3dc3b66c58e77c62881eb3c9e5dacb68dd49",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "socks@2.8.9",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/socks/2.8.9",
+   "tarball_sha256": "b8f5f4ab3f6a117afd04cd5be4277670074e50b02319ee806a321507e711d51d",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE.md": "3a7d3bb198e909ed642bd68bd29a7d7c09a636d27a51ec663d35f00c4760ec42"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "e9441dd383ee65a8ac703eef5d75228a8c31fe897b581fd8fb30fda50ce6a63a",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE.md"
+   ],
+   "package": "source-map-support@0.5.21",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/source-map-support/0.5.21",
+   "tarball_sha256": "5d9b04ef3e6824fdcf91cfcc03ab427fae486bc6859735805593f51b3554f636",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "6cb0631f71c7749763fd3dd1d5bee52dd1070ec17f2edc1710079ad070bd2fbd"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "6ead954f967233375b98f6d8363bdb27ddc7d945a83f88c20952e7ca0fa8675d",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "source-map@0.6.1",
+   "registry_license": "BSD-3-Clause",
+   "registry_url": "https://registry.npmjs.org/source-map/0.6.1",
+   "tarball_sha256": "bdbca10d17ff5a5802d5acfc7b2f22f9f9bf587632a95650d3c5f513c7092b86",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "c9808a775260db5602f6a0c29f5f8b78e81f9666a33623fedfa34a22208b1063",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "strip-ansi@6.0.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/strip-ansi/6.0.1",
+   "tarball_sha256": "9bdb75d0bff49f156dd8c3bcb0e06b3fa96c3d88ddd4c342a4345866a40c08ca",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "c9808a775260db5602f6a0c29f5f8b78e81f9666a33623fedfa34a22208b1063",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "supports-color@7.2.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/supports-color/7.2.0",
+   "tarball_sha256": "f16acafd1634624e60c24a5538004c4e168c82607f10dbe28395e9df3e7d5e4a",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "0ae52fe329ccfd23fedbd688361bd0dedaf5cae3e3516eb2ad17831f2d8b347c",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "which@2.0.2",
+   "registry_license": "ISC",
+   "registry_url": "https://registry.npmjs.org/which/2.0.2",
+   "tarball_sha256": "a13adf5fddeb769655edce551e81fbb11904b9c9be76d95e41da8c4c499d4edc",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "7adebaeee45b60d995843745060fe5486b76eb6c9e8fc7bca6fbc67b8680d96d",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "ws@8.21.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/ws/8.21.0",
+   "tarball_sha256": "d08b726b3aae3a0fed5218a0d9a4b2ac8d75d4ad453a9271db55fe38e94eb4cf",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "1529f88b3675095087120854c6fa2cc1113ab2da2f88c4f6aa4ffe52e98ef81b",
+   "notice_text_contains_tarball_licence_file": [
+    "license"
+   ],
+   "package": "wsl-utils@0.3.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/wsl-utils/0.3.1",
+   "tarball_sha256": "62456a70685d96011bb61948a9a7e0c15abce348f4f6c159ac05b715eeff3cfc",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "5bba27375d93e9119f76c1015f7672cf9ad5f70952296e0842fb2243d6376869"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "cf12d35c36bad4b21582e8549d43283d304574764c28fe0b93f25f475c5e832c",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "yaml@2.9.0",
+   "registry_license": "ISC",
+   "registry_url": "https://registry.npmjs.org/yaml/2.9.0",
+   "tarball_sha256": "008fa204cb1ba700e0272ba045abbf09a6ffe63456e8146ba97cac6c2ad1ef91",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "b303783d5eb7ca50b853ffa5f145e4e7998fab339831d848f507ca6cd970577a"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "da5f77b8bc8717f6e33aedce55a88702d79038d83cdc00af5ca08f3bc4f22ff9",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "yauzl@3.4.0",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/yauzl/3.4.0",
+   "tarball_sha256": "ec962fa3205d4be5849f0fc3bebd0492b0abe8acf402656fd80490531fa8ba88",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "b303783d5eb7ca50b853ffa5f145e4e7998fab339831d848f507ca6cd970577a"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "da5f77b8bc8717f6e33aedce55a88702d79038d83cdc00af5ca08f3bc4f22ff9",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "yazl@3.3.1",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/yazl/3.3.1",
+   "tarball_sha256": "24a97a443e47d83d9e2ea2bb4b99b7f91a8ba5a5b9e4b49ffdd2be9e0ca00e38",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "80d3168ad2f70f6f5bb2ab22b23414707abf6f0a392034891481ae36a1a429d4"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "80d3168ad2f70f6f5bb2ab22b23414707abf6f0a392034891481ae36a1a429d4",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "zod-to-json-schema@3.25.2",
+   "registry_license": "ISC",
+   "registry_url": "https://registry.npmjs.org/zod-to-json-schema/3.25.2",
+   "tarball_sha256": "a4919ab5a32aff4fd6c119c9f187f0dd4b4c490d30c4c4fdaf7c5ff6f38d93f4",
+   "tarball_sha512_verified": true
+  },
+  {
+   "licence_files_in_tarball": {
+    "LICENSE": "3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8"
+   },
+   "notice_file": "utilsBundle.js.LICENSE",
+   "notice_section_sha256": "f61cacc2acb8b71aa79a128b3e732bf25e02aab40747bbbd5bf00c97c9cda28d",
+   "notice_text_contains_tarball_licence_file": [
+    "LICENSE"
+   ],
+   "package": "zod@4.4.3",
+   "registry_license": "MIT",
+   "registry_url": "https://registry.npmjs.org/zod/4.4.3",
+   "tarball_sha256": "ee38f17f533fd500610685a483ae2f413c26f4eb33a51684314563c8d60f279c",
+   "tarball_sha512_verified": true
+  }
+ ],
+ "retrieved_on": "2026-11-03",
+ "schema": "redevops-qa/npm-inlined-packages",
+ "source_members": [
+  "playwright/driver/package/lib/utilsBundle.js.LICENSE",
+  "playwright/driver/package/lib/serverRegistry.js.LICENSE"
+ ]
+}

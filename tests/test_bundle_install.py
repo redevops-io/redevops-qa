@@ -531,3 +531,29 @@ def test_an_ordinary_prefix_still_installs_with_the_kit_present(policy_bundle, b
 def test_the_installer_documents_the_new_exit_status():
     text = (ROOT / "bundle" / "install.sh").read_text(encoding="utf-8")
     assert "2 usage, or a prefix under a path the adapter path policy refuses (for example /root)" in text
+
+
+# ------------------------------------------------------------------------------------------------ the licence and notice texts are installed with the bundle
+@pytest.fixture(scope="module")
+def noticed_bundle(tmp_path_factory):
+    return make_mini_bundle(tmp_path_factory.mktemp("noticed"), "1.0", with_notices=True)
+
+
+def test_install_puts_the_notices_tree_under_share_redevops_qa_and_records_the_index_digest(noticed_bundle, box):
+    prefix = box / "qa"
+    done = run_script(noticed_bundle, "install.sh", ["--prefix", str(prefix)], box / "home")
+    assert done.returncode == 0, done.stderr
+    installed = prefix / "venv" / "share" / "redevops-qa" / "THIRD_PARTY_NOTICES"
+    shipped = noticed_bundle / "THIRD_PARTY_NOTICES"
+    assert sorted(p.relative_to(installed).as_posix() for p in installed.rglob("*") if p.is_file()) == sorted(p.relative_to(shipped).as_posix() for p in shipped.rglob("*") if p.is_file())
+    for p in shipped.rglob("*"):
+        if p.is_file():
+            assert (installed / p.relative_to(shipped)).read_bytes() == p.read_bytes(), p
+    import hashlib
+    info = json.loads((prefix / "INSTALL.json").read_text())
+    assert info["third_party_notices_index_sha256"] == hashlib.sha256((shipped / "INDEX.json").read_bytes()).hexdigest()
+    assert json.loads((noticed_bundle / "BUNDLE.json").read_text())["third_party_notices"]["index_sha256"] == info["third_party_notices_index_sha256"]
+    assert info["browser_lock_sha256"] == hashlib.sha256((noticed_bundle / "browser.lock.json").read_bytes()).hexdigest()           # the browser pin and the notices are both recorded: neither replaced the other
+    assert info["schema_version"] == "1.0" and set(info) >= {"third_party_notices_index_sha256", "browser_lock_sha256", "bundle_json_sha256", "entries"}
+    gone = run_script(noticed_bundle, "uninstall.sh", ["--prefix", str(prefix)], box / "home")
+    assert gone.returncode == 0 and not prefix.exists(), gone.stderr                 # an extra key in INSTALL.json does not make uninstall refuse

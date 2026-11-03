@@ -1,0 +1,526 @@
+{
+ "count": 51,
+ "note": "bare package names imported by the sources of those directories (tests excluded) that package-lock.json resolves; follows import statements, not what a bundler inlined",
+ "package_dirs": [
+  "playwright-core",
+  "utils",
+  "isomorphic",
+  "web",
+  "trace-viewer",
+  "html-reporter",
+  "recorder",
+  "dashboard",
+  "injected",
+  "protocol",
+  "playwright-client"
+ ],
+ "package_lock_sha256": "478ec38a5b4c6825123880b67475d3229dd2c3a4df49b53d9b5634045a4135d1",
+ "packages": [
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/chrome",
+   "version": "2.0.0"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/chrome-beta",
+   "version": "3.0.0"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/chrome-canary",
+   "version": "2.0.0"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/chrome-dev",
+   "version": "3.0.0"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/chromium",
+   "version": "2.0.1"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/edge",
+   "version": "2.0.7"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/firefox",
+   "version": "3.0.10"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/firefox-beta",
+   "version": "4.1.4"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/firefox-nightly",
+   "version": "3.0.6"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "dashboard"
+   ],
+   "license": null,
+   "name": "@browser-logos/safari",
+   "version": "2.1.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "@modelcontextprotocol/sdk",
+   "version": "1.29.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "dashboard",
+    "html-reporter",
+    "recorder",
+    "trace-viewer",
+    "web"
+   ],
+   "license": "MIT",
+   "name": "@vitejs/plugin-react",
+   "version": "6.0.3"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "web"
+   ],
+   "license": "MIT",
+   "name": "@xterm/addon-fit",
+   "version": "0.10.0"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "web"
+   ],
+   "license": "MIT",
+   "name": "@xterm/xterm",
+   "version": "5.5.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "dashboard",
+    "html-reporter",
+    "trace-viewer"
+   ],
+   "license": "BSD-3-Clause",
+   "name": "@zip.js/zip.js",
+   "version": "2.7.73"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "chokidar",
+   "version": "4.0.3"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "Apache-2.0",
+   "name": "chromium-bidi",
+   "version": "12.1.0"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "web"
+   ],
+   "license": "MIT",
+   "name": "codemirror",
+   "version": "5.65.18"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "colors",
+   "version": "1.4.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "commander",
+   "version": "15.0.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "debug",
+   "version": "4.4.3"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "BSD-3-Clause",
+   "name": "diff",
+   "version": "9.0.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "BSD-2-Clause",
+   "name": "dotenv",
+   "version": "17.4.2"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-client",
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "electron",
+   "version": "42.10.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "enquirer",
+   "version": "2.4.1"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "get-east-asian-width",
+   "version": "1.6.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "get-stream",
+   "version": "9.0.1"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "ISC",
+   "name": "graceful-fs",
+   "version": "4.2.11"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "https-proxy-agent",
+   "version": "9.1.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "ISC",
+   "name": "ini",
+   "version": "7.0.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "BSD-3-Clause",
+   "name": "jpeg-js",
+   "version": "0.4.4"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "json5",
+   "version": "2.2.3"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "mime",
+   "version": "4.1.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "BlueOak-1.0.0",
+   "name": "minimatch",
+   "version": "10.2.5"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "open",
+   "version": "11.0.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "pngjs",
+   "version": "7.0.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "progress",
+   "version": "2.0.3"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "proxy-from-env",
+   "version": "2.1.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "dashboard",
+    "html-reporter",
+    "playwright-core",
+    "recorder",
+    "trace-viewer",
+    "web"
+   ],
+   "license": "MIT",
+   "name": "react",
+   "version": "19.2.7"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "dashboard",
+    "html-reporter",
+    "recorder",
+    "trace-viewer",
+    "web"
+   ],
+   "license": "MIT",
+   "name": "react-dom",
+   "version": "19.2.7"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "retry",
+   "version": "0.13.1"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "ISC",
+   "name": "signal-exit",
+   "version": "4.1.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "socks-proxy-agent",
+   "version": "10.1.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "source-map-support",
+   "version": "0.5.21"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "dashboard",
+    "html-reporter",
+    "playwright-core",
+    "recorder",
+    "trace-viewer",
+    "utils",
+    "web"
+   ],
+   "license": "MIT",
+   "name": "vite",
+   "version": "8.1.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "ws",
+   "version": "8.21.0"
+  },
+  {
+   "dev": false,
+   "imported_by": [
+    "isomorphic",
+    "playwright-core",
+    "recorder",
+    "trace-viewer"
+   ],
+   "license": "ISC",
+   "name": "yaml",
+   "version": "2.9.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "yauzl",
+   "version": "3.4.0"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core",
+    "utils"
+   ],
+   "license": "MIT",
+   "name": "yazl",
+   "version": "3.3.1"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-client",
+    "playwright-core"
+   ],
+   "license": "MIT",
+   "name": "zod",
+   "version": "4.4.3"
+  },
+  {
+   "dev": true,
+   "imported_by": [
+    "playwright-core"
+   ],
+   "license": "ISC",
+   "name": "zod-to-json-schema",
+   "version": "3.25.2"
+  }
+ ],
+ "repository_tarball_sha256": "4cf21457cd00395c83b29e7f787b72e8b3bb00cee14728c69ac80a12ae42f089",
+ "retrieved_on": "2026-11-03",
+ "schema": "redevops-qa/playwright-import-candidates",
+ "tag": "v1.64.1"
+}
