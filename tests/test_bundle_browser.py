@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 import browser_helpers as bh
-from bundle_helpers import bb, cb, clean_env, host_target, make_kit_wheel, make_wheel, resum, run_script, tree_listing
+from bundle_helpers import bb, cb, clean_env, host_target, make_kit_wheel, make_wheel, restore_default_signals, resum, run_script, tree_listing
 
 SCRIPT = "install-browser.sh"
 
@@ -158,7 +158,7 @@ def test_an_interrupted_install_leaves_no_staging_directory(w, fake):
     with bh.serve(fake.archives_dir, delay=3) as url:
         e = clean_env(w["home"])
         proc = subprocess.Popen(["bash", str(w["bundle"] / SCRIPT), "--prefix", str(w["prefix"]), "--mirror", url], env=e, cwd=str(w["home"]), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                start_new_session=True)
+                                start_new_session=True, preexec_fn=restore_default_signals)
         deadline = time.time() + 60
         while time.time() < deadline and not (w["prefix"] / "browsers").exists():
             time.sleep(0.05)
@@ -317,9 +317,10 @@ def test_a_signal_sent_to_the_script_alone_stops_the_download_at_once_and_cleans
     import time
     before = tree_listing(w["prefix"])
     with bh.serve(fake.archives_dir, delay=30) as url:
-        # SIGINT is ignored by a process that a non-interactive shell started with `&` (and so by everything it starts): put the default back so that the script can trap it, as it can from a terminal
+        # SIGINT is ignored by a process that a non-interactive shell started with `&`, and SIGHUP by one started with nohup (and so by everything they start): the harness puts the defaults back,
+        # so the script can trap them as it can from a terminal and the test does not depend on how pytest was launched
         proc = subprocess.Popen(["bash", str(w["bundle"] / SCRIPT), "--prefix", str(w["prefix"]), "--mirror", url], env=clean_env(w["home"]), cwd=str(w["home"]), stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+                                stderr=subprocess.PIPE, text=True, preexec_fn=restore_default_signals)
         try:
             deadline = time.time() + 60
             kids = []
@@ -340,6 +341,19 @@ def test_a_signal_sent_to_the_script_alone_stops_the_download_at_once_and_cleans
     time.sleep(0.5)
     assert not any(alive(k) for k in kids), "the download process outlived the script"
     assert prefix_entries(w) == ["INSTALL.json", "bin", "venv"] and tree_listing(w["prefix"]) == before
+
+
+def test_the_harness_resets_signals_that_the_test_process_inherited_as_ignored_and_the_script_cannot(tmp_path):
+    """Under nohup (SIGHUP ignored) or as a background job of a non-interactive shell (SIGINT ignored), an ignored signal survives exec, and a shell script cannot trap a signal that was ignored when it
+    started. A process that ignores the three signals starts two children: one as a test would without the harness (the signals stay ignored) and one through ``restore_default_signals`` (default)."""
+    probe = tmp_path / "probe.py"
+    probe.write_text("import signal, sys\nprint(' '.join(str(signal.getsignal(s) == signal.SIG_IGN) for s in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)))\n")
+    parent = (f"import signal, subprocess, sys\nsys.path.insert(0, {str(bh.ROOT / 'tests')!r})\nfrom bundle_helpers import restore_default_signals\n"
+              "for s in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM): signal.signal(s, signal.SIG_IGN)\n"
+              f"print(subprocess.run([sys.executable, {str(probe)!r}], capture_output=True, text=True).stdout.strip())\n"
+              f"print(subprocess.run([sys.executable, {str(probe)!r}], capture_output=True, text=True, preexec_fn=restore_default_signals).stdout.strip())\n")
+    done = subprocess.run([sys.executable, "-c", parent], capture_output=True, text=True)
+    assert done.stdout.split("\n")[:2] == ["True True True", "False False False"], done.stdout + done.stderr
 
 
 # ------------------------------------------------------------------------------------------------------------------------------ a staging directory left by a killed run

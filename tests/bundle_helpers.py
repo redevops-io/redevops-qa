@@ -142,5 +142,14 @@ def resum(bundle: Path) -> None:
     (bundle / "SHA256SUMS").write_text(bb.sha256sums_text(bundle), encoding="utf-8")
 
 
+def restore_default_signals() -> None:
+    """For ``preexec_fn``: put INT, TERM and HUP back to their default disposition in a child that is about to exec a script. A signal that the test process itself ignores (pytest started with
+    nohup, or as a background job of a non-interactive shell) stays ignored across exec, and a shell script cannot trap a signal that was ignored when it started: a test that signals a script
+    must not depend on how pytest was launched."""
+    import signal
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, signal.SIG_DFL)
+
+
 def tree_listing(root: Path) -> List[str]:
     return sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))
