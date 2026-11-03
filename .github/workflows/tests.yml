@@ -986,6 +986,13 @@ jobs:
         run: python -c "import importlib.metadata as m, selenium; assert m.version('selenium') == '4.52.0', m.version('selenium')"
       - name: Fail if the working tree is dirty
         run: test -z "$(git status --porcelain)"
+      - name: Pre-warm Chrome (one throwaway headless start, so the first start inside a test is not a cold one; never fails the job)
+        run: |
+          # Measured on this runner image: without it the first Chrome start of a job took a median of about 7.5 s and often more than 10 s; with it, about 1.6 s.
+          # It reads Chrome's files into the page cache. It has a time limit and its outcome is only printed: a Chrome that cannot start fails the tests, not this step.
+          started=$SECONDS
+          timeout 300 "$QA_CHROME_BINARY" --headless=new --no-first-run --disable-gpu --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null 2>&1 \
+            && echo "pre-warm: done in $((SECONDS - started)) s" || echo "pre-warm: did not finish cleanly after $((SECONDS - started)) s (exit $?)"
       - name: Run the browser lane (scrubbed environment; only tests marked browser)
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
@@ -1198,6 +1205,13 @@ jobs:
           "$driver" --version
           echo "QA_CHROME_BINARY=$chrome" >> "$GITHUB_ENV"
           echo "QA_CHROMEDRIVER_PATH=$driver" >> "$GITHUB_ENV"
+      - name: Pre-warm Chrome (one throwaway headless start, so the first start inside a test is not a cold one; never fails the job)
+        run: |
+          # Measured on this runner image: without it the first Chrome start of a job took a median of about 7.5 s and often more than 10 s; with it, about 1.6 s.
+          # It reads Chrome's files into the page cache. It has a time limit and its outcome is only printed: a Chrome that cannot start fails the tests, not this step.
+          started=$SECONDS
+          timeout 300 "$QA_CHROME_BINARY" --headless=new --no-first-run --disable-gpu --user-data-dir="$(mktemp -d)" --dump-dom about:blank > /dev/null 2>&1 \
+            && echo "pre-warm: done in $((SECONDS - started)) s" || echo "pre-warm: did not finish cleanly after $((SECONDS - started)) s (exit $?)"
       - name: Run the profile - install, smoke, check
         run: |
           python tools/run_install_profile.py --profile local-python-selenium --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
