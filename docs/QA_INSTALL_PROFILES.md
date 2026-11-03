@@ -2,7 +2,7 @@
 
 # ReDevOps QA: install profiles
 
-This page is generated from [`qa-install-profiles.json`](../qa-install-profiles.json), the data the installer configurator is built from. Every profile but `local-python-qa` installs from a clone of https://github.com/redevops-io/redevops-qa at the pinned commit `5e9c8da6248f9c4e170b77ab4ff202b519c970a8`; The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them. The profile `local-python-qa` installs from a bundle archive instead (see its section).
+This page is generated from [`qa-install-profiles.json`](../qa-install-profiles.json), the data the installer configurator is built from. Every profile but `local-python-qa` installs from a clone of https://github.com/redevops-io/redevops-qa at the pinned commit `55c746e35412a92a287ebbbc239a69de0fbebf10`; The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them. The profile `local-python-qa` installs from a bundle archive instead (see its section).
 
 A profile is **verified** only when a CI job runs that exact profile, step by step, on the host named; **experimental** means the steps are written and partly or not at all run for that host; **planned** means nothing is offered yet and the reason is given.
 
@@ -44,7 +44,7 @@ Hosts:
 
 | Host | Status | Prerequisites | Verified by |
 |---|---|---|---|
-| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. | [run 41306373018](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018) (whole run green, head `6ee02a75fc5a`), [job 124847489639](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489639), installed from the pinned commit `5e9c8da6248f`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, installed from the pinned commit in a clean virtual environment; the whole run is green |
+| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. | [run 41306373018](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018) (whole run green, head `6ee02a75fc5a`), [job 124847489639](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489639), installed from the pinned commit `55c746e35412`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 133 + 10 tests passed, 0 skipped, 0 failed, installed from the pinned commit in a clean virtual environment; the whole run is green |
 | linux-arm64 | experimental | Linux arm64 with a POSIX shell. | The same steps are written for this host but no CI job runs them here. |
 | macos-arm64 | experimental | macOS on Apple silicon with Python 3.12 as `python3.12`. | The same steps are written for this host but no CI job runs them here. |
 
@@ -60,7 +60,7 @@ Parameters:
 # Clone the repository
 git clone https://github.com/redevops-io/redevops-qa.git redevops-qa
 # Check out the pinned commit
-git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8
+git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10
 ```
 
 ### Install
@@ -134,7 +134,7 @@ Hosts:
 
 | Host | Status | Prerequisites | Verified by |
 |---|---|---|---|
-| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. Chrome and ChromeDriver 156 were present on that runner image. | [run 41306373018](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018) (whole run green, head `6ee02a75fc5a`), [job 124847489672](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489672), installed from the pinned commit `5e9c8da6248f`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, installed from the pinned commit in a clean virtual environment; the whole run is green |
+| linux-x86_64 | verified | Linux x86_64 with a POSIX shell; run on a GitHub-hosted ubuntu-24.04 runner. Chrome and ChromeDriver 156 were present on that runner image. | [run 41306373018](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018) (whole run green, head `6ee02a75fc5a`), [job 124847489672](https://github.com/redevops-io/redevops-qa/actions/runs/41306373018/job/124847489672), installed from the pinned commit `55c746e35412`, 2026-11-01: install, smoke and check phases then uninstall: 359 + 135 + 11 tests passed, 0 skipped, 0 failed, real Chrome and ChromeDriver, installed from the pinned commit in a clean virtual environment; the whole run is green |
 | macos-arm64 | experimental | macOS on Apple silicon with Python 3.12 as `python3.12`, Chrome and its ChromeDriver. | The same steps are written for this host but no CI job runs them here. |
 
 Parameters:
@@ -151,7 +151,7 @@ Parameters:
 # Clone the repository
 git clone https://github.com/redevops-io/redevops-qa.git redevops-qa
 # Check out the pinned commit
-git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8
+git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10
 ```
 
 ### Install
@@ -240,7 +240,7 @@ Parameters:
 # Clone the repository
 git clone https://github.com/redevops-io/redevops-qa.git redevops-qa
 # Check out the pinned commit
-git -C redevops-qa checkout --detach 5e9c8da6248f9c4e170b77ab4ff202b519c970a8
+git -C redevops-qa checkout --detach 55c746e35412a92a287ebbbc239a69de0fbebf10
 ```
 
 ### Install
