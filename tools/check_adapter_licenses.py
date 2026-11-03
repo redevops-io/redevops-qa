@@ -505,7 +505,7 @@ def notice_breakdown(text: str) -> Tuple[int, Dict[str, int]]:
 
 def check_wheelhouse(matrix: dict, wheelhouse: Path) -> List[Finding]:
     """What the matrix says about the shipped wheels against the wheels themselves (the built bundle's wheelhouse): the file and its sha256, every recorded licence file by path and sha256,
-    no licence-like file the matrix does not record, and, where the matrix records a breakdown of an inlined notice file, the breakdown recomputed from the file."""
+    no licence-like file the matrix does not record, every member recorded under recorded_members (by path, size in BYTES, as stored in the wheel, and sha256), and, where the matrix records a breakdown of an inlined notice file, the breakdown recomputed from the file."""
     import zipfile
     out: List[Finding] = []
     for comp in matrix.get("components", []):
@@ -528,6 +528,16 @@ def check_wheelhouse(matrix: dict, wheelhouse: Path) -> List[Finding]:
                         out.append(Finding("LICENCE_FILE_DIGEST", at, f"{member} does not have the recorded sha256"))
                 for member in sorted(n for n in names if _LICENCE_FILE_NAME.search(n) and not n.endswith("/") and n not in recorded):
                     out.append(Finding("UNRECORDED_LICENCE_FILE", at, f"{member} is in the wheel but not recorded in license_files"))
+                for item in rec.get("recorded_members") or []:
+                    member = item.get("path")
+                    if member not in names:
+                        out.append(Finding("MEMBER_MISSING", at, f"{member} is not in the wheel"))
+                        continue
+                    data = zf.read(member)
+                    if len(data) != item.get("size") or zf.getinfo(member).file_size != item.get("size"):
+                        out.append(Finding("MEMBER_SIZE_MISMATCH", at, f"{member} is {zf.getinfo(member).file_size} bytes in the wheel, the matrix records {item.get('size')}"))
+                    if hashlib.sha256(data).hexdigest() != item.get("sha256"):
+                        out.append(Finding("MEMBER_DIGEST_MISMATCH", at, f"{member} does not have the recorded sha256"))
                 for notice in rec.get("inlined_notices") or []:
                     member = notice.get("path")
                     if member not in names:

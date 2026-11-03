@@ -694,3 +694,50 @@ def test_the_bundle_job_checks_the_matrix_against_the_wheels_it_built():
     wf = yaml.safe_load((ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8"))
     run = "\n".join(str(s.get("run", "")) for s in wf["jobs"]["bundle"]["steps"])
     assert "tools/check_adapter_licenses.py --wheelhouse" in run
+
+
+# ------------------------------------------------------------------------------------------------------------- sizes in bytes
+def robot_record():
+    return shipped_owner(REAL, "robotframework")["shipped_wheels"][0]
+
+
+def test_the_sizes_in_the_prose_are_the_recorded_byte_sizes_of_the_wheel_members():
+    members = {m["path"]: m for m in robot_record()["recorded_members"]}
+    libdoc = members["robot/htmldata/libdoc/libdoc.html"]
+    assert libdoc["size"] == 196359                                      # the member's size in the wheel; 195645 was the number of characters after decoding it
+    dep = next(d for d in comp(REAL, "robotframework")["bundled_deps"] if "libdoc.html" in d["name"])
+    assert f"{libdoc['size']} bytes" in dep["name"] and libdoc["sha256"] in dep["name"] and "195645" not in json.dumps(REAL)
+    node = playwright_record()["recorded_members"][0]
+    assert node["path"] == "playwright/driver/node" and f"{node['size']} bytes" in json.dumps(comp(REAL, "playwright-python")["notices"])
+    for d in comp(REAL, "robotframework")["bundled_deps"]:
+        for path, m in members.items():
+            if path in d["name"] and "sha256 " in d["name"]:
+                assert m["sha256"] in d["name"], path
+
+
+def wheel_with_members(tmp_path, members):
+    import zipfile
+    path = tmp_path / "w-1-py3-none-any.whl"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("w-1.dist-info/licenses/LICENSE", "licence")
+        for name, data in members.items():
+            zf.writestr(name, data)
+    sha = lambda b: hashlib.sha256(b).hexdigest()
+    return path, {"components": [{"id": "x", "shipped_wheels": [{"name": "w", "version": "1", "file": path.name, "sha256": sha(path.read_bytes()),
+                                                                  "license_files": [{"path": "w-1.dist-info/licenses/LICENSE", "sha256": sha(b"licence")}],
+                                                                  "recorded_members": [{"path": n, "size": len(d), "sha256": sha(d)} for n, d in members.items()]}]}]}
+
+
+def test_the_wheelhouse_check_verifies_the_byte_size_of_a_recorded_member_not_its_character_count(tmp_path):
+    text = "caf\u00e9 \u00fc\u00f6 " * 20                              # multi-byte characters: more bytes than characters
+    data = text.encode("utf-8")
+    assert len(data) != len(text)
+    wheel, m = wheel_with_members(tmp_path, {"w/a.html": data})
+    assert chk.check_wheelhouse(m, tmp_path) == []
+    m["components"][0]["shipped_wheels"][0]["recorded_members"][0]["size"] = len(text)       # the mistake the matrix had: a character count
+    assert "MEMBER_SIZE_MISMATCH" in codes(chk.check_wheelhouse(m, tmp_path))
+    m["components"][0]["shipped_wheels"][0]["recorded_members"][0]["size"] = len(data)
+    m["components"][0]["shipped_wheels"][0]["recorded_members"][0]["sha256"] = "0" * 64
+    assert "MEMBER_DIGEST_MISMATCH" in codes(chk.check_wheelhouse(m, tmp_path))
+    m["components"][0]["shipped_wheels"][0]["recorded_members"][0]["path"] = "w/gone.html"
+    assert "MEMBER_MISSING" in codes(chk.check_wheelhouse(m, tmp_path))

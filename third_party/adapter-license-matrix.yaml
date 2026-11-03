@@ -109,7 +109,7 @@ components:
       - {name: "JSXCompressor (robot/htmldata/lib/jsxcompressor.min.js, sha256 b8269afbdc3549e56fe693b04928ace2141bf7df455e0700588a596185de8780)", spdx: "Apache-2.0 OR LGPL-3.0-only", note: "file header: 'Dual licensed under the Apache License Version 2.0, or LGPL Version 3 licenses'"}
       - {name: "jQuery 3.5.1 (robot/htmldata/lib/jquery.min.js, sha256 f7f6a5894f1d19ddad6fa392b2ece2c5e578cbf7da4ea805b6885eb6985b6e3d)", spdx: unverified, note: "UNVERIFIED: the file header names only '(c) JS Foundation and other contributors | jquery.org/license' and no licence identifier; the wheel carries no licence file for it, and nothing was compared with the jQuery upstream tag"}
       - {name: "jQuery tablesorter 2.30.5 (robot/htmldata/lib/jquery.tablesorter.min.js, sha256 f56f5424a8bc15c1e9c9f0bd0aa70b61d8094a692b2a7f92192a07e547406913)", spdx: unverified, note: "UNVERIFIED: a minified file with no licence header (the version string 2.30.5 is the only identification inside it); the wheel carries no licence file for it"}
-      - {name: "robot/htmldata/libdoc/libdoc.html (sha256 e79fb53d9f8dd0c110869079edfcef4a8924f7f65049f992520b13d62e8f5667), a single-file app of 195645 bytes that inlines a JavaScript bundle", spdx: unverified, note: "UNVERIFIED: the file has no licence or copyright text; the inlined bundle contains the Handlebars runtime and compiler (identified by its code: HandlebarsEnvironment, MustacheStatement) and possibly other libraries; the wheel's LICENSE.txt is Robot Framework's own. The other files under robot/htmldata (common, rebot, testdoc: css, js, html) carry no header and are Robot Framework's own code, except that log.html, report.html and testdoc.html load the jquery assets listed here"}
+      - {name: "robot/htmldata/libdoc/libdoc.html (sha256 e79fb53d9f8dd0c110869079edfcef4a8924f7f65049f992520b13d62e8f5667), a single-file app of 196359 bytes that inlines a JavaScript bundle", spdx: unverified, note: "UNVERIFIED: the file has no licence or copyright text; the inlined bundle contains the Handlebars runtime and compiler (identified by its code: HandlebarsEnvironment, MustacheStatement) and possibly other libraries; the wheel's LICENSE.txt is Robot Framework's own. The other files under robot/htmldata (common, rebot, testdoc: css, js, html) carry no header and are Robot Framework's own code, except that log.html, report.html and testdoc.html load the jquery assets listed here"}
     trademark: {status: verified, note: "the wheel's package description states that the Robot Framework trademark is owned by the Robot Framework Foundation; repository rule: the name identifies the integration only, no logos, no use in a ReDevOps product name"}
     redistribution: {status: staged_unmodified, default_enabled: false, public_distribution: owner_decision_required, reason: "PRIVATE STAGING ONLY: public distribution requires an owner decision. The unmodified wheel is shipped in the pinned bundle with its LICENSE.txt and AUTHORS.rst; the licences of three bundled assets (robot/htmldata/lib/jquery.min.js, robot/htmldata/lib/jquery.tablesorter.min.js and the inlined bundle of robot/htmldata/libdoc/libdoc.html) are UNVERIFIED, and two others are dual licensed (an alternative would be chosen)"}
     shipped_wheels:
@@ -121,6 +121,13 @@ components:
         license_files:
           - {path: "robotframework-7.5.dist-info/AUTHORS.rst", sha256: "c04d39b62cdd0be5f397f78eedf3b6dbb19573ea11900c7e826342f73c6989d1"}
           - {path: "robotframework-7.5.dist-info/LICENSE.txt", sha256: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"}
+        recorded_members:
+          - {path: "robot/htmldata/libdoc/libdoc.html", size: 196359, sha256: "e79fb53d9f8dd0c110869079edfcef4a8924f7f65049f992520b13d62e8f5667"}
+          - {path: "robot/htmldata/lib/jquery.min.js", size: 89476, sha256: "f7f6a5894f1d19ddad6fa392b2ece2c5e578cbf7da4ea805b6885eb6985b6e3d"}
+          - {path: "robot/htmldata/lib/jquery.tablesorter.min.js", size: 43881, sha256: "f56f5424a8bc15c1e9c9f0bd0aa70b61d8094a692b2a7f92192a07e547406913"}
+          - {path: "robot/htmldata/lib/jquery.highlight.min.js", size: 1524, sha256: "595f2a0621a75c7dc18e5076ce7bca1064600ccc974cbd8229be6ef263243f33"}
+          - {path: "robot/htmldata/lib/jquery.tmpl.min.js", size: 6141, sha256: "58fe3741dce607dc6a2abbaddda4f489f9be856f26c20c67a820131018ae153f"}
+          - {path: "robot/htmldata/lib/jsxcompressor.min.js", size: 13667, sha256: "b8269afbdc3549e56fe693b04928ace2141bf7df455e0700588a596185de8780"}
     verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; wheel downloaded from the package registry and the headers of its bundled report assets read", checked_on: "2026-10-31"}
   - id: robotframework-seleniumlibrary
     name: SeleniumLibrary for Robot Framework (considered, not on the allowlist)
@@ -344,6 +351,8 @@ components:
         inlined_notices:
           - {path: "playwright/driver/package/lib/utilsBundle.js.LICENSE", sections: 79, breakdown: {BSD-2-Clause: 1, BSD-3-Clause: 4, BlueOak-1.0.0: 1, ISC: 7, MIT: 65, none-declared: 1}}
           - {path: "playwright/driver/package/lib/serverRegistry.js.LICENSE", sections: 2, breakdown: {MIT: 2}}
+        recorded_members:
+          - {path: "playwright/driver/node", size: 126879696, sha256: "e32e2d16081cf644f88392934288086e7662529d0d43277c34f7aad2207cfafb"}
     verification: {status: verified, method: "LICENSE fetched at the pinned tag with the GitHub contents API; the registry entry for the pinned version lists its dependencies; the shipped linux x86_64 wheel was unpacked and its licence and notice files and bundled components read (the wheel file names, sizes and sha256 are recorded above)", checked_on: "2026-10-31"}
   - id: playwright-python-direct-deps
     name: Playwright for Python direct dependencies
