@@ -189,7 +189,7 @@ native status that says so; its assertions are `INCONCLUSIVE`; the run is never 
   INCONCLUSIVE (exit status 3), and `verify` rejects a bundle whose log records a refusal while the lane is reported as completed (`EGRESS_DENIAL_NOT_REFLECTED`), a status of `egress-denied` without a
   refusal in the log, a log whose layers or allow-list are not the plan's, an allowed connect outside the allow-list, or a malformed log.
   **What the layers do not stop** is part of the report's statement and of the matrix below: a second thread that changes the address of a `connect` between the supervisor's look and the kernel's can
-  reach another address on the allowed PORT (measured: it does, with the seccomp layer alone, and never with Landlock); files, pipes, FIFOs and processes reachable without a socket are not confined; a caller with `CAP_SYS_PTRACE`
+  reach another address on the allowed PORT (in the aarch64 development measurements it reached a forbidden port with the seccomp layer alone, and never with Landlock; the CI experiments assert that Landlock alone, and both layers together, never let it through, and do not assert the seccomp layer alone either way); files, pipes, FIFOs and processes reachable without a socket are not confined; a caller with `CAP_SYS_PTRACE`
   can reach the supervisor and a kernel bug defeats everything; names do not resolve over the network (UDP is refused), only `/etc/hosts` resolves and its address is checked like any other. This is not
   a sandbox of the library: the library allowlist remains a guard, not a sandbox.
 
@@ -220,7 +220,7 @@ are the listeners' counts, not what the library says; the same attempts run with
 | TCP Fast Open (data sent with the connection attempt), by `sendto` and by `sendmsg` | reached | blocked | reached | blocked |
 | `curl`, `python`, `bash` (`/dev/tcp`) started by the library; `ctypes` `connect`; a raw `syscall`; a thread; a module that connects when it is imported | reached | blocked | blocked | blocked |
 | `io_uring` setup | depends on the host | refused (a container's own filter may refuse first, so no audit record is required) | not covered | refused |
-| the address of `connect` flipped by a second process while it is called | reached | NOT stopped: it reached the forbidden port in the measurements made while writing this (a race: not asserted either way) | blocked | blocked (asserted: Landlock holds the port) |
+| the address of `connect` flipped by a second process while it is called | reached | NOT stopped: it reached the forbidden port in the development measurements on aarch64 Docker made while writing this; the CI experiments do not assert it either way (a race, timing dependent) | blocked | blocked (asserted: Landlock holds the port) |
 | the allowed origin, by the library's normal route | works | works | works | works |
 
 Every refusal of the seccomp layer is also an entry of `egress-log.jsonl` (checked per attempt, with the allowed origin recorded as allowed). What is **not** shown: a kernel without Landlock network rules, an
