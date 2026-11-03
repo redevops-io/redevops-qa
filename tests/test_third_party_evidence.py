@@ -685,3 +685,30 @@ def test_the_notices_readme_says_which_files_are_excerpts_and_which_texts_belong
     assert "EXCERPT" in text and "are not whole files" in text and "ORIGINAL tablesorter repository" in text and "not of the Mottie fork" in text
     assert "every other file is byte for byte" not in text.lower()
     assert not re.search(r"\b(cleared|approved|clearance|compatible|permitted)\b", text, re.I)
+
+
+def test_a_declared_licence_source_without_its_verbatim_quote_is_found():
+    m = fresh()
+    src = next(s_ for s_ in item(m, "robotframework", "rf-jquery-tmpl")["sources"] if s_["role"] == "declared_licence")
+    del src["quote"]
+    assert any("quotes the declaration verbatim" in f.message for f in findings_of(m))
+    m = fresh()
+    src = next(s_ for s_ in item(m, "playwright-python", "pw-minimatch")["sources"] if s_["role"] == "declared_licence")
+    src["quote"] = ""
+    assert "EVIDENCE_MISSING_FIELD" in codes(findings_of(m))
+
+
+def test_the_npm_tables_section_count_must_be_the_one_the_wheels_notice_files_have(tmp_path):
+    mit = "The MIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy"
+    sidecar = npm_sidecar({"a@1.0.0": mit})
+    parsed = chk.npm_notice_sections(sidecar)
+    rows = [{"package": "a@1.0.0", "notice_file": "sidecar.txt", "notice_section_sha256": parsed["a@1.0.0"][1], "registry_license": "MIT", "tarball_sha512_verified": True,
+             "licence_files_in_tarball": {"LICENSE": "x"}, "notice_text_contains_tarball_licence_file": ["LICENSE"]}]
+    evidence = tmp_path / "third_party" / "evidence"
+    evidence.mkdir(parents=True)
+    item_ = {"id": "n", "table": {"kind": "npm-inlined-packages", "path": "third_party/evidence/n.json", "source_members": ["w/sidecar.txt"]}}
+    matrix = one_wheel_matrix(tmp_path, {"w/sidecar.txt": sidecar}, {"third_party_evidence": [item_]})
+    (evidence / "n.json").write_text(json.dumps({"schema": chk.NPM_TABLE_SCHEMA, "count": 1, "distinct": 1, "packages": rows}))
+    assert chk.check_wheelhouse(matrix, tmp_path, tmp_path) == []
+    (evidence / "n.json").write_text(json.dumps({"schema": chk.NPM_TABLE_SCHEMA, "count": 2, "distinct": 1, "packages": rows}))          # rows unchanged, the stated count is not what the wheel has
+    assert any("the table says 2 sections" in f.message for f in chk.check_wheelhouse(matrix, tmp_path, tmp_path))
