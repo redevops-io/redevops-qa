@@ -94,6 +94,17 @@ def test_a_lock_that_is_not_exactly_the_documented_shape_is_refused(fake, edit):
         bp.parse_lock(json.dumps(doc).encode())
 
 
+@pytest.mark.parametrize("edit", [lambda d: d["tree"]["files"].pop("ffmpeg-1000/" + bp.MARKER), lambda d: d["tree"]["files"].__setitem__("ffmpeg-1000/" + bp.MARKER, ["0644", 3, "0" * 64])],
+                         ids=["no marker", "marker with content"])
+def test_a_lock_whose_install_directory_has_no_empty_marker_is_refused_even_when_its_digest_is_right(fake, edit):
+    doc = copy.deepcopy(fake.doc)
+    edit(doc)
+    files = {k: (int(v[0], 8), v[1], v[2]) for k, v in doc["tree"]["files"].items()}
+    doc["tree_sha256"] = bp.tree_digest({k: int(v, 8) for k, v in doc["tree"]["directories"].items()}, files)
+    with pytest.raises(bp.LockError, match="must list an empty"):
+        bp.parse_lock(bp.render_lock(doc).encode())
+
+
 def test_a_lock_with_a_duplicate_key_or_that_is_not_json_is_refused(fake):
     text = fake.lock_bytes.decode().replace('"schema_version": "1.0"', '"schema_version": "1.0", "schema_version": "1.0"', 1)
     with pytest.raises(bp.LockError, match="duplicate"):
@@ -293,29 +304,25 @@ def test_a_bad_archive_among_good_ones_leaves_none_of_them_in_the_browsers_direc
 
 def test_a_host_that_sends_more_than_the_pinned_size_is_cut_off_and_refused(fake, tmp_path):
     wanted = next(a for a in fake.lock.archives if a.file == "ffmpeg-linux.zip")
-    read = []
+    served = []
 
-    class Endless(io.RawIOBase):
-        def readable(self):
-            return True
-
-        def readinto(self, b):
-            read.append(len(b))
-            b[:] = b"\0" * len(b)
-            return len(b)
-
-    class Resp(io.BufferedReader):
+    class Endless:
+        """A response that never ends: every read returns exactly what was asked for."""
         def __enter__(self):
             return self
 
         def __exit__(self, *a):
             return False
 
+        def read(self, n=-1):
+            served.append(n)
+            return b"\0" * n
+
     (tmp_path / "browsers").mkdir()
     dest = tmp_path / "x.zip"
     with pytest.raises(bp.InstallError, match="more than the pinned size"):
-        bp.fetch_archive(wanted, dest, "https://mirror.invalid/", opener=lambda req, timeout=0: Resp(Endless()))
-    assert sum(read) < wanted.size + 3 * (1 << 20) + (1 << 16) and not dest.exists()
+        bp.fetch_archive(wanted, dest, "https://mirror.invalid/", opener=lambda req, timeout=0: Endless())
+    assert sum(served) == wanted.size + 1 and not dest.exists()                  # one byte past the pinned size is read, then the transfer is cut off
 
 
 def test_the_first_url_may_be_wrong_when_a_later_one_serves_the_pinned_bytes_and_a_total_failure_names_every_url(fake, tmp_path):
