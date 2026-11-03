@@ -258,7 +258,7 @@ def test_the_runner_robot_egress_job_runs_the_hostile_library_experiments_as_the
     fetches = [s for s in job["steps"] if "repository" in s.get("with", {})]
     assert len(fetches) == 2 and "--verify-trees --require-git" in steps
     assert steps.count('test -z "$(git status --porcelain)"') == 2
-    assert "--expect-tests 217" in steps and "--expect-tests 191" in steps         # the number of tests of each run: a deleted or deselected experiment is not green
+    assert "--expect-tests 264" in steps and "--expect-tests 228" in steps         # the number of tests of each run: a deleted or deselected experiment is not green
     offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["runner"]["steps"])
     assert "robot_egress" not in offline
 

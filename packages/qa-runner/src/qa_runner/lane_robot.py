@@ -10,6 +10,7 @@ Network egress of a Robot library does not pass the egress gateway: a Robot libr
 profile says so. A requested limit that cannot be provided means the engine is never started."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.metadata
 import json
@@ -28,7 +29,7 @@ from qa_adapter_kit.supervisor import CancelToken
 from qa_evidence.canon import CanonError, dumps_canonical, loads_strict
 from qa_robot import RobotConfig, RobotSuiteAdapter, observation_document, parse_observations, suite_manifest
 
-from . import constants as K, netfence, suites, watchdog
+from . import constants as K, egresslog, netfence, suites, watchdog
 from .bundle import NATIVE_STATUSES, LaneOutcome
 from .egress import policy_config
 from .judge import observation_path
@@ -58,6 +59,59 @@ def egress_log_bytes(fence: "netfence.Fence") -> bytes:
     """The lane's audit file: the mechanism that was installed (one line), then every decision of the supervisor in order, one JSON object per line."""
     rows = [fence.header()] + fence.events()
     return b"".join(json.dumps(r, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n" for r in rows)
+
+
+EGRESS_FRAME = b"qa-egress-log "
+
+
+def egress_frame(log: bytes) -> bytes:
+    """The lane child's second copy of its egress log: one line on its standard output, which only the parent reads. Nothing the engine started can reach that descriptor, and the processes the engine
+    left behind are ended before the child writes anything, so a record that is rewritten in a file after the fact cannot hide a refusal from the parent."""
+    return EGRESS_FRAME + base64.b64encode(log) + b"\n"
+
+
+def split_frame(stdout: bytes) -> Tuple[bytes, Optional[bytes]]:
+    """The standard output without the frame, and the log the frame carried (``None`` when there is none or it is not valid base64)."""
+    keep: List[bytes] = []
+    log: Optional[bytes] = None
+    for line in stdout.split(b"\n"):
+        if line.startswith(EGRESS_FRAME):
+            try:
+                log = base64.b64decode(line[len(EGRESS_FRAME):], validate=True)
+            except ValueError:
+                log = None
+        else:
+            keep.append(line)
+    return b"\n".join(keep), log
+
+
+def refused(outcome: LaneOutcome, denied: int, lost: bool, lane_id: str) -> LaneOutcome:
+    """The lane's result once the layers' record is known: the count goes into the outcome, and a lane that completed although the layers refused something (or lost their supervisor) is an engine error
+    with no verdict (no observation record, no counts), whatever Robot said."""
+    egress = {**outcome.egress, "fence_denied": denied}
+    if outcome.native_status in ("NATIVE_PASS", "NATIVE_FAIL", "NATIVE_SKIPPED") and (denied or lost):
+        files = {k: v for k, v in outcome.files.items() if k != observation_path(lane_id)}
+        return replace(outcome, native_status="NATIVE_ERROR", raw_status="egress-fence-lost" if lost else "egress-denied", counts=None, files=files, egress=egress,
+                       exit_code=outcome.exit_code or None)
+    return replace(outcome, egress=egress)
+
+
+def apply_pipe_record(fl: Any, outcome: LaneOutcome, stdout: bytes) -> Tuple[LaneOutcome, bytes]:
+    """What the parent makes of the child's outcome files and of the log the child sent over its standard output. The piped log is the one that counts: it replaces the file's copy in the bundle, the
+    refusals in it decide the lane's status, and a lane that says it was started but sent no log, or a log that is not well formed, is an engine error."""
+    rest, log = split_frame(stdout)
+    path = f"lanes/{fl.lane_id}/{EGRESS_LOG}"
+    if log is None:
+        return replace(outcome, native_status="NATIVE_ERROR", raw_status="egress-record-missing", counts=None, exit_code=None), rest
+    header, events, problems = egresslog.parse(log)
+    if problems:
+        return replace(outcome, native_status="NATIVE_ERROR", raw_status="egress-record-malformed", counts=None, exit_code=None), rest
+    files = dict(outcome.files)
+    files[path] = (log, "log")
+    outcome = replace(outcome, files=files)
+    if header.get("event") == "unavailable":
+        return outcome, rest
+    return refused(outcome, egresslog.refusals(events), any(e.get("verdict") == "lost" for e in events), fl.lane_id), rest
 
 
 def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, deadline_s: float, log: List[str],
@@ -90,7 +144,10 @@ def _run_inner(fl: Any, *, run_id: str, origin: str, workdir: str, cancel: Any, 
                               env={"QA_BASE_URL": origin})
     result = SuiteRunner(adapter).run(request, cancel)
     if fence is not None:
-        fence.close()                                               # the engine and everything it started is done (the supervisor group was ended): what the supervisor saw is complete
+        ended = fence.reap_descendants()                            # whatever the engine detached from its process group is ended BEFORE anything is read or written below: nothing the engine
+        if ended:                                                   # started is left to rewrite the lane's result files
+            log.append(f"lane {fl.lane_id}: {ended} process(es) the engine had left behind were ended")
+        fence.close()                                               # the engine and everything it started is done: what the supervisor saw is complete
 
     native: Dict[str, bytes] = {}
     for name in ("output.xml", "robot-summary.json"):
@@ -252,7 +309,7 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
            "egress": fl.egress, "egress_policy": policy_config(fl.egress, origin) if fl.egress == "origin-only" else None}
     spec_in = lane_dir / "input.json"
     spec_in.write_bytes(dumps_canonical(cfg))
-    proc = run_child([sys.executable, "-s", "-m", "qa_runner.lane_robot", str(spec_in)], cwd=str(lane_dir), env=child_env(str(home)), deadline_s=max(1, math.ceil(deadline_s)) + 20, cancel=cancel, kill_grace_s=12.0)   # the engine runs in its own session: give the child time to end it first
+    proc = run_child([sys.executable, "-s", "-m", "qa_runner.lane_robot", str(spec_in)], cwd=str(lane_dir), env=child_env(str(home)), deadline_s=max(1, math.ceil(deadline_s)) + 20, cancel=cancel, kill_grace_s=12.0, output_limit_bytes=8_000_000 if fl.egress == "origin-only" else 1_000_000)   # the engine runs in its own session: give the child time to end it first
     status, raw = "NATIVE_ERROR", "error"
     if proc.error_code == KitError.TIMEOUT:
         status, raw = "NATIVE_TIMEOUT", "timeout"
@@ -266,11 +323,15 @@ def run_robot_lane(fl: FrozenLane, *, run_id: str, origin: Optional[str], workdi
         outcome, lines = _read_outcome(fl, out, budget)
         if outcome is not None and proc.exit_code == 0:
             log.extend(lines)
+            if fl.egress == "origin-only":
+                outcome, _ = apply_pipe_record(fl, outcome, proc.stdout)
+                if outcome.raw_status.startswith("egress-record-") or outcome.raw_status.startswith("egress-denied") or outcome.raw_status == "egress-fence-lost":
+                    log.append(f"lane {fl.lane_id}: native {outcome.native_status} ({outcome.raw_status}) from the egress record the lane child sent")
             return replace(outcome, double=launcher is not None)       # the child cannot say whether it was started by a test: the parent knows
         raw = f"child-exit-{proc.exit_code}" if proc.exit_code is not None else f"child-signal-{proc.signal}"
     log.append(f"lane {fl.lane_id}: native {status} ({raw}), exit {proc.exit_code}")
     return _outcome(fl, version, status, raw, exit_code=proc.exit_code if status == "NATIVE_ERROR" and proc.exit_code else None,
-                    files={f"logs/{fl.lane_id}.stdout.txt": (proc.stdout[-65536:], "log"), f"logs/{fl.lane_id}.stderr.txt": (proc.stderr[-65536:], "log")})
+                    files={f"logs/{fl.lane_id}.stdout.txt": (split_frame(proc.stdout)[0][-65536:], "log"), f"logs/{fl.lane_id}.stderr.txt": (proc.stderr[-65536:], "log")})
 
 
 def _engine_version() -> str:
@@ -288,6 +349,16 @@ def _fence_unavailable(lane: _Lane, exc: "netfence.FenceUnavailable", policy: Ma
     return LaneOutcome(lane_id=lane.lane_id, engine_name=lane.engine, engine_version=_engine_version(), native_status="NATIVE_UNAVAILABLE", raw_status="egress-unavailable", exit_code=None,
                        files={f"lanes/{lane.lane_id}/egress-profile.json": (dumps_canonical(dict(policy)), "record"),
                               f"lanes/{lane.lane_id}/{EGRESS_LOG}": (json.dumps(row, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n", "log")})
+
+
+def _send_frame(outcome: LaneOutcome, lane: "_Lane") -> None:
+    """The egress log on the child's standard output (see ``egress_frame``), after the outcome files are written; nothing is sent for a lane that asked for no layers."""
+    if lane.egress != "origin-only":
+        return
+    data = outcome.files.get(f"lanes/{lane.lane_id}/{EGRESS_LOG}")
+    if data is not None:
+        sys.stdout.buffer.write(egress_frame(data[0]))
+        sys.stdout.buffer.flush()
 
 
 def main(argv: Optional[List[str]] = None, *, layers: Sequence[str] = netfence.ALL_LAYERS) -> int:
@@ -316,11 +387,14 @@ def main(argv: Optional[List[str]] = None, *, layers: Sequence[str] = netfence.A
             try:
                 fence = netfence.install(policy, layers=layers)             # before anything the plan limits exists: the engine is started by this process, so it carries the layers
             except netfence.FenceUnavailable as exc:
-                _write_outcome(_fence_unavailable(lane, exc, policy if isinstance(policy, dict) else {}, lines), lines, Path(cfg["out_dir"]))
+                unavailable = _fence_unavailable(lane, exc, policy if isinstance(policy, dict) else {}, lines)
+                _write_outcome(unavailable, lines, Path(cfg["out_dir"]))
+                _send_frame(unavailable, lane)
                 return 0
         outcome = _run_inner(lane, run_id=cfg["run_id"], origin=cfg["origin"], workdir=cfg["workdir"], cancel=cancel, deadline_s=float(cfg["deadline_s"]), log=lines,
                              launcher=cfg.get("launcher"), budget=budget, fence=fence, policy=policy if isinstance(policy, dict) else None)
         _write_outcome(outcome, lines, Path(cfg["out_dir"]), budget.dropped)
+        _send_frame(outcome, lane)
         return 0
     except Exception as exc:
         print(f"lane failed: {type(exc).__name__}: {str(exc)[:500]}", file=sys.stderr)

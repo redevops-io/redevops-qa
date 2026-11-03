@@ -8,8 +8,13 @@ process that carries it):
 1. ``seccomp`` (a BPF filter with a supervising thread of the lane child, ``SECCOMP_RET_USER_NOTIF``): ``socket`` is allowed only for TCP over IPv4 and for local stream sockets;
    UDP, raw, packet, netlink, IPv6, SCTP, MPTCP and every other kind are refused. ``connect`` is decided by the supervisor from the address the caller passed: only an
    address of the plan's allow-list is let through, a refused one fails with ``EACCES`` and is recorded. ``connect`` to a local (unix) socket path, ``sendto`` with an address,
-   TCP Fast Open, ``io_uring`` and the calls that read or write another process (``ptrace``, ``process_vm_*``, ``pidfd_getfd``) are refused too.
-2. ``Landlock`` (ABI 4 or later): ``connect`` of a TCP socket is limited, by the kernel itself, to the ports of the allow-list.
+   TCP Fast Open, ``listen`` (nothing can accept an inbound connection), ``io_uring`` and the calls that read or write another process (``ptrace``, ``process_vm_*``, ``pidfd_getfd``) are
+   refused too.
+2. ``Landlock`` (ABI 4 or later): ``connect`` of a TCP socket is limited, by the kernel itself, to the ports of the allow-list, and ``bind`` of a TCP socket is refused for every port (a connect
+   that binds an ephemeral port by itself is not a ``bind`` call and still works).
+
+The lane child also marks itself not dumpable (so that a same-user engine cannot read or write its memory through ``/proc``, with or without a Yama policy on the host) and a subreaper (so that
+a process the engine detaches is a descendant of the lane child and is ended before the lane's result is written: ``reap_descendants``).
 
 Both need no privilege and no helper program: ``prctl``, ``seccomp`` and the three Landlock calls, made through ``ctypes``. If a layer cannot be installed, or the self-test that
 follows (a ``connect`` to a listener that is not allowed must be refused, a UDP socket must be refused) does not pass, ``install`` raises ``FenceUnavailable``: the caller does not start
@@ -18,12 +23,18 @@ the engine. There is no weaker mode.
 What these layers do NOT do (the report of a run says the same):
 
 * The address of ``connect`` is read from the caller's memory and the call is then continued by the kernel, which reads it again: a second thread (or a process sharing the
-  memory) that changes the address in between can reach another address on an allowed PORT (Landlock still holds the port). It cannot reach another port.
+  memory) that changes the address in between can reach ANOTHER IPv4 ADDRESS on the allowed PORT (Landlock still holds the port; measured: about a fifth of the attempts of such a library
+  did). Against a hostile library the allow-list is therefore enforced at the level of the PORT; the address check holds for honest code and for code that does not race it. Closing this would
+  need the supervisor to connect on the caller's behalf (``pidfd_getfd``, which Docker's default profile refuses) or to replace the caller's socket (``SECCOMP_IOCTL_NOTIF_ADDFD``, which loses
+  the options and the blocking mode the caller set): neither is used.
 * Nothing here confines files, pipes, FIFOs, shared memory or a process that is already running and reachable that way; a descriptor the process already had is not affected;
   ``/proc`` and ``/dev`` are as before. Local (unix) stream sockets can be created, but connecting one to a path is refused.
-* A caller with ``CAP_SYS_PTRACE`` (for example root outside a container with the default capabilities) can read or write the supervisor's memory; a kernel bug defeats every
+* A caller with ``CAP_SYS_PTRACE`` (for example root outside a container with the default capabilities) can read or write the supervisor's memory; so can a same-user process
+  that is not refused by ``PR_SET_DUMPABLE`` (it is) and by the host's ptrace policy; the engine itself stays dumpable, because the supervisor needs to read its address argument; a process that signals
+  the lane child (same user) can stop or kill the supervisor: that ends in no connection at all (fail closed) and a lane that runs into its deadline, never in an open network; a kernel bug defeats every
   layer; a kernel without user notification, Landlock network rules, or an architecture without a table here has NO mechanism and the lane does not start.
 * Names are not resolved over the network (UDP is refused): only what ``/etc/hosts`` gives resolves, and the address it gives is then checked like any other.
+* Inbound: ``listen`` is refused and ``bind`` is refused by Landlock, so nothing in the lane accepts a connection; a TCP simultaneous open (two ends that connect to each other) is not excluded.
 
 Linux only. ``x86_64`` is the platform this release makes claims for; the table for ``aarch64`` exists so the same code can be exercised on that architecture during development, it is
 not measured in CI and nothing is claimed for it."""
@@ -36,15 +47,19 @@ import json
 import os
 import platform
 import select
+import signal
 import socket
 import struct
 import sys
 import threading
+import time
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
-from .egresslog import ALL_LAYERS, LAYER_LANDLOCK, LAYER_SECCOMP, MAX_EVENTS
+from .egresslog import ALL_LAYERS, LAYER_LANDLOCK, LAYER_SECCOMP, MAX_ALLOW_RECORDS, MAX_DENY_RECORDS
 
 # ---- kernel constants ---------------------------------------------------------------------------------------------------------------
+PR_SET_DUMPABLE = 4
+PR_SET_CHILD_SUBREAPER = 36
 PR_SET_NO_NEW_PRIVS = 38
 SECCOMP_SET_MODE_FILTER = 1
 SECCOMP_FILTER_FLAG_NEW_LISTENER = 8
@@ -56,6 +71,7 @@ SECCOMP_RET_ALLOW = 0x7FFF0000
 SECCOMP_USER_NOTIF_FLAG_CONTINUE = 1
 LANDLOCK_CREATE_RULESET_VERSION = 1
 LANDLOCK_RULE_NET_PORT = 2
+LANDLOCK_ACCESS_NET_BIND_TCP = 1
 LANDLOCK_ACCESS_NET_CONNECT_TCP = 2
 MIN_LANDLOCK_ABI = 4
 AF_UNIX, AF_INET = 1, 2
@@ -71,10 +87,10 @@ BPF_LD_W_ABS, BPF_JEQ_K, BPF_JSET_K, BPF_AND_K, BPF_RET_K = 0x20, 0x15, 0x45, 0x
 
 ARCHES: Dict[str, Dict[str, Any]] = {
     "x86_64": {"audit": 0xC000003E, "x32": True, "seccomp": 317,
-               "nr": {"socket": 41, "connect": 42, "sendto": 44, "sendmsg": 46, "socketpair": 53, "ptrace": 101, "sendmmsg": 307, "process_vm_readv": 310,
+               "nr": {"socket": 41, "connect": 42, "listen": 50, "sendto": 44, "sendmsg": 46, "socketpair": 53, "ptrace": 101, "sendmmsg": 307, "process_vm_readv": 310,
                       "process_vm_writev": 311, "io_uring_setup": 425, "io_uring_enter": 426, "io_uring_register": 427, "pidfd_getfd": 438}},
     "aarch64": {"audit": 0xC00000B7, "x32": False, "seccomp": 277,
-                "nr": {"socket": 198, "socketpair": 199, "connect": 203, "sendto": 206, "sendmsg": 211, "ptrace": 117, "sendmmsg": 269, "process_vm_readv": 270,
+                "nr": {"socket": 198, "socketpair": 199, "listen": 201, "connect": 203, "sendto": 206, "sendmsg": 211, "ptrace": 117, "sendmmsg": 269, "process_vm_readv": 270,
                        "process_vm_writev": 271, "io_uring_setup": 425, "io_uring_enter": 426, "io_uring_register": 427, "pidfd_getfd": 438}},
 }
 _AF = {1: "AF_UNIX", 2: "AF_INET", 10: "AF_INET6", 16: "AF_NETLINK", 17: "AF_PACKET", 40: "AF_VSOCK", 0: "AF_UNSPEC"}
@@ -170,7 +186,7 @@ def build_filter(arch: str) -> bytes:
     a.ld(0)
     if spec["x32"]:
         a.jset(X32_SYSCALL_BIT, "kill", None)                           # the x32 call numbers are a second set of numbers for the same calls
-    for name in ("socket", "socketpair", "connect", "sendto", "sendmsg", "sendmmsg", "ptrace", "process_vm_readv", "process_vm_writev", "io_uring_setup", "io_uring_enter",
+    for name in ("socket", "socketpair", "connect", "listen", "sendto", "sendmsg", "sendmmsg", "ptrace", "process_vm_readv", "process_vm_writev", "io_uring_setup", "io_uring_enter",
                  "io_uring_register", "pidfd_getfd"):
         a.jeq(nr[name], "g_" + name, None)
     a.ret(SECCOMP_RET_ALLOW)
@@ -214,7 +230,7 @@ def build_filter(arch: str) -> bytes:
     a.label("g_sendmmsg")
     a.ld(_ARG_LO(3))
     a.jset(MSG_FASTOPEN, "notify", "allow")
-    for name in ("connect", "ptrace", "process_vm_readv", "process_vm_writev", "io_uring_setup", "io_uring_enter", "io_uring_register", "pidfd_getfd"):
+    for name in ("connect", "listen", "ptrace", "process_vm_readv", "process_vm_writev", "io_uring_setup", "io_uring_enter", "io_uring_register", "pidfd_getfd"):
         a.label("g_" + name)
         a.ret(SECCOMP_RET_USER_NOTIF)
     a.label("notify")
@@ -270,7 +286,8 @@ def _libc() -> Any:
     libc.syscall.restype = ctypes.c_long
     libc.ioctl.restype = ctypes.c_int
     libc.ioctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p]
-    libc.prctl.restype = ctypes.c_int
+    if hasattr(libc, "prctl"):                              # (not on macOS: the layers do not exist there, but the rest of this module can be imported and tested)
+        libc.prctl.restype = ctypes.c_int
     return libc
 
 
@@ -306,7 +323,8 @@ class Fence:
         self.layers = tuple(layers)
         self.facts = dict(facts)
         self._events: List[Dict[str, Any]] = []
-        self._overflow = 0
+        self._allow_omitted = 0
+        self._deny_omitted = 0
         self._lock = threading.Lock()
         self._fd: Optional[int] = None
         self._ready = threading.Event()
@@ -319,24 +337,35 @@ class Fence:
 
     # -- audit
     def events(self) -> List[Dict[str, Any]]:
+        """Every decision in order and, when records were left out, a closing ``summary`` record that says how many. A refusal is written until MAX_DENY_RECORDS, an allowed connect until the
+        lower MAX_ALLOW_RECORDS: the allowed ones are never the reason a refusal is missing."""
         with self._lock:
-            return [dict(e) for e in self._events]
+            rows = [dict(e) for e in self._events]
+            if self._allow_omitted or self._deny_omitted:
+                rows.append({"event": "summary", "allow_omitted": self._allow_omitted, "deny_omitted": self._deny_omitted})
+            return rows
 
     @property
     def denied(self) -> int:
         with self._lock:
-            return sum(1 for e in self._events if e["verdict"] == "deny") + self._overflow
+            return sum(1 for e in self._events if e["verdict"] == "deny") + self._deny_omitted
 
     def _record(self, **fields: Any) -> None:
         with self._lock:
-            if len(self._events) >= MAX_EVENTS:
-                self._overflow += 1 if fields.get("verdict") == "deny" else 0
+            verdict = fields.get("verdict")
+            allows = sum(1 for e in self._events if e["verdict"] == "allow")
+            denies = len(self._events) - allows
+            if verdict == "allow" and allows >= MAX_ALLOW_RECORDS:
+                self._allow_omitted += 1
+                return
+            if verdict != "allow" and denies >= MAX_DENY_RECORDS:
+                self._deny_omitted += 1 if verdict == "deny" else 0
                 return
             self._events.append({"seq": len(self._events) + 1, "layer": LAYER_SECCOMP, **fields})
 
     def _reset(self) -> None:
         with self._lock:
-            self._events, self._overflow = [], 0
+            self._events, self._allow_omitted, self._deny_omitted = [], 0, 0
 
     def header(self) -> Dict[str, Any]:
         """The first line of the lane's egress log: which layers were installed, on what, and what the self-test measured."""
@@ -380,6 +409,10 @@ class Fence:
             with self._lock:
                 self.lost = not self._stop.is_set()
                 self._events.append({"seq": len(self._events) + 1, "layer": LAYER_SECCOMP, "syscall": "supervisor", "verdict": "lost", "reason": type(exc).__name__})
+            try:
+                os.close(fd)                                                # a call that is waiting for an answer that will never come fails now (ENOTCONN) instead of at the deadline
+            except OSError:
+                pass
 
     def _refuse_after_error(self, fd: int, req: _Notif) -> None:
         self._record(verdict="deny", syscall=self._nr_name.get(req.data.nr, f"syscall-{req.data.nr}"), reason="decision-failed")
@@ -433,10 +466,61 @@ class Fence:
             return False, {"syscall": "connect", "family": "AF_UNIX", "address": path.decode("utf-8", "replace")[:100], "reason": "local-socket-connect-not-permitted"}
         return False, {"syscall": "connect", "family": _AF.get(family, f"AF_{family}"), "reason": "address-family-not-permitted"}
 
+    def reap_descendants(self, rounds: int = 100) -> int:
+        """End every process the lane child has as a descendant, whatever session or group it left to (the lane child is a subreaper, so what the engine detached and orphaned is a child of this
+        process by now), and reap them. Returns how many were ended. The lane's result is written after this: nothing that the engine started is left to rewrite it."""
+        ended = 0
+        me = os.getpid()
+        for _ in range(rounds):
+            victims = [p for p in _descendants(me)]
+            if not victims:
+                break
+            for pid in victims:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+            for pid in victims:
+                try:
+                    os.waitpid(pid, os.WNOHANG)
+                except ChildProcessError:
+                    pass
+                except OSError:
+                    pass
+            ended += len(victims)
+            time.sleep(0.02)
+        return ended
+
     def close(self) -> None:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
+
+
+def _descendants(root: int) -> List[int]:
+    """The processes whose parent chain leads to ``root`` (a snapshot of /proc; a process that is in the middle of exiting may be missed and is found by the next round)."""
+    children: Dict[int, List[int]] = {}
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return []
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/stat", "rb") as fh:
+                stat = fh.read().decode("utf-8", "replace")
+            ppid = int(stat.rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        children.setdefault(ppid, []).append(int(name))
+    found: List[int] = []
+    todo = [root]
+    while todo:
+        for child in children.get(todo.pop(), []):
+            found.append(child)
+            todo.append(child)
+    return found
 
 
 # ---- installing -----------------------------------------------------------------------------------------------------------------------
@@ -445,7 +529,7 @@ def _fail(reason: str, message: str) -> FenceUnavailable:
 
 
 def _install_landlock(libc: Any, ports: Iterable[int]) -> None:
-    attr = _LandlockRuleset(handled_access_fs=0, handled_access_net=LANDLOCK_ACCESS_NET_CONNECT_TCP)
+    attr = _LandlockRuleset(handled_access_fs=0, handled_access_net=LANDLOCK_ACCESS_NET_CONNECT_TCP | LANDLOCK_ACCESS_NET_BIND_TCP)       # no bind rule is added: every TCP bind is refused
     fd = libc.syscall(NR_LANDLOCK_CREATE, ctypes.byref(attr), ctypes.sizeof(attr), 0)
     if fd < 0:
         raise _fail("landlock-create-failed", f"landlock_create_ruleset failed ({os.strerror(ctypes.get_errno())})")
@@ -463,7 +547,7 @@ def _install_landlock(libc: Any, ports: Iterable[int]) -> None:
 def _install_seccomp(libc: Any, arch: str) -> int:
     sizes = _Sizes()
     if libc.syscall(ARCHES[arch]["seccomp"], SECCOMP_GET_NOTIF_SIZES, 0, ctypes.byref(sizes)) != 0:
-        raise _fail("seccomp-notification-unsupported", f"this kernel has no seccomp user notification ({os.strerror(ctypes.get_errno())})")
+        raise _fail("seccomp-notification-unsupported", f"seccomp user notification is not available: this kernel lacks it or a container's seccomp profile refuses it ({os.strerror(ctypes.get_errno())})")
     if (sizes.notif, sizes.notif_resp) != (ctypes.sizeof(_Notif), ctypes.sizeof(_Resp)):
         raise _fail("seccomp-layout-unknown", "the kernel's notification structures are not the ones this code knows")
     program = build_filter(arch)
@@ -490,7 +574,7 @@ def install(policy: Mapping[str, Any], *, layers: Sequence[str] = ALL_LAYERS) ->
     libc = _libc()
     facts = kernel_facts()
     if LAYER_LANDLOCK in layers and facts.get("landlock_abi", 0) < MIN_LANDLOCK_ABI:
-        raise _fail("landlock-network-rules-unavailable", f"Landlock network rules need ABI {MIN_LANDLOCK_ABI} or later (kernel 6.7 or later, Landlock enabled); this kernel reports {facts.get('landlock_abi', 0)}")
+        raise _fail("landlock-network-rules-unavailable", f"Landlock network rules need ABI {MIN_LANDLOCK_ABI} or later (kernel 6.7 or later with Landlock enabled, a native x86_64 host or VM, a container profile that allows the landlock calls); this host reports {facts.get('landlock_abi', 0)}")
     fence = Fence(arch, allowed, layers, facts)
     canary = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -500,6 +584,10 @@ def install(policy: Mapping[str, Any], *, layers: Sequence[str] = ALL_LAYERS) ->
             raise _fail("self-test-port-clash", "the self-test listener got a port of the allow-list")
         if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
             raise _fail("no-new-privs-failed", f"PR_SET_NO_NEW_PRIVS failed ({os.strerror(ctypes.get_errno())})")
+        if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:                    # a same-user engine cannot open /proc/<this process>/mem or attach to it, whatever the host's ptrace policy
+            raise _fail("dumpable-failed", f"PR_SET_DUMPABLE failed ({os.strerror(ctypes.get_errno())})")
+        if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:             # what the engine detaches and orphans becomes a child of this process, to be ended by reap_descendants
+            raise _fail("subreaper-failed", f"PR_SET_CHILD_SUBREAPER failed ({os.strerror(ctypes.get_errno())})")
         if LAYER_SECCOMP in layers:
             fence._start()                                                  # the supervisor thread must exist before the filter does: it is then not subject to it
         if LAYER_LANDLOCK in layers:
@@ -517,11 +605,11 @@ def install(policy: Mapping[str, Any], *, layers: Sequence[str] = ALL_LAYERS) ->
     return fence
 
 
-def _selftest(fence: Fence, tcp_addr: Tuple[str, int], layers: Sequence[str]) -> Dict[str, Any]:
+def _selftest(fence: Fence, tcp_addr: Tuple[str, int], layers: Sequence[str], make_socket: Any = socket.socket) -> Dict[str, Any]:
     """A listener the policy does not allow must refuse this very thread, and (with the seccomp layer) a UDP socket must be refused. Anything else means the layers are not doing what
     they are for, and ``FenceUnavailable`` is raised: the lane does not start."""
     result: Dict[str, Any] = {}
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s = make_socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(3)
     try:
         s.connect(tcp_addr)
@@ -535,7 +623,7 @@ def _selftest(fence: Fence, tcp_addr: Tuple[str, int], layers: Sequence[str]) ->
         s.close()
     if LAYER_SECCOMP in layers:
         try:
-            socket.socket(socket.AF_INET, socket.SOCK_DGRAM).close()
+            make_socket(socket.AF_INET, socket.SOCK_DGRAM).close()
             result["udp_refused"] = False
         except PermissionError:
             result["udp_refused"] = True
@@ -548,11 +636,19 @@ def _selftest(fence: Fence, tcp_addr: Tuple[str, int], layers: Sequence[str]) ->
 
 # ---- measuring this host (doctor, the run's preflight) ---------------------------------------------------------------------------------------
 _PROBE = "--probe"
+PROBE_SETS = {"both": ALL_LAYERS, "seccomp": (LAYER_SECCOMP,), "landlock": (LAYER_LANDLOCK,)}
 
 
-def probe_main() -> int:
-    """Run in a throwaway child: install the layers around a synthetic allow-list (one loopback listener), then try what must pass and what must be refused, and print one JSON line."""
-    out: Dict[str, Any] = {"facts": kernel_facts()}
+def all_ok(checks: Mapping[str, Any]) -> bool:
+    """Every check passed: a probe with no check at all, or with one that is not exactly True, is not ok."""
+    return bool(checks) and all(v is True for v in checks.values())
+
+
+def probe_main(which: str = "both") -> int:
+    """Run in a throwaway child: install one set of layers (both, or each alone: whether Landlock enforces by itself is measured here, where the seccomp layer cannot refuse first) around a
+    synthetic allow-list (one loopback listener), then try what must pass and what must be refused, and print one JSON line."""
+    layers = PROBE_SETS[which]
+    out: Dict[str, Any] = {"facts": kernel_facts(), "set": which}
     allowed_l = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     other_l = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -563,7 +659,7 @@ def probe_main() -> int:
         port = allowed_l.getsockname()[1]
         policy = {"private": [{"host": "127.0.0.1", "networks": ["127.0.0.1/32"], "schemes": ["http"], "ports": [port], "label": "probe"}]}
         try:
-            fence = install(policy)
+            fence = install(policy, layers=layers)
         except FenceUnavailable as exc:
             out.update(ok=False, reason=exc.reason, message=exc.message[:300])
             print(json.dumps(out, sort_keys=True))
@@ -578,17 +674,41 @@ def probe_main() -> int:
             checks["allowed_connect_works"] = False
         finally:
             c.close()
-        for name, fn in (("other_port_refused", lambda: socket.create_connection(("127.0.0.1", other_l.getsockname()[1]), timeout=3)),
-                         ("udp_refused", lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM)),
-                         ("ipv6_refused", lambda: socket.socket(socket.AF_INET6, socket.SOCK_STREAM))):
+
+        def refused(fn: Any) -> bool:
             try:
                 fn().close()
-                checks[name] = False
+                return False
             except PermissionError:
-                checks[name] = True
+                return True
             except OSError:
-                checks[name] = False
-        out.update(ok=all(checks.values()), checks=checks, layers=list(fence.layers), selftest=fence.selftest)
+                return False
+
+        def bind_port_0() -> socket.socket:
+            b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                b.bind(("127.0.0.1", 0))
+            except BaseException:
+                b.close()
+                raise
+            return b
+
+        def listen_socket() -> socket.socket:
+            b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                b.listen(1)
+            except BaseException:
+                b.close()
+                raise
+            return b
+        checks["other_port_refused"] = refused(lambda: socket.create_connection(("127.0.0.1", other_l.getsockname()[1]), timeout=3))
+        if LAYER_SECCOMP in layers:
+            checks["udp_refused"] = refused(lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM))
+            checks["ipv6_refused"] = refused(lambda: socket.socket(socket.AF_INET6, socket.SOCK_STREAM))
+            checks["listen_refused"] = refused(listen_socket)
+        if LAYER_LANDLOCK in layers:
+            checks["bind_refused"] = refused(bind_port_0)
+        out.update(ok=all_ok(checks), checks=checks, layers=list(fence.layers), selftest=fence.selftest)
         fence.close()
     finally:
         allowed_l.close()
@@ -597,20 +717,33 @@ def probe_main() -> int:
     return 0
 
 
-def probe(timeout_s: float = 30.0) -> Dict[str, Any]:
-    """Measure whether the layers work on this host, in a child process (the layers cannot be taken off the process that installs them). The result always has ``ok``; ``reason`` and
-    ``message`` say why not."""
+def _probe_one(which: str, timeout_s: float) -> Dict[str, Any]:
     import subprocess
+    done = subprocess.run([sys.executable, "-s", "-m", "qa_runner.netfence", _PROBE, which], capture_output=True, text=True, timeout=timeout_s,
+                          env={"PATH": "/usr/bin:/bin", "PYTHONPATH": os.pathsep.join(p for p in sys.path if p and os.path.isdir(p))})
+    doc = json.loads(done.stdout.strip().splitlines()[-1])
+    if not isinstance(doc, dict) or "ok" not in doc:
+        raise ValueError("not a probe result")
+    return doc
+
+
+def probe(timeout_s: float = 30.0) -> Dict[str, Any]:
+    """Measure whether the layers work on this host, in throwaway child processes (the layers cannot be taken off the process that installs them): each layer ALONE first (so that a layer that
+    does not enforce by itself is not hidden by the other one), then both. The result always has ``ok``; ``reason`` and ``message`` say why not; ``checks`` are those of the two layers
+    together, ``per_set`` holds all three."""
+    per_set: Dict[str, Any] = {}
     try:
-        done = subprocess.run([sys.executable, "-s", "-m", "qa_runner.netfence", _PROBE], capture_output=True, text=True, timeout=timeout_s,
-                              env={"PATH": "/usr/bin:/bin", "PYTHONPATH": os.pathsep.join(p for p in sys.path if p and os.path.isdir(p))})
-        doc = json.loads(done.stdout.strip().splitlines()[-1])
-        if not isinstance(doc, dict) or "ok" not in doc:
-            raise ValueError("not a probe result")
-        return doc
+        for which in ("landlock", "seccomp", "both"):
+            doc = _probe_one(which, timeout_s)
+            per_set[which] = doc
+            if doc.get("ok") is not True:
+                return {"ok": False, "reason": doc.get("reason", "layer-check-failed"), "message": str(doc.get("message") or f"the checks of the {which} layer(s) did not all pass: {doc.get('checks')}")[:300],
+                        "facts": doc.get("facts") or kernel_facts(), "per_set": per_set}
+        both = per_set["both"]
+        return {"ok": True, "facts": both["facts"], "checks": both["checks"], "layers": both["layers"], "selftest": both["selftest"], "per_set": per_set}
     except Exception as exc:
-        return {"ok": False, "reason": "probe-failed", "message": f"the probe could not run ({type(exc).__name__})", "facts": kernel_facts()}
+        return {"ok": False, "reason": "probe-failed", "message": f"the probe could not run ({type(exc).__name__})", "facts": kernel_facts(), "per_set": per_set}
 
 
 if __name__ == "__main__":
-    sys.exit(probe_main() if sys.argv[1:] == [_PROBE] else 2)
+    sys.exit(probe_main(sys.argv[2] if len(sys.argv) == 3 else "both") if sys.argv[1:2] == [_PROBE] and (len(sys.argv) == 2 or sys.argv[2] in PROBE_SETS) else 2)

@@ -7,6 +7,7 @@ import shutil
 import socket
 import threading
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,9 @@ from qa_runner.orchestrate import RunOptions, run_plan
 from qa_runner.plan import freeze_plan
 
 from qr_tamper import codes, edit_json, forge_consistently, put, rechain, verify_files_in
+
+
+ORIGINAL_SUITE = suites.SUITE_DIR                       # the reviewed suite, whatever another fixture has patched in since
 
 
 class Listener:
@@ -48,14 +52,20 @@ class Listener:
         self.sock.close()
 
 
-def hostile_copy(tmp_path, monkeypatch, port):
+REWRITER_SOURCE = (Path(__file__).resolve().parent / "hostile_suite" / "HostileLib.py").read_text().split('REWRITER = r"""')[1].split('"""')[0]
+
+
+def hostile_copy(tmp_path, monkeypatch, port, rewriter=False):
     """The reviewed suite with ONE change: after asking the app for an order, its library tries to reach a hostile loopback port (and swallows the error, so Robot itself reports PASS)."""
     copy = tmp_path / "suite"
-    shutil.copytree(suites.SUITE_DIR, copy)
+    shutil.copytree(ORIGINAL_SUITE, copy)
     api = (copy / "OrderApi.py").read_text()
     anchor = '    total = body.get("total_cents")\n'
     assert anchor in api
     attempt = f"    try:\n        import socket\n        socket.create_connection(('127.0.0.1', {port}), timeout=2).close()\n    except OSError:\n        pass\n"
+    if rewriter:                                                 # and a process in a session of its own that rewrites the lane child's outcome once it is written (the out directory is next to the workspace)
+        attempt += ("    import os, subprocess, sys\n    subprocess.Popen([sys.executable, '-I', '-c', " + repr(REWRITER_SOURCE) + ", os.path.normpath(os.path.join(os.getcwd(), '..', 'out'))],\n"
+                    "                     start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n")
     (copy / "OrderApi.py").write_text(api.replace(anchor, attempt + anchor))
     monkeypatch.setattr(suites, "SUITE_DIR", copy)
 
@@ -76,6 +86,22 @@ def hostile(up, tmp_path_factory):
         hostile_copy(tmp, mp, listener.port)
         frozen = freeze_plan(up, robot_plan())
         summary = run_plan(up, frozen, RunOptions(defect="none", run_id="r0-hostile", lane_deadline_s=120))
+        yield frozen, summary, listener
+    finally:
+        mp.undo()
+        listener.close()
+
+
+@pytest.fixture(scope="module")
+def hostile_rewriter(up, tmp_path_factory):
+    """The same run with a library that also leaves a detached process behind to rewrite the lane's outcome (a pass, no refusal, a log without one)."""
+    tmp = tmp_path_factory.mktemp("hostile_rewriter")
+    listener = Listener()
+    mp = pytest.MonkeyPatch()
+    try:
+        hostile_copy(tmp, mp, listener.port, rewriter=True)
+        frozen = freeze_plan(up, robot_plan())
+        summary = run_plan(up, frozen, RunOptions(defect="none", run_id="r0-rewriter", lane_deadline_s=120))
         yield frozen, summary, listener
     finally:
         mp.undo()
@@ -177,6 +203,11 @@ def _add_allow(data):
     return data + (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def _add_allow_on_another_port(data):
+    row = {"seq": len(data.decode().splitlines()), "layer": egresslog.LAYER_SECCOMP, "syscall": "connect", "verdict": "allow", "reason": "in-allow-list", "family": "AF_INET", "address": "127.0.0.1", "port": 1}
+    return data + (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
 CASES = [
     ("the lane relabelled as a completed pass, everything recomputed", _lane(lambda o: replace(o, native_status="NATIVE_PASS", raw_status="PASS", exit_code=0, counts={"passed": 1, "failed": 0, "errored": 0, "skipped": 0})),
      ("EGRESS_DENIAL_NOT_REFLECTED",)),
@@ -186,6 +217,7 @@ CASES = [
     ("the log claims another allow-list", _lane(_edit_log(_edit_header(allowed=["127.0.0.1/32:1"]))), ("EGRESS_MECHANISM_WRONG",)),
     ("the log claims a self-test that did not pass", _lane(_edit_log(_edit_header(selftest={"forbidden_tcp_refused": False, "udp_refused": True}))), ("EGRESS_MECHANISM_WRONG",)),
     ("an allowed connect to an address outside the allow-list added to the log", _lane(_edit_log(_add_allow)), ("EGRESS_ALLOW_OUTSIDE_POLICY",)),
+    ("an allowed connect to the right address on another port added to the log", _lane(_edit_log(_add_allow_on_another_port)), ("EGRESS_ALLOW_OUTSIDE_POLICY",)),
     ("a record of the log that is not a decision", _lane(_edit_log(lambda d: d + b'{"nonsense":1}\n')), ("EGRESS_LOG_MALFORMED",)),
 ]
 
@@ -215,3 +247,32 @@ def test_the_extension_count_cannot_be_changed_and_the_statement_cannot_be_swapp
     v = verify_files_in(tmp_path, rechain(edit_json(dict(s.bundle.files), "report.json", lambda r: [x.update(id=K.ROBOT_EGRESS_LIMITATION_ID, text=K.robot_egress_limitation_text(["robot"])) for x in r["limitations"]
                                                                                                 if x["id"] == K.ROBOT_EGRESS_LAYERS_ID])))
     assert not v.accepted and "EGRESS_STATEMENT_WRONG" in codes(v)
+
+
+# ---- a process the library detaches cannot erase a refusal -----------------------------------------------------------------------------------------
+def test_a_detached_process_that_rewrites_the_lane_child_s_outcome_cannot_turn_a_refused_lane_into_a_pass(hostile_rewriter, tmp_path):
+    frozen, s, listener = hostile_rewriter
+    r = report(s)
+    assert s.lanes == (("robot", "NATIVE_ERROR"),) and r["lanes"][0]["native"]["raw_status"] == "egress-denied" and s.outcome == "INCONCLUSIVE" and listener.hits == 0
+    assert r["extensions"]["egress_fence_denied"] == 4
+    header, events, problems = egresslog.parse(s.bundle.files["lanes/robot/egress-log.jsonl"])
+    assert not problems and egresslog.denied(events) == 4, events
+    v = verify_files_in(tmp_path, s.bundle.files, plan_digest=frozen.plan_digest)
+    assert v.accepted and not v.findings, [f.to_json() for f in v.findings]
+
+
+def test_an_honest_bundle_of_a_lane_that_lost_its_supervisor_is_accepted_and_one_that_hides_the_loss_is_not(clean, up, tmp_path):
+    """The lane child ends as egress-fence-lost when its supervisor dies: a bundle that says so, with the loss in the log, is accepted; the same log under a lane reported as completed is not."""
+    frozen, s = clean
+    lost = {"seq": 1, "layer": egresslog.LAYER_SECCOMP, "syscall": "supervisor", "verdict": "lost", "reason": "RuntimeError"}
+
+    def with_lost(o):
+        files = dict(o.files)
+        head = files["lanes/robot/egress-log.jsonl"][0].decode().splitlines()[0]
+        files["lanes/robot/egress-log.jsonl"] = ((head + "\n" + json.dumps(lost, sort_keys=True, separators=(",", ":")) + "\n").encode(), "log")
+        return files
+    honest = forge_consistently(up, dict(s.bundle.files), edit_lane=lambda lid, o: replace(o, files=with_lost(o), native_status="NATIVE_ERROR", raw_status="egress-fence-lost", exit_code=None, counts=None))
+    v = verify_files_in(tmp_path, honest)
+    assert v.accepted and not v.findings, [f.to_json() for f in v.findings]
+    hiding = forge_consistently(up, dict(s.bundle.files), edit_lane=lambda lid, o: replace(o, files=with_lost(o)))
+    assert "EGRESS_DENIAL_NOT_REFLECTED" in codes(verify_files_in(tmp_path, hiding))

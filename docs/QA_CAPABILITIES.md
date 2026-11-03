@@ -52,7 +52,7 @@ Limitations:
 
 * The target is the bundled fixture app: this release runs plans against it only, not against an arbitrary application.
 * Linux x86_64 only; Playwright with Chromium only; Selenium and Appium are not part of this workflow.
-* The browser lane's traffic goes through the egress gateway; a Robot lane that asks for the kernel layers (`origin-only`) is limited by them instead, with the limits the report states (a second thread can change a connect address to another one on the allowed port; files, pipes and processes are not confined), and does not start where they are unavailable; a Robot lane that says `not-enforced` is limited by nothing.
+* The browser lane's traffic goes through the egress gateway; a Robot lane that asks for the kernel layers (`origin-only`) is limited by them instead, with the limits the report states (against a hostile library only the port is enforced: a second thread can change a connect address to another one on the allowed port; files, pipes and processes are not confined), and does not start where they are unavailable; a Robot lane that says `not-enforced` is limited by nothing.
 * The pinned bundle's install and the public CI demo are run by CI jobs added after this evidence; they get their own rows once a run on the main branch backs them.
 
 ### Re-verification of a finished run from its evidence bundle alone (`redevops-qa verify`)

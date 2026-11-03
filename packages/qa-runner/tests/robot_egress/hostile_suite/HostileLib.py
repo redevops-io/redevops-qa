@@ -243,6 +243,115 @@ def a_bad_address():
     return {"reached": r == 0, "errno": err}
 
 
+def _listen(bind_first):
+    """Inbound: a listening socket on every address (the lane could then accept a connection from an outside peer and send data on it)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if bind_first:
+            s.bind(("0.0.0.0", 0))
+        s.listen(1)
+        s.close()
+        return {"reached": True}
+    except OSError as exc:
+        return {"reached": False, "error": type(exc).__name__}
+
+
+def a_listen_bound():
+    return _listen(True)
+
+
+def a_listen_unbound():
+    """listen() on a socket that was never bound picks a port by itself: no bind call is made."""
+    return _listen(False)
+
+
+def _stream_protocol(proto):
+    try:
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM, proto).close()
+        return {"reached": True}
+    except OSError as exc:
+        return {"reached": False, "error": type(exc).__name__}
+
+
+def a_mptcp():
+    return _stream_protocol(262)
+
+
+def a_sctp():
+    return _stream_protocol(132)
+
+
+def a_proc_exposure():
+    """The engine's parent is the lane child (it holds the supervisor): can this process open its memory, or are its /proc/<pid>/mem file this user's (the process is dumpable: a non-dumpable process
+    owns them as root, whatever the host's ptrace policy says)?"""
+    ppid = os.getppid()
+    try:
+        with open(f"/proc/{ppid}/mem", "rb") as fh:
+            fh.seek(0x400000)
+        return {"reached": True, "how": "opened /proc/ppid/mem"}
+    except OSError as exc:
+        err = type(exc).__name__
+    owned = os.getuid() != 0 and os.stat(f"/proc/{ppid}/mem").st_uid == os.getuid()
+    return {"reached": owned, "how": "/proc/ppid/mem owned by this user" if owned else err}
+
+
+def a_race_other_address():
+    """The race of a_race, but between the allowed address and ANOTHER loopback address on the allowed port (a listener there counts what arrives)."""
+    shared = mmap.mmap(-1, 16)
+    good, other = _sockaddr("127.0.0.1", W["allowed_port"]), _sockaddr("127.0.0.3", W["allowed_port"])
+    shared[0:16] = good
+    pid = os.fork()
+    if pid == 0:
+        end = time.monotonic() + 6.0
+        while time.monotonic() < end:
+            shared[0:16] = other
+            shared[0:16] = good
+        os._exit(0)
+    addr = ctypes.addressof((ctypes.c_char * 16).from_buffer(shared))
+    attempts = W["race_attempts"]
+    for _ in range(attempts):
+        fd = LIBC.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+        LIBC.connect(fd, ctypes.c_void_p(addr), 16)
+        os.close(fd)
+    os.kill(pid, 9)
+    os.waitpid(pid, 0)
+    return {"reached": False, "attempts": attempts}
+
+
+def a_detached_survivor():
+    """Leave a process behind in a session of its own (it is not in the engine's process group): it must not outlive the lane."""
+    p = subprocess.Popen(["/bin/sleep", "300"], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {"reached": False, "pid": p.pid}
+
+
+REWRITER = r"""
+import json, os, sys, time
+out = sys.argv[1]
+path = os.path.join(out, "outcome.json")
+while not os.path.exists(path):
+    time.sleep(0.001)
+for _ in range(2000):
+    try:
+        doc = json.load(open(path))
+        doc["native_status"], doc["raw_status"], doc["egress"] = "NATIVE_PASS", "PASS", {"fence_denied": 0}
+        for name, meta in doc["files"].items():
+            if name.endswith("egress-log.jsonl"):
+                ref = os.path.join(out, meta["data"])
+                lines = open(ref, "rb").read().splitlines(True)
+                open(ref, "wb").write(lines[0])
+        json.dump(doc, open(path, "w"))
+    except (OSError, ValueError, KeyError):
+        pass
+    time.sleep(0.0005)
+"""
+
+
+def a_detached_rewriter():
+    """A process in a session of its own that waits for the lane child to write its outcome and then rewrites it: a pass, no refusals, a log with no refusal in it."""
+    subprocess.Popen([sys.executable, "-I", "-c", REWRITER, W["out_dir"]], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {"reached": False}
+
+
 def a_fast_open():
     """TCP Fast Open: the first data goes out WITH the connection attempt, no connect() call."""
     try:
@@ -308,8 +417,8 @@ def a_allowed_origin():
         return {"reached": False, "error": type(exc).__name__}
 
 
-ATTACKS = [a_allowed_origin, a_bad_address, a_direct, a_ip_literal_http, a_same_port_other_ip, a_zero_address, a_dns_udp_query, a_dns_rebind, a_dns_tcp_query, a_getaddrinfo, a_redirect, a_raw_socket, a_udp, a_ipv6,
-           a_subprocess_curl, a_subprocess_python, a_subprocess_bash, a_ctypes_connect, a_raw_syscall, a_thread, a_import_time, a_proxy_env, a_unix_stream, a_unix_dgram, a_unix_dgram_pair, a_udp6, a_fast_open, a_fast_open_sendmsg, a_io_uring, a_race]
+ATTACKS = [a_allowed_origin, a_bad_address, a_listen_bound, a_listen_unbound, a_mptcp, a_sctp, a_proc_exposure, a_race_other_address, a_detached_survivor, a_direct, a_ip_literal_http, a_same_port_other_ip, a_zero_address, a_dns_udp_query, a_dns_rebind, a_dns_tcp_query, a_getaddrinfo, a_redirect, a_raw_socket, a_udp, a_ipv6,
+           a_subprocess_curl, a_subprocess_python, a_subprocess_bash, a_ctypes_connect, a_raw_syscall, a_thread, a_import_time, a_proxy_env, a_unix_stream, a_unix_dgram, a_unix_dgram_pair, a_udp6, a_fast_open, a_fast_open_sendmsg, a_io_uring, a_race, a_detached_rewriter]
 
 
 def run_all_attacks():
