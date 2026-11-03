@@ -451,3 +451,10 @@ def test_an_install_whose_install_json_lacks_the_notices_index_digest_fails_what
     assert doctor.check_third_party_notices(str(prefix)).status == "FAIL"        # nor does an unreadable file
     add_notices(prefix)
     assert doctor.check_third_party_notices(str(prefix)).status == "OK"
+
+
+def test_doctor_runs_both_the_browser_build_check_and_the_notices_check_in_a_bundle_install():
+    import inspect
+    src = inspect.getsource(doctor.run_doctor)
+    assert "check_third_party_notices" in src and "check_browser_pin" in src
+    assert doctor.check_third_party_notices(None).name == "third-party notices"

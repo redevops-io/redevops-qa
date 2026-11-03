@@ -553,5 +553,7 @@ def test_install_puts_the_notices_tree_under_share_redevops_qa_and_records_the_i
     info = json.loads((prefix / "INSTALL.json").read_text())
     assert info["third_party_notices_index_sha256"] == hashlib.sha256((shipped / "INDEX.json").read_bytes()).hexdigest()
     assert json.loads((noticed_bundle / "BUNDLE.json").read_text())["third_party_notices"]["index_sha256"] == info["third_party_notices_index_sha256"]
+    assert info["browser_lock_sha256"] == hashlib.sha256((noticed_bundle / "browser.lock.json").read_bytes()).hexdigest()           # the browser pin and the notices are both recorded: neither replaced the other
+    assert info["schema_version"] == "1.0" and set(info) >= {"third_party_notices_index_sha256", "browser_lock_sha256", "bundle_json_sha256", "entries"}
     gone = run_script(noticed_bundle, "uninstall.sh", ["--prefix", str(prefix)], box / "home")
     assert gone.returncode == 0 and not prefix.exists(), gone.stderr                 # an extra key in INSTALL.json does not make uninstall refuse
