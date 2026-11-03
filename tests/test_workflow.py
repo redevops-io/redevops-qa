@@ -49,7 +49,20 @@ def test_the_bridge_job_fails_on_zero_tests_or_skips():
 
 @pytest.mark.parametrize("word", ["secrets.", "token", "qa_pins_read_token", "pat:", "password"])
 def test_the_workflow_uses_no_secret_and_no_token(word):
-    assert word not in TEXT.lower().replace("no token input", "").replace("no secret and no token", "")
+    allowed = TEXT.lower().replace("no token input", "").replace("no secret and no token", "")
+    if word == "token":
+        # The one use: the workflow's own built-in credential, handed to the install-profiles check so that it can read the logs of the runs it records.
+        allowed = allowed.replace("gh_token: ${{ github.token }}", "").replace('gh_token="$gh_token"', "")
+    assert word not in allowed
+
+
+def test_the_only_credential_is_the_built_in_one_with_read_access_to_runs_and_only_in_the_install_profiles_check():
+    job = WF["jobs"]["install-profiles"]
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    users = [(name, s) for name, j in WF["jobs"].items() for s in j["steps"] if "github.token" in str(s) or "GH_TOKEN" in str(s)]
+    assert [(n, s["env"]) for n, s in users] == [("install-profiles", {"GH_TOKEN": "${{ github.token }}"})]
+    assert "--verify-ci" in users[0][1]["run"] and "python tools/check_install_profiles.py" in users[0][1]["run"]
+    assert [n for n, j in WF["jobs"].items() if "actions" in j.get("permissions", {})] == ["install-profiles"]
 
 
 def test_the_pinned_trees_are_fetched_at_the_commit_named_in_pins_toml():
