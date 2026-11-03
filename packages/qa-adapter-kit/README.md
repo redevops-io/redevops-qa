@@ -47,7 +47,7 @@ verify its own result. Evidence cannot be constructed with an oracle status.
 | Sealed runs | The pinned files in the manifest are hashed first; installers and downloaders (`pip`, `npm`, `curl`, `git`, `python -m pip`, ...) cannot start; an adapter that declares `downloads` is refused. |
 
 Not enforced here: network isolation (`AdapterManifest.network` is a declaration for the worker) and confinement of file writes by
-the started process. POSIX only (process groups). An interactive action is bounded by a worker thread and its deadline: a timed-out
+the started process. (The runner's Robot lane limits network egress itself, with kernel layers installed on its own process before it starts the engine: see `packages/qa-runner`; nothing in this kit does.) POSIX only (process groups). An interactive action is bounded by a worker thread and its deadline: a timed-out
 action cannot be pre-empted, so the adapter is asked to `abort()` and the session is closed.
 
 ## Fakes and tests

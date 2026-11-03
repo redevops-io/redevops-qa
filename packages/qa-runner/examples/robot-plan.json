@@ -2,7 +2,7 @@
   "lanes": [
     {
       "deadline_s": 120,
-      "egress": "not-enforced",
+      "egress": "origin-only",
       "engine": "robot-framework",
       "lane_id": "robot",
       "probes": {

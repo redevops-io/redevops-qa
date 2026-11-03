@@ -46,7 +46,7 @@ class LaneOutcome:
     counts: Optional[Mapping[str, int]] = None
     harness_verdicts: Mapping[str, str] = field(default_factory=dict)         # in-run verdicts of the harness verifier (a cross-check, never the source)
     double: bool = False                                                      # produced by a test double (a test seam): such a lane can never carry a verdict
-    egress: Mapping[str, int] = field(default_factory=dict)                   # denials counted by the egress layers (gateway, in-browser gate), when the lane has them
+    egress: Mapping[str, int] = field(default_factory=dict)                   # denials counted by the egress layers (gateway, in-browser gate, the Robot lane's kernel layers), when the lane has them
     chromium: Optional[str] = None                                            # the browser build the lane reports (informational)
 
 
@@ -76,10 +76,18 @@ def _lane_entry(run_id: str, lane: LaneOutcome) -> Dict[str, Any]:
 
 
 def extra_limitations(frozen: FrozenPlan) -> List[Dict[str, str]]:
-    """The limitations a run's report carries beyond the standard ones: today the statement that egress is not enforced for a Robot lane. It is derived from the PLAN (the lanes that name the
-    Robot engine), so ``verify`` can require exactly this text from the same plan."""
-    robot = [l.lane_id for l in frozen.lanes if l.engine == K.ENGINE_ROBOT]
-    return [{"id": K.ROBOT_EGRESS_LIMITATION_ID, "text": K.robot_egress_limitation_text(robot)}] if robot else []
+    """The limitations a run's report carries beyond the standard ones: what limits the egress of the plan's Robot lanes, per profile. A lane that names ``not-enforced`` gets the statement that egress is not
+    enforced for it; a lane that names ``origin-only`` gets the statement of the kernel layers and of what they do not stop. Both are derived from the PLAN (the lanes that name the Robot engine and
+    their profile), so ``verify`` can require exactly this text from the same plan."""
+    robot = [l for l in frozen.lanes if l.engine == K.ENGINE_ROBOT]
+    open_lanes = [l.lane_id for l in robot if l.egress == "not-enforced"]
+    fenced = [l.lane_id for l in robot if l.egress == "origin-only"]
+    out: List[Dict[str, str]] = []
+    if open_lanes:
+        out.append({"id": K.ROBOT_EGRESS_LIMITATION_ID, "text": K.robot_egress_limitation_text(open_lanes)})
+    if fenced:
+        out.append({"id": K.ROBOT_EGRESS_LAYERS_ID, "text": K.robot_egress_layers_text(fenced)})
+    return out
 
 
 def finalize_results(judged: List[Dict[str, Any]], native_status: str, double: bool, harness_verdicts: Mapping[str, str], incomplete: bool = False) -> List[Dict[str, Any]]:

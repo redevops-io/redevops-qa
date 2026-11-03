@@ -13,7 +13,7 @@ from qa_runner.cli import main
 from qa_runner.procs import child_env
 from qr_tamper import GOLDEN, codes, golden, manifest_digest, verify_files_in
 
-PLAN_DIGEST = "sha256:3e53d5b170e6541bd7fb37188a17c99c766af1d161d5aed452af68a56e68b943"
+PLAN_DIGEST = "sha256:67f553bab6744a83ea8f39b8759d15b8b1a3e7dabdd888c3e4bbc86ae4eb444c"
 
 
 def cli(*argv):

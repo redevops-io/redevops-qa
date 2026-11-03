@@ -20,7 +20,7 @@ OTHER_SRC = ("qa-bridge", "qa-playwright", "qa-egress", "qa-adapter-kit", "qa-ch
 def _run(work: Path, tests: Sequence[str]) -> subprocess.CompletedProcess:
     paths = [str(work / "src"), str(work / "kit")] + [str(ROOT / "packages" / p / "src") for p in OTHER_SRC if p != "qa-adapter-kit"]
     ini = work / "mutant.ini"
-    ini.write_text("[pytest]\npythonpath = %s\naddopts = -p no:cacheprovider -q -x\nfilterwarnings = error\n" % " ".join(paths), encoding="utf-8")
+    ini.write_text("[pytest]\npythonpath = %s\naddopts = -p no:cacheprovider -q -x\nfilterwarnings = error\nmarkers =\n    robot_egress: the Robot egress experiments (Linux, Robot Framework installed)\n" % " ".join(paths), encoding="utf-8")
     env = {k: os.environ[k] for k in KEEP_ENV if k in os.environ}
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     cmd = [sys.executable, "-m", "pytest", "-c", str(ini), "--rootdir", str(work), *[str(PKG / "tests" / t) for t in tests]]

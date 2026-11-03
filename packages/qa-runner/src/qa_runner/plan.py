@@ -46,8 +46,10 @@ FACT_COVERS = {
     "discount-rule": {"engine": K.ENGINE_ROBOT, "check_program": "evidence.robot-observations",
                       "says": "a Robot lane's assertion read by the evidence.robot-observations program (the order totals the discount rule produces)"},
 }
-#: what traffic of an engine is controlled by: only the browser's traffic passes the egress gateway; a Robot library opens its own sockets, so a Robot lane says so
-EGRESS_PROFILES = {K.ENGINE_PLAYWRIGHT: ("origin-only",), K.ENGINE_ROBOT: ("not-enforced",)}
+#: what limits the traffic of an engine: the browser's traffic passes the egress gateway (``origin-only``); a Robot lane is limited by kernel layers installed on its process before the engine
+#: starts (``origin-only`` again: the same allow-list, one loopback origin; the lane does not start if the layers cannot be installed), or, when the plan says ``not-enforced``, by nothing
+#: (a Robot library opens its own sockets, and the report says so)
+EGRESS_PROFILES = {K.ENGINE_PLAYWRIGHT: ("origin-only",), K.ENGINE_ROBOT: ("origin-only", "not-enforced")}
 TARGET_KINDS = ("fixture-app",)
 MAX_PLAN_BYTES = 1024 * 1024
 

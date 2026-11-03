@@ -247,10 +247,11 @@ def test_the_runner_egress_job_runs_only_the_egress_tests_in_a_scrubbed_environm
     assert "-m egress" not in offline
 
 
-def test_the_runner_documentation_says_robot_egress_is_not_enforced_and_what_the_egress_tests_do_not_show():
+def test_the_runner_documentation_says_what_limits_robot_egress_and_what_it_does_not_stop_and_what_the_egress_tests_do_not_show():
     text = (ROOT / "packages" / "qa-runner" / "README.md").read_text(encoding="utf-8")
-    for needle in ("Robot lane: egress is NOT enforced", "guard, not a sandbox", "egress-not-enforced-robot", "What is not shown", "fails closed"):
-        assert needle in text
+    for needle in ("Robot lane: kernel layers, not the gateway", "guard, not a sandbox", "egress-layers-robot", "egress-not-enforced-robot", "What the layers do not stop", "Egress matrix by engine",
+                   "There is no weaker mode", "Nothing was started", "What is not shown", "fails closed", "not-enforced"):
+        assert needle in text, needle
     assert "tamper-proof" not in text.lower()
 
 

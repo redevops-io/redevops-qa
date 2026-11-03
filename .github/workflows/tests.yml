@@ -370,6 +370,76 @@ jobs:
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
+  runner-robot-egress:
+    name: runner Robot egress lane (Linux x86_64; Robot Framework 7.5 pinned; a hostile Robot library against the kernel layers of the Robot lane, with no layer, each layer alone and both, and the same as root in an ubuntu:24.04 container; mutation of each layer; a missing Robot Framework or kernel feature fails, never skips)
+    # Hostile LOOPBACK listeners and a hostile Robot library inside the real lane child (qa_runner.lane_robot): every attempt is counted by the listener it aims at, never by what the library says. The control (no layer)
+    # must reach, the lane's layers must not, and each layer alone shows what it does and does not stop. The same experiments run as root in an ubuntu:24.04 container with Docker's default options. No browser, no secret,
+    # nothing leaves the machine: the listeners and the library use the loopback interface only.
+    runs-on: ubuntu-24.04
+    needs: pins
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Read the pinned commits
+        id: pins
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
+      - name: Fetch runtime-contracts at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.contracts_repo }}
+          ref: ${{ steps.pins.outputs.contracts_commit }}
+          path: ${{ steps.pins.outputs.contracts_path }}
+          persist-credentials: false
+      - name: Fetch agent-harness at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pins.outputs.harness_qa_repo }}
+          ref: ${{ steps.pins.outputs.harness_qa_commit }}
+          path: ${{ steps.pins.outputs.harness_qa_path }}
+          persist-credentials: false
+      - name: Verify the fetched trees are exactly the pins (HEAD, clean, tree digest, vector digests)
+        run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --verify-trees --require-git
+      - name: Install the pinned test tools and Robot Framework
+        run: python -m pip install "pytest>=8,<10" "pyyaml>=6,<7" "robotframework==7.5"
+      - name: Fail unless the pinned Robot Framework is importable
+        run: python -c "import importlib.metadata as m, robot; assert m.version('robotframework') == '7.5', m.version('robotframework')"
+      - name: What this host offers the layers (informational; the experiments decide)
+        run: |
+          uname -srm
+          cat /sys/kernel/security/lsm; echo
+          for f in kernel/apparmor_restrict_unprivileged_userns kernel/yama/ptrace_scope; do echo -n "$f="; cat /proc/sys/$f; done
+          unshare -Urn true || echo "an unprivileged user and network namespace is not available here (the layers do not use one)"
+          PYTHONPATH=packages/qa-runner/src python -s -m qa_runner.netfence --probe
+      - name: Fail if the working tree is dirty
+        run: test -z "$(git status --porcelain)"
+      - name: Run the Robot egress experiments and their mutations as the runner user (scrubbed environment; only tests marked robot_egress)
+        run: |
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+            python -m pytest -q -m robot_egress packages/qa-runner/tests/robot_egress --junitxml="$RUNNER_TEMP/junit-robot-egress.xml"
+      - name: Fail on zero collected tests, any skip, or a number of tests other than the one expected (a deleted or deselected test cannot stay green)
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-egress.xml" --expect-tests 0
+      - name: Run the experiments as root in an ubuntu:24.04 container (Docker's default options: its own seccomp profile, no added capability)
+        run: |
+          docker run --rm -v "$PWD":/w -v "$RUNNER_TEMP":/out -w /w ubuntu:24.04 bash -euc '
+            apt-get update -qq >/dev/null
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-venv curl git >/dev/null
+            git config --global --add safe.directory "*"
+            python3 -m venv /opt/venv
+            /opt/venv/bin/pip install -q "pytest>=8,<10" "pyyaml>=6,<7" "robotframework==7.5"
+            id; grep -i seccomp /proc/self/status
+            env -i HOME=/tmp/home PATH=/opt/venv/bin:/usr/bin:/bin LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+              python -m pytest -q -m robot_egress packages/qa-runner/tests/robot_egress/test_qr_robot_egress_experiments.py packages/qa-runner/tests/robot_egress/test_qr_robot_egress_run.py \
+              --junitxml=/out/junit-robot-egress-root.xml
+          '
+      - name: Fail on zero collected tests, any skip, or a number of tests other than the one expected (as root)
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-egress-root.xml" --expect-tests 0
+      - name: Fail if the tests left anything in the working tree
+        run: test -z "$(git status --porcelain)"
+
   runner-e2e:
     name: runner end to end (real Chromium and Robot Framework 7.5 in one run; Playwright and Robot pinned; the two-lane plan for each seeded defect, partial success, timeouts, cancellation and a killed parent with process checks; a missing dependency fails, never skips)
     # The product's end-to-end path: one frozen plan, two real engines, serially, one run id, one evidence bundle, for the clean target and each seeded defect, run through the
