@@ -1098,6 +1098,32 @@ def test_the_pin_at_the_recorded_head_fails_closed_when_it_cannot_be_read(pin_re
     assert "no readable source.pinned_commit" in joined(chk.pin_at_head_report(m, root)[0])
 
 
+@pytest.mark.parametrize("head", ["v1", "main", "HEAD", "side", "abcdef123456", "--output=PLACEHOLDER", "-p", "--end-of-options", "", "B" * 40, "g" * 40, "a" * 39, "a" * 41])
+def test_a_recorded_head_that_is_not_a_full_commit_id_is_a_finding_and_never_reaches_git(pin_repo, head, tmp_path, monkeypatch):
+    root, a, b = pin_repo
+    target = tmp_path / "written-by-git"
+    head = head.replace("PLACEHOLDER", str(target))
+    calls = []
+    real = chk.caps._git
+    monkeypatch.setattr(chk.caps, "_git", lambda r, *args: calls.append(args) or real(r, *args))
+    problems, ok = chk.pin_at_head_report(recorded(head, "b" * 40)[0], root)
+    assert ok == set() and "not a full 40-character commit id" in joined(problems)
+    assert calls == [] and not target.exists()
+
+
+def test_git_gets_the_revision_after_end_of_options(pin_repo, monkeypatch):
+    root, a, b = pin_repo
+    calls = []
+    real = chk.caps._git
+    monkeypatch.setattr(chk.caps, "_git", lambda r, *args: calls.append(args) or real(r, *args))
+    assert chk.pin_at_head_report(recorded(b, "b" * 40)[0], root)[1]
+    assert calls == [("show", "--end-of-options", f"{b}:{chk.PROFILES}")]
+
+
+def test_the_log_redirect_is_https_only_by_default():
+    assert chk.LOG_REDIRECT_PREFIXES == ("https://",)
+
+
 def test_the_head_exception_without_verify_ci_rests_on_the_pin_at_head_alone(pin_repo, monkeypatch):
     root, a, b = pin_repo                                               # HEAD = B, which is off main; the record cites B
     m, key = recorded(b, "b" * 40, pinned=a)

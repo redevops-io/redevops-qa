@@ -22,6 +22,9 @@ Offline (no network, no secret) except the explicit ``--verify-ci`` and ``--cros
   passed counts of the log equal to the counts in the summary, each suite also shown as ``OK N tests, 0 skipped, 0 failed``; a log that cannot be read fails,
   except that a log that is gone (HTTP 404 or 410) is tolerated for a run whose head is on main;
 * ``docs/QA_INSTALL_PROFILES.md`` equals the document generated from the JSON.
+* ``--no-freshness`` skips every git-based check, the pin at the recorded heads included (the recorded head must be a full 40-hex commit id; it is passed to ``git``
+  after ``--end-of-options``). On a pull_request run the checked-out commit is the merge of the pull request into its base: the file being checked and the HEAD
+  used for the ancestry rule are that merge commit's, while the pin at a recorded head is read from the recorded commit itself.
 
 Usage: ``python tools/check_install_profiles.py [--root DIR] [--main-ref REF] [--no-freshness] [--write-docs] [--verify-ci] [--cross-check]``.
 """
@@ -420,7 +423,10 @@ def pin_at_head_report(profiles: Dict[str, Any], root: Path) -> Tuple[List[str],
             if not vb:
                 continue
             at = f"profile {p['id']} host {h['os_arch']}"
-            code, text = caps._git(root, "show", f"{vb['head_sha']}:{PROFILES}")
+            if not FULL_SHA.fullmatch(str(vb["head_sha"])):
+                out.append(f"{at}: the recorded head_sha is not a full 40-character commit id, so the pin at that commit is not read")
+                continue
+            code, text = caps._git(root, "show", "--end-of-options", f"{vb['head_sha']}:{PROFILES}")
             if code != 0:
                 out.append(f"{at}: cannot read {PROFILES} at the recorded head {vb['head_sha'][:12]} (is the full history fetched?), so the pin that run installed cannot be checked")
                 continue
@@ -527,6 +533,7 @@ def docs_problems(profiles: Dict[str, Any], root: Path) -> List[str]:
 
 
 # ------------------------------------------------------------------------------------------------ opt-in network checks
+FULL_SHA = re.compile(r"[0-9a-f]{40}")
 CHECKOUT_LINE = re.compile(r"checkout verified: HEAD is the pinned commit ([0-9a-f]{40}), clean tree")
 PASSED_LINE = re.compile(r"^\S+Z (\d+) passed(?:, \d+ [a-z ]+)* in [0-9.]+s", re.M)
 OK_LINE = re.compile(r"^\S+Z OK (\d+) tests, 0 skipped, 0 failed\s*$", re.M)
