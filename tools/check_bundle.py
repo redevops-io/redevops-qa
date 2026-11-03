@@ -10,7 +10,8 @@ Exit status 0 when there is no finding, 1 otherwise, 2 for a usage error. Findin
 Checked: the file set against SHA256SUMS (every file listed once, nothing unlisted, every digest right); BUNDLE.json (schema, target, one Python minor and one platform,
 wheels with digests, the browser record, the licence statements); requirements.lock (every wheel exactly once, ``name==version`` as in its file name, a ``--hash`` that is
 the file's sha256, no other requirement); the wheels themselves (a METADATA whose name and version are the file name's; no wheel outside the manifest); the pinned-upstreams
-wheel (pins.toml byte for byte, the pinned trees under .pinned next to it); the text of README.md and BUNDLE.json against a list of claims this release does not make.
+wheel (pins.toml byte for byte, the pinned trees under .pinned next to it, a copy of browser.lock.json); browser.lock.json (well formed, the BUNDLE.json record made from it, the lock of
+the Playwright wheel in the bundle: version, browsers.json digest, Chromium revision); the text of README.md and BUNDLE.json against a list of claims this release does not make.
 """
 from __future__ import annotations
 
@@ -20,16 +21,16 @@ import re
 import sys
 import zipfile
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Sequence
+from typing import Dict, List, NamedTuple, Optional, Sequence
 
-REQUIRED_FILES = ("BUNDLE.json", "README.md", "SHA256SUMS", "requirements.lock", "install.sh", "install-browser.sh", "uninstall.sh")
+REQUIRED_FILES = ("BUNDLE.json", "README.md", "SHA256SUMS", "requirements.lock", "install.sh", "install-browser.sh", "uninstall.sh", "browser.lock.json")
 PINNED_DIST = "redevops_qa_pinned_upstreams"
 FAMILY_LICENCE_FILES = ("LICENSE.md", "LICENSE", "LICENSE-COMMONS-CLAUSE")
 #: text a bundle must never carry (case-insensitive): a command that names the other project on the package index, and claims that are not made
 FORBIDDEN = ("pip install agent-harness", "pip install agent_harness", "tamper-proof", "tamper proof", "tamperproof", "reproducible build", "bit-for-bit", "soc 2", "soc2", "cis benchmark",
              "audited", "qa demo site")
 #: phrases that must be there
-REQUIRED_TEXT = ("AGPL-3.0-or-later with the Commons Clause", "not open source", "plain AGPL-3.0-or-later", "downloaded", "not hashed", "Node.js", "private staging only")
+REQUIRED_TEXT = ("AGPL-3.0-or-later with the Commons Clause", "not open source", "plain AGPL-3.0-or-later", "downloaded", "browser.lock.json", "Not covered", "Node.js", "private staging only")
 
 
 class Finding(NamedTuple):
@@ -103,8 +104,9 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
     if root.name != manifest.get("name"):
         out.append(Finding("NAME", "BUNDLE.json", "the directory name is not the bundle name"))
     browser = manifest.get("browser") or {}
-    if browser.get("hashed_by_this_bundle") is not False or browser.get("fetched_at_install") is not True:
-        out.append(Finding("BROWSER_RECORD", "BUNDLE.json", "the browser is downloaded at install time and is not hashed by the bundle; the record must say so"))
+    if browser.get("shipped_in_bundle") is not False or browser.get("fetched_at_install") is not True or browser.get("pinned_by_this_bundle") is not True:
+        out.append(Finding("BROWSER_RECORD", "BUNDLE.json", "the browser is downloaded at install time, is not shipped in the bundle and is pinned by browser.lock.json; the record must say so"))
+    out += _check_browser_lock(root, manifest, browser, allow_test_target)
     lic = manifest.get("licences") or {}
     if "agent_harness" not in lic or "runtime_contracts" not in lic or "redevops_qa_packages" not in lic or "third_party" not in lic:
         out.append(Finding("LICENCES", "BUNDLE.json", "the licence record names the family packages, runtime-contracts, agent-harness and the third-party wheels separately"))
@@ -180,7 +182,7 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
         if len(pinned) != 1 or not pins:
             out.append(Finding("PINS_RECORD", "BUNDLE.json", "one pinned-upstreams wheel and a pins record are expected"))
         else:
-            out += _check_pinned_wheel(root / "wheelhouse" / pinned[0]["filename"], pins)
+            out += _check_pinned_wheel(root / "wheelhouse" / pinned[0]["filename"], pins, (root / "browser.lock.json").read_bytes())
     if not allow_test_target and not any(_wheel_nv(w.get("filename", "")) and _wheel_nv(w["filename"])[0] == "redevops-qa-adapter-kit" for w in entries):
         out.append(Finding("PATH_POLICY_SOURCE", "BUNDLE.json", "install.sh reads the adapter path policy from the adapter kit wheel of the bundle; a release bundle holds it"))
     # --- text
@@ -199,7 +201,60 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
     return out
 
 
-def _check_pinned_wheel(path: Path, pins: dict) -> List[Finding]:
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def _tree_digest(tree: dict) -> str:
+    """The digest ``tree_sha256`` of browser.lock.json holds: sha256 of the canonical JSON of the directories and the files (re-implemented here, not imported)."""
+    doc = {"directories": dict(sorted(tree["directories"].items())), "files": dict(sorted(tree["files"].items()))}
+    return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _check_browser_lock(root: Path, manifest: dict, record: dict, allow_test_target: bool) -> List[Finding]:
+    """browser.lock.json: well formed, the record in BUNDLE.json is made from it, and (when the bundle holds the Playwright wheel) it is the lock of that wheel: same Playwright version, same
+    ``browsers.json`` digest, same Chromium revision and browser version. Whether the archives still hash to the pin is for ``install-browser.sh``, which downloads them."""
+    out: List[Finding] = []
+    data = (root / "browser.lock.json").read_bytes()
+    try:
+        lock = json.loads(data.decode("utf-8"))
+        archives = lock["archives"]
+        tree = lock["tree"]
+        pw, br = lock["playwright"], lock["browser"]
+        ok = (lock.get("schema") == "redevops-qa/browser-lock" and lock.get("schema_version") == "1.0" and lock.get("target") == {"platform": "linux-x86_64"} and br.get("name") == "chromium"
+              and isinstance(archives, list) and archives and set(tree) == {"directories", "files"} and tree["directories"] and tree["files"]
+              and all(isinstance(a, dict) and set(a) == {"name", "dir", "file", "urls", "sha256", "size"} and _HEX64.fullmatch(str(a["sha256"])) and isinstance(a["size"], int) and a["size"] > 0
+                      and a["urls"] and all(str(u).startswith("https://") and u.endswith("/" + a["file"]) for u in a["urls"]) for a in archives)
+              and all(str(a["dir"]).endswith("-" + str(br["revision"])) or a["name"] == "ffmpeg" for a in archives)
+              and all(isinstance(v, list) and len(v) == 3 and _HEX64.fullmatch(str(v[2])) for v in tree["files"].values())
+              and lock.get("tree_sha256") == _tree_digest(tree) and _HEX64.fullmatch(str(pw.get("browsers_json_sha256"))))
+    except (ValueError, KeyError, TypeError, AttributeError):
+        ok = False
+    if not ok:
+        return [Finding("BROWSER_LOCK", "browser.lock.json", "not a well formed redevops-qa/browser-lock 1.0 for linux-x86_64 (archives with https URLs, a sha256 and a size each; a tree whose digest is tree_sha256)")]
+    if record.get("lock_sha256") != hashlib.sha256(data).hexdigest() or record.get("lock") != "browser.lock.json":
+        out.append(Finding("BROWSER_RECORD", "BUNDLE.json", "the browser record does not name browser.lock.json with its sha256"))
+    if record.get("archives") != [{"file": a["file"], "sha256": a["sha256"], "size": a["size"]} for a in archives] or record.get("tree_sha256") != lock["tree_sha256"] \
+            or (record.get("playwright"), record.get("revision"), record.get("browser_version")) != (pw["version"], br["revision"], br["browser_version"]):
+        out.append(Finding("BROWSER_RECORD", "BUNDLE.json", "the browser record is not what browser.lock.json says (archives, tree digest, Playwright version, revision, browser version)"))
+    pws = [w for w in manifest.get("wheels") or [] if w.get("name") == "playwright"]
+    if pws:
+        wheel = root / "wheelhouse" / pws[0].get("filename", "")
+        try:
+            with zipfile.ZipFile(wheel) as zf:
+                raw = zf.read("playwright/driver/package/browsers.json")
+            chromium = next(b for b in json.loads(raw)["browsers"] if b["name"] == "chromium")
+        except (OSError, KeyError, ValueError, StopIteration, zipfile.BadZipFile):
+            return out + [Finding("BROWSER_LOCK", pws[0].get("filename", "playwright"), "the Playwright wheel has no readable browsers.json with a chromium entry")]
+        if pws[0].get("version") != pw["version"] or hashlib.sha256(raw).hexdigest() != pw["browsers_json_sha256"]:
+            out.append(Finding("BROWSER_LOCK", "browser.lock.json", "the lock is not for the Playwright wheel of this bundle (version or browsers.json digest differs)"))
+        if str(chromium["revision"]) != br["revision"] or chromium.get("browserVersion") != br["browser_version"]:
+            out.append(Finding("BROWSER_LOCK", "browser.lock.json", f"the revision the Playwright wheel expects ({chromium['revision']}, {chromium.get('browserVersion')}) is not the pinned one ({br['revision']}, {br['browser_version']})"))
+    elif not allow_test_target:
+        out.append(Finding("BROWSER_LOCK", "BUNDLE.json", "a release bundle holds the Playwright wheel the lock is checked against"))
+    return out
+
+
+def _check_pinned_wheel(path: Path, pins: dict, browser_lock: Optional[bytes] = None) -> List[Finding]:
     out: List[Finding] = []
     try:
         with zipfile.ZipFile(path) as zf:
@@ -210,6 +265,8 @@ def _check_pinned_wheel(path: Path, pins: dict) -> List[Finding]:
             if hashlib.sha256(zf.read(pins_entries[0])).hexdigest() != pins.get("pins_toml_sha256"):
                 out.append(Finding("PINNED_WHEEL", path.name, "pins.toml inside is not the one the manifest records"))
             base = pins_entries[0][: -len("pins.toml")]
+            if browser_lock is not None and (base + "browser.lock.json" not in names or zf.read(base + "browser.lock.json") != browser_lock):
+                out.append(Finding("PINNED_WHEEL", path.name, "share/redevops-qa/browser.lock.json is missing or is not the bundle's browser.lock.json (doctor checks the browser against the installed copy)"))
             try:
                 listing = json.loads(zf.read(base + "pinned-files.json"))["files"]
             except (KeyError, ValueError):

@@ -162,3 +162,40 @@ def test_the_checker_finds_a_pinned_file_that_the_listing_does_not_describe(buil
     bad = tmp_path / wheel.name
     bb.write_wheel(bad, entries, 1_700_000_000)
     assert any("pinned-files.json does not list exactly" in f.message for f in cb._check_pinned_wheel(bad, pin_info))
+
+
+# ------------------------------------------------------------------------------------------------------------------------------ the browser pin travels with the pinned wheel
+def test_the_wheel_carries_the_browser_lock_under_share_and_the_checker_compares_it_with_the_bundles_copy(tmp_path):
+    import hashlib as h
+    import zipfile as z
+    pins, deps, _pinmod = bb.load_pins(PINS_FILE, PIN_SET)
+    trees = bb.pinned_trees(pins, deps, ROOT / ".pinned", PINS_FILE)
+    lock = (ROOT / "bundle" / "browser.lock.json").read_bytes()
+    wheel = bb.build_pinned_wheel(PINS_FILE, trees, deps, "0.1.0.dev0", 1_700_000_000, tmp_path, lock)
+    pin_info = {"pins_toml_sha256": h.sha256(PINS_FILE.read_bytes()).hexdigest()}
+    with z.ZipFile(wheel) as zf:
+        assert zf.read("redevops_qa_pinned_upstreams-0.1.0.dev0.data/data/share/redevops-qa/browser.lock.json") == lock
+    assert cb._check_pinned_wheel(wheel, pin_info, lock) == []
+    # another lock in the bundle than in the wheel
+    assert any("browser.lock.json" in f.message for f in cb._check_pinned_wheel(wheel, pin_info, lock + b" "))
+    # a wheel built without the lock, checked against a bundle that has one
+    (tmp_path / "bare").mkdir()
+    bare = bb.build_pinned_wheel(PINS_FILE, trees, deps, "0.1.0.dev0", 1_700_000_000, tmp_path / "bare")
+    assert any("browser.lock.json is missing" in f.message for f in cb._check_pinned_wheel(bare, pin_info, lock))
+
+
+def test_the_installed_lock_is_the_file_doctor_reads(tmp_path):
+    from qa_runner import browser_pin, doctor
+    pins, deps, _pinmod = bb.load_pins(PINS_FILE, PIN_SET)
+    trees = bb.pinned_trees(pins, deps, ROOT / ".pinned", PINS_FILE)
+    lock = (ROOT / "bundle" / "browser.lock.json").read_bytes()
+    wheel = bb.build_pinned_wheel(PINS_FILE, trees, deps, "0.1.0.dev0", 1_700_000_000, tmp_path, lock)
+    prefix = tmp_path / "prefix"
+    done = subprocess.run([sys.executable, "-m", "pip", "install", "--no-index", "--no-deps", "--disable-pip-version-check", "--no-input", "--prefix", str(prefix), str(wheel)],
+                          capture_output=True, text=True, env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PIP_CONFIG_FILE": "/dev/null"}, timeout=300)
+    assert done.returncode == 0, done.stderr
+    assert (prefix / "share" / "redevops-qa" / browser_pin.LOCK_NAME).read_bytes() == lock
+    registry = tmp_path / "registry.json"
+    registry.write_bytes(b"not the registry of the pinned playwright")
+    c = doctor.check_browser_pin(prefix=str(prefix), browsers=tmp_path / "nothing", registry=registry, playwright_version="1.64.1")
+    assert c.status == "FAIL" and "browsers.json" in c.detail and "is not the pinned one" in c.detail

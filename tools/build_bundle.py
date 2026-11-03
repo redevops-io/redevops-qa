@@ -8,8 +8,9 @@
 What the bundle is (see ``bundle/README.md``, which is shipped inside it): the repository's own packages built as wheels, one wheel that carries the pinned
 upstream source trees (runtime-contracts and agent-harness at the commits ``pins.toml`` names, with the vector files the pin check reads), and the third-party
 wheels of ``bundle/third-party.lock.json`` for ONE Python minor and ONE platform (CPython 3.12, Linux x86_64). ``requirements.lock`` names every wheel with its
-sha256; ``install.sh`` installs with ``pip install --no-index --find-links wheelhouse --require-hashes -r requirements.lock``. Chromium is not in the bundle: it is
-downloaded when the browser step runs, and it is recorded in ``BUNDLE.json``, not hashed by this builder.
+sha256; ``install.sh`` installs with ``pip install --no-index --find-links wheelhouse --require-hashes -r requirements.lock``. Chromium is not in the bundle: the browser step
+downloads it, and ``bundle/browser.lock.json`` (a reviewed repository file, carried into the bundle and into ``share/redevops-qa``) pins the sha256 of the archives and the tree they
+unpack to; this builder checks the lock against the ``browsers.json`` of the Playwright wheel (the revision must match) and records it in ``BUNDLE.json``. It does not download the browser.
 
 What this builder does not do: it publishes nothing, creates no tag or release and needs no credential. Network use: ``pip download`` of the pinned, hashed
 third-party wheels and of the pinned build tool from the package index, nothing else. The pinned upstream trees are not fetched here: pass the directory the CI jobs
@@ -48,6 +49,7 @@ LOCK_SCHEMA = "redevops-qa/bundle-third-party-lock"
 #: the repository packages that are part of the bundle (Selenium and Appium are outside the release claim and are not shipped)
 FIRST_PARTY = ("qa-adapter-kit", "qa-bridge", "qa-checks", "qa-egress", "qa-evidence", "qa-fixture-app", "qa-playwright", "qa-robot", "qa-runner")
 PINNED_DIST = "redevops-qa-pinned-upstreams"
+BROWSER_LOCK = "browser.lock.json"      # bundle/browser.lock.json: the pin of the browser archives and of the tree they unpack to
 PINNED_FILES = "pinned-files.json"      # beside pins.toml: the sha256 of every file of the pinned trees as shipped (doctor compares the installed trees with it)
 #: the one target a bundle is built for. A test bundle may name another target; the release bundle never does.
 TARGET = {"python": "3.12", "python_tag": "cp312", "platform": "linux-x86_64"}
@@ -243,14 +245,16 @@ def tree_files(tree: Path, dirs: Sequence[str]) -> List[str]:
     return found
 
 
-def build_pinned_wheel(pins_file: Path, trees: Dict[str, tuple], deps, version: str, epoch: int, dst_dir: Path) -> Path:
-    """One wheel that installs ``<prefix>/share/redevops-qa/pins.toml`` and the pinned trees below ``.pinned`` next to it, laid out as ``pins.toml`` expects:
+def build_pinned_wheel(pins_file: Path, trees: Dict[str, tuple], deps, version: str, epoch: int, dst_dir: Path, browser_lock: Optional[bytes] = None) -> Path:
+    """One wheel that installs ``<prefix>/share/redevops-qa/pins.toml`` (and ``browser.lock.json``) and the pinned trees below ``.pinned`` next to it, laid out as ``pins.toml`` expects:
     the distribution directories, the vector files, ``pyproject.toml`` (the version the tree declares) and the licence files. Not an installable ``agent-harness``
     or ``runtime-contracts`` distribution: no import path is added to the environment, ``redevops-qa`` puts the trees on ``sys.path`` itself, as it does in a checkout."""
     dist = PINNED_DIST.replace("-", "_")
     info = f"{dist}-{version}.dist-info"
     data_root = f"{dist}-{version}.data/data/share/redevops-qa"
     files: Dict[str, bytes] = {f"{data_root}/pins.toml": pins_file.read_bytes()}
+    if browser_lock is not None:           # the copy ``redevops-qa doctor`` checks the installed browser against (and install-browser.sh compares the bundle's own copy with)
+        files[f"{data_root}/{BROWSER_LOCK}"] = browser_lock
     for name, (dep, tree) in sorted(trees.items()):
         rels = set(tree_files(tree, dep.distribution_paths)) | set(dep.vector_files) | set(deps.addendum_files(dep)) | {"pyproject.toml"}
         repo = dep.repo.rsplit("/", 1)[-1]
@@ -261,7 +265,7 @@ def build_pinned_wheel(pins_file: Path, trees: Dict[str, tuple], deps, version: 
     listing = {k[len(tree_root):]: sha256_bytes(v) for k, v in sorted(files.items()) if k.startswith(tree_root + ".pinned/")}
     files[f"{data_root}/{PINNED_FILES}"] = (json.dumps({"schema": "redevops-qa/pinned-files", "schema_version": "1.0", "files": listing}, indent=2, sort_keys=True) + "\n").encode()
     metadata = (f"Metadata-Version: 2.1\nName: {PINNED_DIST}\nVersion: {version}\nSummary: The pinned upstream source trees (runtime-contracts, agent-harness) that redevops-qa verifies "
-                "against pins.toml, laid out under share/redevops-qa\nLicense: Two licences, not one: runtime-contracts is AGPL-3.0-or-later with the Commons Clause; agent-harness is "
+                "against pins.toml, and the browser pin (browser.lock.json), laid out under share/redevops-qa\nLicense: Two licences, not one: runtime-contracts is AGPL-3.0-or-later with the Commons Clause; agent-harness is "
                 "AGPL-3.0-or-later. Their licence files are inside this wheel next to the trees.\nRequires-Python: >=3.11\n").encode()
     files[f"{info}/METADATA"] = metadata
     files[f"{info}/WHEEL"] = b"Wheel-Version: 1.0\nGenerator: redevops-qa tools/build_bundle.py\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
@@ -419,22 +423,33 @@ class WheelEntry:
     licence: str
 
 
-def browser_record(wheel: Optional[Path]) -> dict:
-    """What the Playwright wheel says about the Chromium it installs (read from the wheel; nothing is downloaded or executed)."""
-    rec = {"engine": "chromium", "installed_by": "install-browser.sh (python -m playwright install chromium)", "fetched_at_install": True, "hashed_by_this_bundle": False,
-           "note": "Chromium is downloaded from the Playwright download host when the browser step runs. This bundle records which build the pinned Playwright expects; it does not hash or ship the browser, and `redevops-qa doctor` reports the build that launches."}
+def browser_record(wheel: Optional[Path], lock_bytes: bytes) -> dict:
+    """What the bundle records about the Chromium its browser step installs: the pin (``browser.lock.json``, by digest, with the archives it names) and, from the Playwright wheel, the
+    revision that wheel expects. Nothing is downloaded or executed. The lock must agree with the wheel: same ``browsers.json`` digest, same revision and browser version."""
+    lock = json.loads(lock_bytes.decode("utf-8"))
+    rec = {"engine": "chromium", "installed_by": "install-browser.sh (downloads the archives named in browser.lock.json, checks their sha256 and size before unpacking, then checks the unpacked tree)",
+           "fetched_at_install": True, "shipped_in_bundle": False, "pinned_by_this_bundle": True, "lock": BROWSER_LOCK, "lock_sha256": sha256_bytes(lock_bytes),
+           "playwright": lock["playwright"]["version"], "revision": lock["browser"]["revision"], "browser_version": lock["browser"]["browser_version"],
+           "archives": [{"file": a["file"], "sha256": a["sha256"], "size": a["size"]} for a in lock["archives"]],
+           "tree_files": len(lock["tree"]["files"]), "tree_sha256": lock["tree_sha256"],
+           "not_covered": ["the operating system libraries Chromium loads (apt, --with-deps)", "availability of the Playwright download host", "a change made to the installed tree after a check"],
+           "note": "Chromium is downloaded from the Playwright download host when the browser step runs; it is not in this bundle. The step refuses an archive whose sha256 or size is not the pinned one "
+                   "and `redevops-qa doctor` checks the installed tree against the pin."}
     if wheel is None:
         return rec
     with zipfile.ZipFile(wheel) as zf:
-        data = json.loads(zf.read("playwright/driver/package/browsers.json"))
-    for b in data["browsers"]:
-        if b["name"] == "chromium":
-            rec.update({"playwright": wheel_name_version(wheel.name)[1], "revision": str(b["revision"]), "browser_version": b.get("browserVersion", "")})
+        raw = zf.read("playwright/driver/package/browsers.json")
+        data = json.loads(raw)
+    chromium = next(b for b in data["browsers"] if b["name"] == "chromium")
+    if (wheel_name_version(wheel.name)[1] != lock["playwright"]["version"] or sha256_bytes(raw) != lock["playwright"]["browsers_json_sha256"]
+            or str(chromium["revision"]) != lock["browser"]["revision"] or chromium.get("browserVersion", "") != lock["browser"]["browser_version"]):
+        raise BuildError(f"bundle/{BROWSER_LOCK} is not for the Playwright wheel of this bundle ({wheel.name}: revision {chromium['revision']}, browser {chromium.get('browserVersion')}): "
+                         "regenerate it with tools/make_browser_lock.py and review the diff")
     return rec
 
 
 def assemble(out_dir: Path, *, name: str, entries: Sequence[WheelEntry], target: dict, epoch: int, label: str, version: str, commit: str, pins_info: Optional[dict],
-             licences_from: Dict[str, Path], build_tools: Dict[str, str], readme_template: str) -> Path:
+             licences_from: Dict[str, Path], build_tools: Dict[str, str], readme_template: str, browser_lock: Optional[bytes] = None) -> Path:
     """Write the bundle directory ``out_dir/name`` and return it. Nothing here reads the network or a clock."""
     bdir = out_dir / name
     (bdir / "wheelhouse").mkdir(parents=True)
@@ -452,6 +467,8 @@ def assemble(out_dir: Path, *, name: str, entries: Sequence[WheelEntry], target:
     for script in SCRIPTS:
         shutil.copyfile(BUNDLE_SRC / script, bdir / script)
         os.chmod(bdir / script, 0o755)
+    lock_bytes = browser_lock if browser_lock is not None else (BUNDLE_SRC / BROWSER_LOCK).read_bytes()
+    (bdir / BROWSER_LOCK).write_bytes(lock_bytes)
     licence_dir = bdir / "licences"
     for group, base in sorted(licences_from.items()):
         for f in LICENCE_FILES[group]:
@@ -463,7 +480,7 @@ def assemble(out_dir: Path, *, name: str, entries: Sequence[WheelEntry], target:
     manifest = {
         "schema": SCHEMA, "schema_version": SCHEMA_VERSION, "name": name, "bundle_version": version, "label": label,
         "source": {"repository": "redevops-io/redevops-qa", "commit": commit},
-        "target": target, "pins": pins_info, "wheels": wheels, "browser": browser_record(pw), "build_tools": build_tools,
+        "target": target, "pins": pins_info, "wheels": wheels, "browser": browser_record(pw, lock_bytes), "build_tools": build_tools,
         "licences": {
             "summary": "An assembly of separately licensed parts; there is no single licence for the whole bundle.",
             "redevops_qa_packages": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause); not open source. licences/redevops-qa/",
@@ -472,14 +489,16 @@ def assemble(out_dir: Path, *, name: str, entries: Sequence[WheelEntry], target:
             "third_party_staging": "PRIVATE STAGING ONLY: the third-party wheels are shipped unmodified under the status staged_unmodified of third_party/adapter-license-matrix.yaml; public distribution of this bundle requires an owner decision.",
             "third_party_notes": {"playwright": "The Playwright wheel contains a Node.js runtime binary (playwright/driver/node) with its licence file (playwright/driver/LICENSE), the Playwright driver with 81 npm packages inlined into lib/utilsBundle.js and lib/serverRegistry.js (sidecar .LICENSE files) and libwebp (lib/webp_codec.LICENSE), each under its own notice; the declared licence of the wheel, Apache-2.0, does not describe them. They are not classified one by one."},
             "third_party": f"{len(third)} wheels under their own licences, unmodified, each carrying its licence files in its dist-info: " + ", ".join(f"{w['name']} {w['version']} ({w['license']})" for w in third),
-            "chromium": "downloaded at install time under its own licences; not part of this bundle",
+            "chromium": "downloaded at install time under its own licences (pinned by sha256 in browser.lock.json); not part of this bundle",
         },
         "integrity": "SHA256SUMS and requirements.lock are inside the bundle: they detect damage and partial replacement, not a replaced bundle. Compare the digest of the archive with a value obtained from somewhere the archive's producer does not control.",
         "scope": "CPython " + target["python"] + ", " + target["platform"].replace("-", " ") + ". No other Python minor or platform is claimed.",
     }
     (bdir / "BUNDLE.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    pin = json.loads(lock_bytes.decode("utf-8"))
     values = {"bundle_name": name, "bundle_version": version, "python": target["python"], "platform": target["platform"].replace("-", " "), "python_tag": target["python_tag"],
-              "wheel_count": str(len(wheels)), "commit": commit}
+              "wheel_count": str(len(wheels)), "commit": commit, "playwright_version": pin["playwright"]["version"], "chromium_revision": pin["browser"]["revision"],
+              "chromium_version": pin["browser"]["browser_version"], "browser_files": str(len(pin["tree"]["files"]))}
     (bdir / "README.md").write_text(render_readme(readme_template, values), encoding="utf-8", newline="\n")
     (bdir / "SHA256SUMS").write_text(sha256sums_text(bdir), encoding="utf-8", newline="\n")
     return bdir
@@ -507,7 +526,7 @@ def cmd_build(args) -> int:
         wheels_dir.mkdir()
         py = make_build_venv(work, epoch, cache)
         entries = [WheelEntry(p, "first-party", "source-available, AGPL-3.0-or-later with the Commons Clause") for p in build_first_party(root, FIRST_PARTY, epoch, work, py, wheels_dir)]
-        entries.append(WheelEntry(build_pinned_wheel(pins_file, trees, deps, version, epoch, wheels_dir), "pinned-upstreams",
+        entries.append(WheelEntry(build_pinned_wheel(pins_file, trees, deps, version, epoch, wheels_dir, (BUNDLE_SRC / BROWSER_LOCK).read_bytes()), "pinned-upstreams",
                                   "runtime-contracts: AGPL-3.0-or-later with the Commons Clause; agent-harness: AGPL-3.0-or-later"))
         lock = read_third_party_lock()
         if lock["target"] != TARGET:
