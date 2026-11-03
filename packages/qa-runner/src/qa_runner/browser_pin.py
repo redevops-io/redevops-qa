@@ -18,6 +18,7 @@ Command line (used by ``bundle/install-browser.sh``)::
     python -I -m qa_runner.browser_pin verify --lock FILE --browsers DIR [--json]
     python -I -m qa_runner.browser_pin stage  --lock FILE --browsers DIR --staging DIR [--mirror BASE]
     python -I -m qa_runner.browser_pin commit --lock FILE --browsers DIR --staging DIR
+    python -I -m qa_runner.browser_pin urls   --lock FILE [--fallbacks-only]
 
 Exit status: 0 ok; 1 the check or the install failed (the message names what was expected and what was found); 2 usage.
 """
@@ -457,12 +458,37 @@ def commit(lock: Lock, browsers: Path, staging: Path) -> List[str]:
     return moved
 
 
+def check_urls(lock: Lock, log: Callable[[str], None] = lambda s: None, *, fallbacks_only: bool = False, opener: Callable = urllib.request.urlopen) -> List[str]:
+    """Download every URL the lock lists for every archive, one by one, and report whether each serves the pinned bytes (no file is kept). Returns the URLs that do not: an unreachable URL, a
+    wrong size or a wrong sha256. ``fallbacks_only`` skips the first URL of each archive (the one the install uses, and the one the install already verified)."""
+    import tempfile
+    bad: List[str] = []
+    with tempfile.TemporaryDirectory(prefix="browser-pin-urls-") as tmp:
+        for a in lock.archives:
+            for i, url in enumerate(a.urls):
+                if fallbacks_only and i == 0:
+                    continue
+                single = Archive(a.name, a.dir, a.file, (url,), a.sha256, a.size)
+                try:
+                    fetch_archive(single, Path(tmp) / a.file, None, lambda s: None, opener)
+                except InstallError as exc:
+                    bad.append(url)
+                    log(f"MISMATCH {url}: {str(exc).splitlines()[-1].strip()}")
+                else:
+                    log(f"same bytes {url}: sha256 {a.sha256} ({a.size} bytes)")
+                    (Path(tmp) / a.file).unlink()
+    return bad
+
+
 # ------------------------------------------------------------------------------------------------------------------------------------- the command line
 def main(argv: Optional[Sequence[str]] = None, out=None, err=None) -> int:
     out = out or sys.stdout
     err = err or sys.stderr
     p = argparse.ArgumentParser(prog="python -m qa_runner.browser_pin", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="command", required=True)
+    sp = sub.add_parser("urls", help="download every URL of the lock and say whether it serves the pinned bytes")
+    sp.add_argument("--lock", required=True)
+    sp.add_argument("--fallbacks-only", action="store_true")
     for name in ("verify", "stage", "commit"):
         sp = sub.add_parser(name)
         sp.add_argument("--lock", required=True)
@@ -482,6 +508,10 @@ def main(argv: Optional[Sequence[str]] = None, out=None, err=None) -> int:
     except LockError as exc:
         print(f"browser_pin: the lock file is not usable: {exc}", file=err)
         return 1
+    if args.command == "urls":
+        bad = check_urls(lock, lambda s: print(s, file=out), fallbacks_only=args.fallbacks_only)
+        print(f"browser_pin: {len(bad)} URL(s) do not serve the pinned bytes" if bad else "browser_pin: every URL checked serves the pinned bytes", file=err if bad else out)
+        return 1 if bad else 0
     browsers = Path(args.browsers)
     try:
         if args.command == "verify":

@@ -457,6 +457,8 @@ CASES += [
      [t(BDOC, "test_a_pin_for_another_revision_than_the_installed_playwright_expects_fails")]),
     ("doctor: the pin is for the installed Playwright version", "doctor.py", "    if have != lock.playwright_version:\n", "    if False:\n",
      [t(BDOC, "test_a_pin_for_another_playwright_version_fails")]),
+    ("pin: a URL that serves other bytes than the pin is reported", "browser_pin.py", "                    bad.append(url)\n", "                    pass\n",
+     [t(PIN, "test_check_urls_reports_every_url_that_does_not_serve_the_pinned_bytes")]),
     ("run: a browser lane is refused against a browser that fails the pin", "cli.py", '    if check.status == "FAIL":\n        raise EnvironmentFault("BROWSER_PIN"', '    if False:\n        raise EnvironmentFault("BROWSER_PIN"',
      [t(BDOC, "test_run_refuses_a_browser_lane_against_a_browser_that_fails_the_pin_and_starts_nothing"), t(BDOC, "test_demo_makes_the_same_check")]),
     ("run: the browser check is made before a run starts", "cli.py", "_refuse_a_browser_that_is_not_the_pinned_build(any(lane.engine == K.ENGINE_PLAYWRIGHT for lane in frozen.lanes))",

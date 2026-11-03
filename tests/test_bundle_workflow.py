@@ -255,7 +255,12 @@ def test_the_builder_puts_the_browser_lock_into_the_pinned_wheel_of_a_release_bu
 
 def test_the_bundle_tests_job_runs_the_browser_pin_tests_and_the_install_job_runs_the_real_browser_step():
     run = "\n".join(str(s.get("run", "")) for s in MAIN["jobs"]["bundle-tests"]["steps"])
-    assert "tests/test_bundle_browser.py" in run and "tests/test_bundle_browser_lock.py" in run
+    assert "tests/test_bundle_browser.py" in run and "tests/test_bundle_browser_lock.py" in run and "tests/test_browser_mutations.py" in run
     install = MAIN["jobs"]["bundle-install"]
     assert "browser.lock.json" in install["name"] or "pin" in install["name"]
     assert any("tools/bundle_acceptance.sh" in str(s.get("run", "")) for s in install["steps"])
+
+
+def test_the_install_job_checks_that_the_fallback_urls_of_the_pin_serve_the_pinned_bytes():
+    runs = [str(s.get("run", "")) for s in MAIN["jobs"]["bundle-install"]["steps"]]
+    assert any(r.strip() == "python -I packages/qa-runner/src/qa_runner/browser_pin.py urls --lock bundle/browser.lock.json --fallbacks-only" for r in runs)

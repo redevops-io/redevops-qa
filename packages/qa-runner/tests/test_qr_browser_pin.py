@@ -537,3 +537,41 @@ def test_the_module_runs_isolated_with_the_standard_library_only(tmp_path, fake)
     assert done.returncode == 1 and "NOT_INSTALLED" in done.stderr
     imported = {line.split("|")[-1].strip().split(".")[0] for line in done.stderr.splitlines() if line.startswith("import time:")}
     assert not ({"playwright", "yaml", "robot", "pytest", "qa_evidence", "redevops_qa_bridge", "agent_harness"} & imported)
+
+
+# ------------------------------------------------------------------------------------------------------------------------------ do the listed URLs serve the pinned bytes
+class _Body(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_check_urls_reports_every_url_that_does_not_serve_the_pinned_bytes(fake):
+    good = {a.file: (fake.archives_dir / a.file).read_bytes() for a in fake.lock.archives}
+    log = []
+
+    def opener(req, timeout=0):
+        url = req.full_url
+        file = url.rsplit("/", 1)[-1]
+        if "/second/" in url and file == "ffmpeg-linux.zip":
+            return _Body(good[file][:-1] + b"X")                    # another mirror, other bytes
+        if "/second/" in url and file == "chrome-linux64.zip":
+            raise OSError("not reachable")
+        return _Body(good[file])
+    bad = bp.check_urls(fake.lock, log.append, opener=opener)
+    assert sorted(bad) == ["https://example.invalid/second/chrome-linux64.zip", "https://example.invalid/second/ffmpeg-linux.zip"]
+    assert sum(1 for x in log if x.startswith("same bytes")) == 4 and sum(1 for x in log if x.startswith("MISMATCH")) == 2
+    assert bp.check_urls(fake.lock, opener=lambda req, timeout=0: _Body(good[req.full_url.rsplit("/", 1)[-1]])) == []
+
+
+def test_check_urls_can_skip_the_first_url_of_each_archive(fake):
+    seen = []
+    good = {a.file: (fake.archives_dir / a.file).read_bytes() for a in fake.lock.archives}
+
+    def opener(req, timeout=0):
+        seen.append(req.full_url)
+        return _Body(good[req.full_url.rsplit("/", 1)[-1]])
+    assert bp.check_urls(fake.lock, fallbacks_only=True, opener=opener) == []
+    assert seen and all("/second/" in u for u in seen) and len(seen) == len(fake.lock.archives)
