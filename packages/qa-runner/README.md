@@ -12,6 +12,11 @@ copied.
 Scope of this release line: Linux x86_64, Playwright Chromium and Robot Framework. macOS runs are development evidence only (`doctor` says so). Selenium and
 Appium are not part of this workflow. Nothing here has been run on any other platform.
 
+Installing: from a checkout, as the tests and the CI jobs do (the `src` directories on `PYTHONPATH`, the pinned trees fetched into `.pinned`); or from the pinned bundle (`bundle/README.md`,
+built by `tools/build_bundle.py`): a wheelhouse with a hash for every wheel, installed with `pip install --no-index --find-links wheelhouse --require-hashes -r requirements.lock` into a new
+directory, for CPython 3.12 on Linux x86_64 only. A bundle install keeps `pins.toml` and the pinned trees under `<prefix>/share/redevops-qa/` and the pin check runs against those copies
+(`REDEVOPS_QA_PINS` still overrides; a checkout above the environment is not used instead). Chromium is downloaded by the bundle's separate browser step and is recorded, not hashed, by the bundle.
+
 ## Commands
 
 ```text

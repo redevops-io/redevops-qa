@@ -4,7 +4,8 @@ version = "0.1.0.dev0"
 description = "The redevops-qa command: doctor, run and (in later parts) freeze, verify, report, inspect and demo for ReDevOps QA runs"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
+license = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause"
+license-files = ["LICENSE*"]      # the family licence texts; tools/build_bundle.py copies them next to this file before it builds the wheel
 # Standard library and the repository's own packages only. The two pinned upstreams (runtime-contracts, agent-harness) are found through
 # pins.toml, not through pip; Playwright and Robot Framework are optional pinned extras of their own packages.
 dependencies = []
@@ -16,8 +17,12 @@ dev = ["pytest>=8"]
 redevops-qa = "qa_runner.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The reviewed Robot suite is data the runner reads from its own directory (suites.py); without this a wheel would lack the .robot file.
+[tool.setuptools.package-data]
+"qa_runner.robot_suite" = ["*.robot"]
