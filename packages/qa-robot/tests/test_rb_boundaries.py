@@ -72,9 +72,11 @@ def test_the_licence_check_accepts_the_repository_with_this_package():
     assert chk.run(ROOT / "third_party" / "adapter-license-matrix.yaml", ROOT) == []
 
 
-def test_the_matrix_records_robot_as_an_optional_extra_with_unverified_bundled_assets():
-    assert ROBOT["redistribution"]["status"] == "optional_extra"
-    assert any(d["spdx"] == "unverified" for d in ROBOT["bundled_deps"])
+def test_the_matrix_records_robot_as_shipped_unmodified_for_private_staging_only_with_unverified_bundled_assets():
+    assert ROBOT["redistribution"]["status"] == "staged_unmodified" and ROBOT["redistribution"]["public_distribution"] == "owner_decision_required"
+    assert "PRIVATE STAGING ONLY" in ROBOT["redistribution"]["reason"]
+    unverified = [d for d in ROBOT["bundled_deps"] if d["spdx"] == "unverified"]
+    assert len(unverified) == 2 and all("robot/htmldata/lib/" in d["name"] for d in unverified)
 
 
 def test_the_default_allowlist_matches_the_documented_one():
