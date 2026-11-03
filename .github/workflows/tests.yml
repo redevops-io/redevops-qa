@@ -318,8 +318,8 @@ jobs:
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
             PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" \
             python -m pytest -q -m egress packages/qa-runner/tests/egress --junitxml="$RUNNER_TEMP/junit-runner-egress.xml"
-      - name: Fail on zero collected tests or any skip
-        run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner-egress.xml"
+      - name: Fail on zero collected tests, any skip, or a number of tests other than the one expected (a deleted or deselected test cannot stay green)
+        run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner-egress.xml" --expect-tests 30
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 

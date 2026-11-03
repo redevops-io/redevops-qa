@@ -137,3 +137,17 @@ def test_what_the_lane_child_could_not_keep_is_carried_to_the_run_so_that_the_re
     doc["not_kept"] = ["x" * 400]
     (tmp_path / "outcome.json").write_bytes(dumps_canonical(doc))
     assert _read(LANE, tmp_path, Budget(10_000_000)) == (None, [])
+
+
+def test_the_lane_child_leaves_without_running_the_interpreters_shutdown_and_keeps_its_exit_status_and_its_streams(tmp_path):
+    """The CI crash (SIGSEGV during interpreter shutdown, after the result was written) is avoided by leaving with ``os._exit`` once the streams are flushed. An ``atexit`` handler stands for the
+    shutdown: it must not run, the exit status must be the one ``main`` returned (2: a lane input that cannot be read) and what ``main`` wrote to standard error must still arrive."""
+    import subprocess
+    import sys
+    from qa_runner.procs import child_env
+    code = ("import atexit, runpy, sys\natexit.register(lambda: sys.stdout.write('ATEXIT-RAN'))\nsys.argv = ['lane_browser', %r]\n"
+            "runpy.run_module('qa_runner.lane_browser', run_name='__main__', alter_sys=True)\n") % str(tmp_path / "missing.json")
+    done = subprocess.run([sys.executable, "-s", "-c", code], env=child_env(str(tmp_path)), cwd=str(tmp_path), capture_output=True, text=True, timeout=60)
+    assert done.returncode == 2, (done.returncode, done.stderr)
+    assert "ATEXIT-RAN" not in done.stdout, "the interpreter's shutdown ran"
+    assert "lane input unreadable" in done.stderr

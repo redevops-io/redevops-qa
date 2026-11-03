@@ -353,6 +353,8 @@ CASES = [
      [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[a switch given twice with the same value]")]),
     ("nothing a killed child wrote is kept as the engine's record", "orchestrate.py", '    if proc.exit_code != 0 and raw_status != "lane-error":', "    if False:",
      [t(CRASH, "test_nothing_the_killed_child_wrote_is_kept_as_the_engines_own_record_so_verify_accepts_the_bundle_as_honest")]),
+    ("the lane child leaves without the interpreter's shutdown", "lane_browser.py", "    os._exit(code)", "    sys.exit(code)",
+     [t(CHILD, "test_the_lane_child_leaves_without_running_the_interpreters_shutdown_and_keeps_its_exit_status_and_its_streams")]),
     ("the Playwright proxy option must remove the loopback bypass", "egress.py", '    if proxy.get("bypass") != "<-loopback>":', "    if False:",
      [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[playwright proxy bypass changed]")]),
     ("a launch configuration for another gateway is refused", "egress.py", '    if proxy.get("server") != server:', "    if False:", [t(EGCFG, "test_every_protection_removed_from_the_launch_configuration_is_named[playwright proxy names another server]")]),

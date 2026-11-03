@@ -242,6 +242,7 @@ def test_the_runner_egress_job_runs_only_the_egress_tests_in_a_scrubbed_environm
     fetches = [s for s in job["steps"] if "repository" in s.get("with", {})]
     assert len(fetches) == 2 and "--verify-trees --require-git" in steps
     assert steps.count('test -z "$(git status --porcelain)"') == 2
+    assert "--expect-tests 30" in steps                                         # the number of tests the egress lane holds: a deleted or deselected test is not green
     offline = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["runner"]["steps"])
     assert "-m egress" not in offline
 

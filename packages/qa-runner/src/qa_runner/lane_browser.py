@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -220,4 +221,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    # Leave without running the interpreter's shutdown. Everything the lane has to say is already on disk (written and closed before ``main`` returns) and on the two standard streams, which are
+    # flushed here. On ubuntu-24.04, in 24 of 24 CI runs of a lane whose navigation had timed out (a hostile page that opens a WebSocket to a refused origin), the process was killed by SIGSEGV
+    # DURING interpreter shutdown, after ``main`` had returned and the result file was complete (faulthandler: no Python frame, extension module greenlet); with this exit the same runs ended
+    # with exit status 0 (24 of 24). Without it an honest result was followed by a crash that the parent can only read as a signal. The parent supervises the process group, so nothing is left behind.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)

@@ -29,8 +29,8 @@ redevops-qa inspect BUNDLE [--anchor sha256:HEX] [--plan-digest sha256:HEX]
 **`doctor`** reports Python, platform, the temporary directory, the pinned dependencies (commits, tree digests and vector files against `pins.toml`),
 Playwright 1.64.1 and a real headless Chromium launch, Robot Framework 7.5, the fixture app and the egress gateway. Each check is `OK`, `WARN` (works, outside
 what this release claims: any platform but Linux x86_64) or `FAIL`, with the command that fixes it. It never installs, downloads or changes anything. A
-protection that cannot be provided is a `FAIL`: the egress gateway that every browser lane depends on must start, the browser launch configuration must be available, and it must be complete
-(`qa_runner.egress.launch_config_problems`: the explicit proxy, Chromium's implicit loopback bypass removed, no name resolution in the browser, no QUIC, no WebRTC traffic outside the proxy). The
+protection that cannot be provided is a `FAIL`: the egress gateway that every browser lane depends on must start, the browser launch configuration must be available, and it must be complete and closed
+(`qa_runner.egress.launch_config_problems`: only the arguments `qa-egress` itself produces, none twice; the explicit proxy, Chromium's implicit loopback bypass removed, no name resolution in the browser, no QUIC, no WebRTC traffic outside the proxy). The
 browser lane applies the same check before it starts a browser. Exit status 0, or 3 if a check failed.
 
 **`freeze`** validates a plan (the strict runtime-contracts parser first, then the harness mirror; unknown fields refused at every level), computes every assertion's digest, the
@@ -168,8 +168,18 @@ native status that says so; its assertions are `INCONCLUSIVE`; the run is never 
   origin sees nothing and the gateway refuses every attempt as not listed; with Chromium's defaults, and with `--proxy-server` alone (what a driver that only adds a proxy flag does), it is reached by every
   path, so the protected result is not an empty one. The same page is given to the orchestrated lane (both layers on). The gateway is stopped after the first page of a real run: the lane fails closed and
   the target never sees a later request.
-* **What is not shown:** HTTPS interception, DNS rebinding at browser level, headed mode, other browsers (Selenium's driver does not apply the launch configuration), other platforms than the one that runs
-  the job. A page that opens a WebSocket to a refused origin keeps the page from finishing its load in the orchestrated lane; the navigation step then times out and the lane is INCONCLUSIVE, never a pass.
+* **What is not shown:** HTTPS interception, DNS rebinding at browser level, headed mode, other browsers (Selenium's driver does not apply the launch configuration), other platforms than the one
+  that runs the job. "The hostile origin sees nothing" is counted in HTTP request lines AND in accepted TCP connections (a bare connect, a TLS ClientHello); rows exist for an image over https and a
+  secure WebSocket, with controls that must open a connection. A `<link rel=preconnect>` opened no connection in the pinned Chromium even with every protection off, so there is no row for it.
+  Removing a single flag from the launch configuration (the DNS, QUIC or proxy flags) is not detectable at browser level with cleartext HTTP on loopback; only the WebRTC flag changed results.
+* **A page that opens a WebSocket to a refused origin** keeps the page from finishing its load in the orchestrated lane (both egress layers on): the navigation step times out and the lane ends
+  INCONCLUSIVE, never a pass. The lane child returns 0 with a COMPLETED result file (the lane's own exit code is 4); the exit status 3 of the run comes from the orchestrator.
+* **A lane child that crashed on ubuntu-24.04 (found by the egress tests, understood from CI runs, fixed).** After the timed-out navigation of that page the lane child process was killed by SIGSEGV
+  in 24 of 24 CI runs (Python 3.12.15, Playwright 1.64.1, greenlet 3.5.6), in the same way with `-X dev`. It happened AFTER `main` had returned and the result file was complete (the crash is in
+  interpreter shutdown: faulthandler shows no Python frame and the extension module `greenlet`); it did not happen in 24 of 24 runs that left through `os._exit`. The child now flushes its streams
+  and leaves with `os._exit`. What is guaranteed either way: a child killed by a signal is a lane error (`child-signal-N`), never a verdict; nothing it wrote is kept as the engine's own record (so
+  `verify` accepts the bundle as honest rather than refusing a relabelled status); every process it started is ended with its process group. What is not known: why greenlet fails in shutdown after
+  a timed-out navigation (a defect of the pinned Playwright/greenlet pair is the likely cause; not investigated further), and whether other Python or platform builds are affected.
 
 ## Bounded reads
 

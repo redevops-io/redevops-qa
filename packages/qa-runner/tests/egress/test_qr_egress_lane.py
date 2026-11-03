@@ -61,23 +61,20 @@ def test_the_orchestrated_lane_given_the_hostile_page_loads_it_and_the_hostile_o
 
 
 def test_the_orchestrated_lane_given_the_full_hostile_page_including_the_websocket_still_sends_the_hostile_origin_nothing(up, tmp_path, record_property):
-    """The WebSocket attempt keeps the page from finishing its load: the navigation step times out and the lane does not run to a verdict. How the CHILD process ends is recorded (junit property and
-    the assertion message), not hidden: where this was written (macOS arm64) the child returns 0 with a COMPLETED result whose outcome is INCONCLUSIVE (the lane's exit code 4; exit 3 is what the
-    orchestrator makes of an INCONCLUSIVE lane); on ubuntu-24.04 it was killed by SIGSEGV in CI runs of this test (see the README). What is asserted either way: the browser ran (the allowed origin
-    served the page), the hostile TCP origin saw no request and no connection, the UDP listener saw nothing, and the lane never ends as a pass."""
+    """The WebSocket attempt keeps the page from finishing its load: the navigation step times out and the lane does not run to a verdict. The lane child must still END NORMALLY: it exits 0
+    with a COMPLETED result file whose outcome is not a pass (the lane's own exit code is 4; exit 3 is what the orchestrator makes of such a lane). Before the child left through ``os._exit`` it was
+    killed by SIGSEGV during interpreter shutdown on ubuntu-24.04 in every CI run of this test (24 of 24), after the result was written; any signal here is a failure again. Also asserted: the
+    browser ran (the allowed origin served the page), the hostile TCP origin saw no request and no connection, and the UDP listener saw nothing."""
     proc, doc, seen, a, b, out = hostile_lane(up, tmp_path, PAGE)
     ended = f"exit {proc.exit_code}" if proc.exit_code is not None else f"signal {proc.signal}"
     record_property("lane_child_end", ended)
-    record_property("lane_result_file", "present" if doc is not None else "absent")
     assert "/page" in seen["a_seen"], f"the browser never loaded the page (the child ended: {ended}): the silence below would mean nothing; stderr: {proc.stderr[-500:]!r}"
     assert seen["b_hits"] == frozenset(), sorted(seen["b_hits"])
     assert seen["b_connections"] == 0, seen["b_connections"]
     assert seen["udp"] == 0
-    if proc.exit_code is not None:
-        assert proc.exit_code in (0, 3) and doc is not None, (ended, proc.stderr[-500:])
-        assert not (doc["status"] == "COMPLETED" and doc["outcome"] == "PASS"), doc
-    else:
-        assert proc.signal is not None, "the child ended with neither an exit code nor a signal"
+    assert proc.exit_code == 0 and proc.signal is None, f"the lane child did not end normally ({ended}); stderr: {proc.stderr[-800:]!r}"
+    assert doc is not None and doc["status"] == "COMPLETED", doc
+    assert doc["outcome"] != "PASS" and doc["exit_code"] != 0, {k: doc[k] for k in ("outcome", "reason", "exit_code")}
 
 
 def lane_command(mode):
