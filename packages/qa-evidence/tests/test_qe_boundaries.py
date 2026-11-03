@@ -50,7 +50,7 @@ def test_no_module_touches_the_network_a_shell_or_a_subprocess(path):
 def test_the_package_declares_no_dependency_and_its_licence():
     data = tomllib.loads((PKG / "pyproject.toml").read_text())
     assert data["project"]["dependencies"] == []
-    assert data["project"]["license"]["text"] == "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause"
+    assert data["project"]["license"] == "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" and data["project"]["license-files"] == ["LICENSE*"]      # an SPDX string; the wheel carries the texts
     assert data["project"]["requires-python"] == ">=3.11"
     assert data["project"]["scripts"] == {"redevops-qa-evidence": "qa_evidence.cli:main"}
     assert data["tool"]["setuptools"]["package-data"] == {"qa_evidence": ["schemas/*.json"]}

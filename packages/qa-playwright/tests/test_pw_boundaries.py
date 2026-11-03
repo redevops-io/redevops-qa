@@ -57,7 +57,7 @@ def test_the_package_declares_no_runtime_dependency_and_playwright_only_as_an_op
     meta = tomllib.loads((PKG / "pyproject.toml").read_text())
     assert meta["project"]["dependencies"] == []
     assert meta["project"]["optional-dependencies"]["browser"] == ["playwright==1.64.1"]
-    assert meta["project"]["license"]["text"] == "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause"
+    assert meta["project"]["license"] == "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" and meta["project"]["license-files"] == ["LICENSE*"]      # an SPDX string; the wheel carries the texts
 
 
 def test_every_source_and_test_file_has_the_spdx_header():
