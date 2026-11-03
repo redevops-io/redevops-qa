@@ -457,7 +457,7 @@ CASES += [
      [t(BDOC, "test_a_pin_for_another_revision_than_the_installed_playwright_expects_fails")]),
     ("doctor: the pin is for the installed Playwright version", "doctor.py", "    if have != lock.playwright_version:\n", "    if False:\n",
      [t(BDOC, "test_a_pin_for_another_playwright_version_fails")]),
-    ("pin: a URL that serves other bytes than the pin is reported", "browser_pin.py", "                    bad.append(url)\n", "                    pass\n",
+    ("pin: a URL that serves other bytes than the pin is reported", "browser_pin.py", "                    bad.append(redact(url))\n", "                    pass\n",
      [t(PIN, "test_check_urls_reports_every_url_that_does_not_serve_the_pinned_bytes")]),
     ("pin: credentials in a mirror URL are never shown", "browser_pin.py", '    return re.sub(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/?#\\s]*@", r"\\1", url)\n', "    return url\n",
      [t(PIN, "test_credentials_in_a_mirror_url_are_not_shown_anywhere"), t(PIN, "test_redact_removes_only_the_userinfo")]),

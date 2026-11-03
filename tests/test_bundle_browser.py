@@ -319,19 +319,25 @@ def test_a_signal_sent_to_the_script_alone_stops_the_download_at_once_and_cleans
     import time
     before = tree_listing(w["prefix"])
     with bh.serve(fake.archives_dir, delay=30) as url:
+        # SIGINT is ignored by a process that a non-interactive shell started with `&` (and so by everything it starts): put the default back so that the script can trap it, as it can from a terminal
         proc = subprocess.Popen(["bash", str(w["bundle"] / SCRIPT), "--prefix", str(w["prefix"]), "--mirror", url], env=clean_env(w["home"]), cwd=str(w["home"]), stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True)
-        deadline = time.time() + 60
-        kids = []
-        while time.time() < deadline and not kids:
-            kids = children_of(proc.pid)
-            time.sleep(0.1)
-        assert kids, "the download process was never started"
-        time.sleep(0.5)
-        t0 = time.time()
-        os.kill(proc.pid, getattr(signal, sig_name))
-        proc.communicate(timeout=20)
-        elapsed = time.time() - t0
+                                stderr=subprocess.PIPE, text=True, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+        try:
+            deadline = time.time() + 60
+            kids = []
+            while time.time() < deadline and not kids:
+                kids = children_of(proc.pid)
+                time.sleep(0.1)
+            assert kids, "the download process was never started"
+            time.sleep(0.5)
+            t0 = time.time()
+            os.kill(proc.pid, getattr(signal, sig_name))
+            proc.communicate(timeout=20)
+            elapsed = time.time() - t0
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
     assert proc.returncode == code and elapsed < 10, (proc.returncode, elapsed)
     time.sleep(0.5)
     assert not any(alive(k) for k in kids), "the download process outlived the script"
