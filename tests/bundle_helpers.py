@@ -92,6 +92,11 @@ def run_script(bundle: Path, script: str, args: Sequence[str], home: Path, *, py
     return subprocess.run(argv, env=clean_env(home), cwd=str(home), capture_output=True, text=True, timeout=300)
 
 
+def synthetic_wheel(bundle: Path) -> Path:
+    """The synthetic wheel of a mini bundle (not the adapter-kit wheel, which sits in the same wheelhouse; the directory order of two files is not the same on every file system)."""
+    return next((bundle / "wheelhouse").glob("redevops_qa_testpkg-*.whl"))
+
+
 def resum(bundle: Path) -> None:
     """Rewrite SHA256SUMS for whatever the directory holds now (what someone who tampers with a bundle and wants the first check to pass would do)."""
     (bundle / "SHA256SUMS").write_text(bb.sha256sums_text(bundle), encoding="utf-8")

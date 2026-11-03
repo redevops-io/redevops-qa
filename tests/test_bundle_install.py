@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from bundle_helpers import bb, clean_env, host_target, make_mini_bundle, make_wheel, resum, run_script, tree_listing
+from bundle_helpers import bb, clean_env, host_target, make_mini_bundle, make_wheel, resum, run_script, synthetic_wheel, tree_listing
 
 
 @pytest.fixture(scope="module")
@@ -136,7 +136,7 @@ def test_the_real_release_target_is_refused_on_any_host_that_is_not_that_target(
 
 def test_a_tampered_wheel_is_refused_by_the_sums_first_and_nothing_is_created(bundles, box):
     bundle = fresh_copy(bundles["v1"], box)
-    wheel = next((bundle / "wheelhouse").glob("*.whl"))
+    wheel = synthetic_wheel(bundle)
     wheel.write_bytes(wheel.read_bytes() + b"tampered")
     done = run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home")
     assert done.returncode == 4 and "checksum differs" in done.stderr and not (box / "qa").exists()
@@ -144,7 +144,7 @@ def test_a_tampered_wheel_is_refused_by_the_sums_first_and_nothing_is_created(bu
 
 def test_a_tampered_wheel_whose_sums_were_rewritten_is_refused_by_pip_require_hashes_and_the_prefix_is_removed(bundles, box):
     bundle = fresh_copy(bundles["v1"], box)
-    wheel = next((bundle / "wheelhouse").glob("*.whl"))
+    wheel = synthetic_wheel(bundle)
     wheel.write_bytes(wheel.read_bytes() + b"tampered")
     resum(bundle)                                       # the first check now passes: what is left is pip's own, against requirements.lock
     done = run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home")
@@ -155,7 +155,7 @@ def test_a_tampered_wheel_whose_sums_were_rewritten_is_refused_by_pip_require_ha
 
 def test_a_wheel_swapped_for_another_build_of_it_is_refused(bundles, box):
     bundle = fresh_copy(bundles["v1"], box)
-    old = next((bundle / "wheelhouse").glob("*.whl"))
+    old = synthetic_wheel(bundle)
     swapped = make_wheel(box, "1.0", marker="evil")                  # same name and version, other contents
     old.write_bytes(swapped.read_bytes())
     resum(bundle)
@@ -208,7 +208,7 @@ def test_a_missing_file_of_the_bundle_is_refused(bundles, box):
     (bundle / "BUNDLE.json").unlink()
     assert run_script(bundle, "install.sh", ["--prefix", str(box / "qa")], box / "home").returncode == 4
     bundle2 = fresh_copy(bundles["v2"], box)
-    next((bundle2 / "wheelhouse").glob("*.whl")).unlink()
+    synthetic_wheel(bundle2).unlink()
     done = run_script(bundle2, "install.sh", ["--prefix", str(box / "qa2")], box / "home")
     assert done.returncode == 4 and "listed but missing" in done.stderr and not (box / "qa2").exists()
 
@@ -235,7 +235,7 @@ def test_a_failed_install_of_the_new_bundle_leaves_the_running_installation_work
     running = box / "running"
     assert run_script(bundles["v1"], "install.sh", ["--prefix", str(running)], box / "home").returncode == 0
     broken = fresh_copy(bundles["v2"], box)
-    wheel = next((broken / "wheelhouse").glob("*.whl"))
+    wheel = synthetic_wheel(broken)
     wheel.write_bytes(wheel.read_bytes() + b"x")
     resum(broken)
     assert run_script(broken, "install.sh", ["--prefix", str(box / "next")], box / "home").returncode == 6
