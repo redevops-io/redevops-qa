@@ -30,6 +30,10 @@ Actions `open`, `click`, `type`, `read`, `check`, `screenshot`, one at a time un
   bounds the start too, so give that action a larger one. `close()` and `abort()` cancel a start that has not finished: the browser
   is quit the moment its start returns, so an abandoned start does not leave a browser running. The start itself cannot be interrupted
   from outside; it is bounded by ChromeDriver's own start-up limits.
+  A start that returns in the very instant the budget runs out counts as a success and its browser is kept. A start that really timed
+  out leaves the adapter terminal until `close()`: the late browser is quit when its start returns, every further `start()` or action
+  raises a `TIMEOUT` fault without launching a second browser (inside a session the later actions of that session fail fast the same
+  way), and `close()` makes the adapter usable again. A factory that raises `KeyboardInterrupt` or `SystemExit` propagates it unchanged.
 * Screenshots are off unless enabled, because an image cannot be redacted.
 * Stale and not-interactable elements are retried within the session's retry limit; a missing element, a timeout and a browser crash are
   not. A missing Selenium, browser or driver executable is `ERROR` with code `UNAVAILABLE`: never a pass, never a skip, no fallback.

@@ -170,7 +170,9 @@ def test_a_launch_budget_timeout_in_the_lazy_path_starts_no_second_browser_for_t
     assert first.status is Status.ERROR and first.error_code is ErrorCode.TIMEOUT
     second = s.perform(act(1, "open", HOME, timeout_s=5))
     assert second.status is Status.ERROR and second.error_code is ErrorCode.TIMEOUT
-    assert eventually(lambda: made and made[0].quit_called) and len(made) == 1 and adapter._driver is None
+    assert eventually(lambda: made and made[0].quit_called)
+    time.sleep(0.7)                                                    # longer than a second start would take: a second browser would exist by now
+    assert len(made) == 1 and adapter._driver is None
     s.close()
 
 
@@ -266,3 +268,35 @@ def _swallow(fn):
         fn()
     except Exception:
         pass
+
+
+def test_a_waiter_left_behind_by_close_does_not_re_arm_the_terminal_state(tmp_path):
+    made = []
+    delays = [0.8, 0.0]                                                # the first start is slow, the next one is fast
+
+    def factory():
+        time.sleep(delays.pop(0))
+        made.append(FakeBrowser(site()))
+        return made[-1]
+    _, adapter, _ = make_session(tmp_path, factory=factory, config=config(0.3))
+    outcome = []
+
+    def starter():
+        try:
+            adapter.start()
+            outcome.append("started")
+        except AdapterFault as exc:
+            outcome.append(exc.code)
+    t = threading.Thread(target=starter)
+    t.start()
+    time.sleep(0.1)
+    adapter.close()                                                    # while the start is running; the waiter's budget (0.3 s) runs out afterwards
+    t.join(5)
+    assert outcome == [ErrorCode.INVALID_REQUEST]                      # "closed while starting", not a timeout
+    adapter.start()                                                    # the adapter was closed: a fresh start works, no second close() needed
+    held = adapter._driver
+    assert held is not None and not held.quit_called
+    assert eventually(lambda: len(made) == 2)                          # the abandoned slow start finishes later and is quit, the held browser is not
+    late = next(b for b in made if b is not held)
+    assert eventually(lambda: late.quit_called) and not held.quit_called
+    adapter.close()

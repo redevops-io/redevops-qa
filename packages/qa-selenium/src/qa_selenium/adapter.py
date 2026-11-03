@@ -157,7 +157,9 @@ class SeleniumInteractiveAdapter:
                 threading.Thread(target=self._run_launch, args=(launch,), daemon=True, name="qa-selenium-launch").start()
         if not launch.done.wait(self.config.launch_timeout_s):
             with self._lock:
-                finished = launch.stored or launch.exc is not None      # the launch returned in the instant the budget ran out: its result stands
+                # The launch returned in the instant the budget ran out (its result stands), or close() already cancelled it (this waiter was left
+                # behind and must neither report a timeout nor re-arm the terminal state of an adapter that was closed).
+                finished = launch.stored or launch.exc is not None or launch.cancelled
                 if not finished:
                     launch.cancelled = True
                     if self._launch is launch:
