@@ -220,4 +220,16 @@ def test_the_root_check_script_covers_the_refusal_the_working_prefix_the_evidenc
     assert "curl" not in text and "wget" not in text
     for line in text.splitlines():
         if re.search(r"\brm -rf\b", line) and not line.lstrip().startswith("#"):
-            assert '"$work"' in line and '"$evidence"' in line and '"$tmpd"' in line and "/tmp/qa-root-check-" in line, line               # it removes only what it made
+            own = '"$work"' in line and '"$evidence"' in line and '"$tmpd"' in line and "/tmp/qa-root-check-" in line
+            assert own or line.strip().startswith('[ ! -e "$prefix/INSTALL.json" ] || rm -rf -- "$prefix"'), line               # it removes only what it made
+
+
+def test_the_root_check_uninstalls_before_it_removes_the_directory_that_holds_uninstall_sh():
+    """A failure after step 2 used to leave /opt/redevops-qa-root-check installed: the cleanup removed the work directory first and then looked for uninstall.sh in it."""
+    text = (ROOT / "tools" / "bundle_root_check.sh").read_text(encoding="utf-8")
+    body = text[text.index("cleanup() {"):text.index("trap cleanup EXIT")]
+    uninstall = body.index('"$work/$name/uninstall.sh"')
+    remove_work = body.index('rm -rf "$work"')
+    assert uninstall < remove_work
+    assert body.index('[ -e "$prefix/INSTALL.json" ]') < uninstall
+    assert 'rm -rf -- "$prefix"' in body and body.index('rm -rf -- "$prefix"') < remove_work              # and the prefix is gone even if uninstall.sh refused

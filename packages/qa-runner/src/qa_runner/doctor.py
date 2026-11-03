@@ -82,19 +82,22 @@ def _share(prefix: Optional[str]) -> Path:
     return Path(prefix or sys.prefix) / "share" / "redevops-qa"
 
 
-def effective_lane_paths() -> List[Tuple[str, str]]:
-    """The paths a run will put on the command line of its lanes, derived from the same things the run derives them from: the interpreter that starts the lane child, the Robot guard script
-    (``lane_robot.GUARD``), and the working directory ``make_workdir`` creates under the temporary directory (``tempfile.gettempdir()``, which honours ``TMPDIR``), below which the Robot
-    lane's workspace and output directory lie (``lane_robot``: ``workdir/lanes/<lane>/workspace/suite`` and ``.../output``). The evidence directory and ``HOME`` are not on any command line
-    (the lane children get a ``HOME`` of their own under that working directory), so they are not listed; a path that the code starts to hand to a lane belongs here."""
+def effective_lane_paths() -> List[Tuple[str, str, bool]]:
+    """The paths a run will put on the command line of its Robot lane, derived from the same things the run derives them from: the interpreter that starts the lane child, the Robot guard
+    script (``lane_robot.GUARD``), and the working directory ``make_workdir`` creates under the temporary directory (``tempfile.gettempdir()``, which honours ``TMPDIR``), below which the
+    Robot lane's workspace and output directory lie (``lane_robot``: ``workdir/lanes/<lane>/workspace/suite`` and ``.../output``). The evidence directory and ``HOME`` are not on any command
+    line (the lane children get a ``HOME`` of their own under that working directory), so they are not listed; a path that the code starts to hand to a lane belongs here.
+    Each entry is ``(what, path, resolved)``. The interpreter and the guard script are tested as the command line gives them (``sys.executable`` as it is, and ``GUARD``, which the lane module
+    has already made a real path): the adapter kit does not follow a link there, and a venv's ``bin/python`` is a link to the interpreter it was made from, which may live under ``/root`` while
+    the installation does not. The working directory and the paths below it are tested as given and by their real path as well (a ``TMPDIR`` that is a link into a refused place)."""
     try:
         from .lane_robot import GUARD
     except ImportError:                          # the Robot packages are not installed: doctor says so in its own check
-        GUARD = str(Path(__file__).with_name("robot_guard.py"))
+        GUARD = str(Path(__file__).resolve().with_name("robot_guard.py"))
     workdir = Path(tempfile.gettempdir()) / "redevops-qa-<random>"
     lane = workdir / "lanes" / "robot"
-    return [("the interpreter", sys.executable), ("the Robot guard script", GUARD), ("the temporary working directory of a run (from TMPDIR)", str(workdir)),
-            ("the Robot lane's workspace", str(lane / "workspace" / "suite")), ("the Robot lane's output directory", str(lane / "output"))]
+    return [("the interpreter", sys.executable, False), ("the Robot guard script", GUARD, False), ("the temporary working directory of a run (from TMPDIR)", str(workdir), True),
+            ("the Robot lane's workspace", str(lane / "workspace" / "suite"), True), ("the Robot lane's output directory", str(lane / "output"), True)]
 
 
 def path_rule(path: str) -> str:
@@ -115,22 +118,36 @@ def path_rule(path: str) -> str:
     return ""
 
 
-def check_path_policy(paths: Optional[Sequence[Tuple[str, str]]] = None, is_denied: Optional[Callable[[str], bool]] = None) -> Check:
-    """The adapter kit refuses a command whose arguments name a prohibited path (``/root``, ``/etc``, a ``.config`` component, ...). A run whose lane command lines would name one ends
+def check_path_policy(paths: Optional[Sequence[Tuple]] = None, is_denied: Optional[Callable[[str], bool]] = None, *, robot: bool = True) -> Check:
+    """The adapter kit refuses a command whose arguments name a prohibited path (``/root``, ``/etc``, a ``.config`` component, ...). A run whose Robot lane command line would name one ends
     INCONCLUSIVE (``PROHIBITED_PATH``) when the Robot lane starts; this names the path and the rule before ``demo`` runs, and ``run`` and ``demo`` make the same check themselves before
-    they start anything. The rule is the adapter kit's own (``qa_adapter_kit.paths.is_denied``); it is not relaxed or special-cased here."""
+    they start anything. The rule is the adapter kit's own (``qa_adapter_kit.paths.is_denied``); it is not relaxed or special-cased here. Only the Robot lane has such a command line: with
+    ``robot=False`` (a plan without a Robot lane, ``doctor --engines`` without it) nothing is checked, and the detail says so.
+    ``paths`` are ``(what, path)`` (tested as given) or ``(what, path, resolved)`` (also by the real path when ``resolved``)."""
     from qa_adapter_kit.paths import DENIED_COMPONENTS as kit_components, DENIED_PREFIXES as kit_prefixes
+    if not robot:
+        return Check("adapter path policy", "OK", "not checked: no Robot lane in this run, and only the Robot lane's command line carries the interpreter, the guard script and the working directory")
     if is_denied is None:
         from qa_adapter_kit.paths import is_denied as kit_is_denied
         is_denied = kit_is_denied
     if paths is None:
         paths = effective_lane_paths()
-    bad = [(what, os.path.normpath(p)) for what, p in paths if is_denied(os.path.normpath(p)) or is_denied(os.path.realpath(p))]
+    bad = []
+    for item in paths:
+        what, path = item[0], item[1]
+        resolved = bool(item[2]) if len(item) > 2 else False
+        given = os.path.normpath(path)
+        if is_denied(given):
+            bad.append(f"{what} is {given} ({path_rule(given) or 'refused'})")
+        elif resolved and is_denied(os.path.realpath(path)):
+            real = os.path.realpath(path)
+            bad.append(f"{what} is {given}, whose real path {real} is refused ({path_rule(real) or 'refused'})")
     if bad:
-        return Check("adapter path policy", "FAIL", "; ".join(f"{what} is {p} ({path_rule(p) or 'its real path is refused'})" for what, p in bad)
-                     + ": the adapter path policy refuses these paths, so the Robot lane of a run would end INCONCLUSIVE (PROHIBITED_PATH)",
-                     "install into a directory the policy accepts (as root, not under /root: for example /opt/redevops-qa) and set TMPDIR to such a directory; the refused places are "
-                     + ", ".join(kit_prefixes) + " and any path with a component such as " + ", ".join(sorted(kit_components)[:4]) + " (the list of qa_adapter_kit.paths, which is not relaxed)")
+        return Check("adapter path policy", "FAIL", "; ".join(bad) + ": the adapter path policy refuses these paths, so the Robot lane of a run would end INCONCLUSIVE (PROHIBITED_PATH)",
+                     "install into a directory the policy accepts (as root, not under /root: for example /opt/redevops-qa) and set TMPDIR to such a directory; the interpreter and the guard script "
+                     "are tested by the path the installation gives them (a link from the virtual environment to a Python kept elsewhere is not followed), the working directory of a run "
+                     "also by its real path; the refused places are " + ", ".join(kit_prefixes) + " and any path with a component such as " + ", ".join(sorted(kit_components)[:4])
+                     + " (the list of qa_adapter_kit.paths, which is not relaxed)")
     return Check("adapter path policy", "OK", "the interpreter, the Robot guard script and the working directory of a run (TMPDIR) are paths the adapter path policy accepts; HOME and the evidence directory are not on a lane command line")
 
 
@@ -278,7 +295,7 @@ def check_workdir() -> Check:
 
 
 def run_doctor(engines: Sequence[str] = (K.ENGINE_PLAYWRIGHT,), *, include: Optional[Sequence[Callable[[], Check]]] = None) -> List[Check]:
-    checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, check_path_policy, check_first_party_modules, check_pins, check_pinned_files]
+    checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, lambda: check_path_policy(robot=K.ENGINE_ROBOT in engines), check_first_party_modules, check_pins, check_pinned_files]
     if K.ENGINE_PLAYWRIGHT in engines:
         checks.append(check_playwright)
     if K.ENGINE_ROBOT in engines:

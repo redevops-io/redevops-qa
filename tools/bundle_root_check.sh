@@ -34,7 +34,14 @@ work="$(mktemp -d)"
 prefix=/opt/redevops-qa-root-check
 evidence=/root/qa-root-check-evidence
 tmpd=/root/qa-root-check-tmp
-cleanup() { rm -rf "$work" "$evidence" "$tmpd" "${evidence}-2" /tmp/qa-root-check-home /tmp/qa-root-check-tmp /tmp/qa-root-check-evidence; [ ! -e "$prefix/INSTALL.json" ] || "$work/$name/uninstall.sh" --prefix "$prefix" >/dev/null 2>&1 || true; }
+cleanup() {
+  # The installation first (uninstall.sh is in the work directory, which is removed after it), then what the script made around it.
+  if [ -e "$prefix/INSTALL.json" ]; then
+    "$work/$name/uninstall.sh" --prefix "$prefix" >/dev/null 2>&1 || true
+    [ ! -e "$prefix/INSTALL.json" ] || rm -rf -- "$prefix"          # the prefix is this script's own, and INSTALL.json says it was made by install.sh
+  fi
+  rm -rf "$work" "$evidence" "$tmpd" "${evidence}-2" /tmp/qa-root-check-home /tmp/qa-root-check-tmp /tmp/qa-root-check-evidence
+}
 trap cleanup EXIT
 tar xf "$current/$name.tar" -C "$work"
 cd "$work/$name"

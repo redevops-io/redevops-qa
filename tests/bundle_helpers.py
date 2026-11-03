@@ -70,12 +70,12 @@ def make_kit_wheel(directory: Path, paths_text: str | None = None, version: str 
 
 
 def make_mini_bundle(out_dir: Path, version: str = "1.0", *, target: Dict[str, str] | None = None, label: str = "", name: str = "redevops-qa-bundle-test",
-                     kit_paths_text: str | None = None, with_kit: bool = False) -> Path:
+                     kit_paths_text: str | None = None, with_kit: bool = True) -> Path:
     """A bundle of one synthetic wheel, built by ``assemble``. Its target is this host unless given."""
     wheels = out_dir / f"wheels-{version}"
     wheels.mkdir(parents=True)
     entries = [bb.WheelEntry(make_wheel(wheels, version), "first-party", "test")]
-    if with_kit or kit_paths_text is not None:
+    if with_kit:                    # the installer reads the path policy from the adapter-kit wheel and refuses a bundle without one
         entries.append(bb.WheelEntry(make_kit_wheel(wheels, kit_paths_text), "first-party", "test"))
     return bb.assemble(out_dir, name=name, entries=entries, target=target or host_target(), epoch=1_700_000_000, label=label, version=version, commit="0" * 40, pins_info=None,
                        licences_from={}, build_tools={}, readme_template=(ROOT / "bundle" / "README.md").read_text(encoding="utf-8"))

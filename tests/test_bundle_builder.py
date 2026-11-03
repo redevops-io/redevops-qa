@@ -141,7 +141,7 @@ def test_the_runner_wheel_carries_the_reviewed_robot_suite():
 # ----------------------------------------------------------------------------------------------------------------------------- the checker
 @pytest.fixture(scope="module")
 def mini(tmp_path_factory):
-    return make_mini_bundle(tmp_path_factory.mktemp("mini"))
+    return make_mini_bundle(tmp_path_factory.mktemp("mini"), with_kit=False)
 
 
 def codes(bundle, **kw):
@@ -346,3 +346,4 @@ def test_the_readme_tells_root_to_use_a_prefix_outside_root_and_says_what_doctor
     assert "As root (HOME=/root), use a prefix outside `/root`, for example `/opt/redevops-qa`" in text and "exit status 2" in text and "PROHIBITED_PATH" in text
     assert "`TMPDIR`" in text and "`HOME` and the evidence directory (`--out`) may be anywhere" in text and "read from the adapter kit inside the bundle" in text
     assert "`run` and `demo` make the same check and do not start otherwise" in text and "is not relaxed" in text
+    assert "so a virtual environment made from a Python kept under `/root`" in text and "only a plan with a Robot lane is checked" in text
