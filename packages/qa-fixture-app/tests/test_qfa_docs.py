@@ -39,7 +39,7 @@ def test_the_readme_lists_every_route_the_app_serves():
 def test_licence_wording_is_the_repositorys_and_makes_no_open_source_claim():
     assert "source-available" in README and "LICENSE.md" in README
     text = (s.PKG / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }' in text and "dependencies = []" in text
+    assert 'license = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause"' in text and 'license-files = ["LICENSE*"]' in text and "dependencies = []" in text
     assert not re.search(r"(?<!not )open[- ]source", README, re.I)
 
 
