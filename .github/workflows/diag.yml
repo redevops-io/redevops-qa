@@ -1,0 +1,34 @@
+name: diag
+on:
+  push:
+    branches: ["qa-r0-robot-egress-diag"]
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: environment
+        run: bash diag/env.sh
+      - name: probe as the runner user
+        run: bash diag/probe.sh
+      - name: probe under the system python as runner
+        run: PYTHONPATH=$PWD/diag /usr/bin/python3 -s -m qa_runner.netfence --probe
+  container-root:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: ubuntu 24.04 container as root (default docker options)
+        run: |
+          docker run --rm -v "$PWD/diag":/d:ro ubuntu:24.04 bash -c 'apt-get update -qq >/dev/null && apt-get install -y -qq python3 curl >/dev/null; bash /d/env.sh; cd /d; PYTHONPATH=/d python3 -s -m qa_runner.netfence --probe'
+      - name: ubuntu 24.04 container, nobody
+        run: |
+          docker run --rm -v "$PWD/diag":/d:ro ubuntu:24.04 bash -c 'apt-get update -qq >/dev/null && apt-get install -y -qq python3 >/dev/null; su -s /bin/bash nobody -c "cd /d; PYTHONPATH=/d python3 -s -m qa_runner.netfence --probe"'
