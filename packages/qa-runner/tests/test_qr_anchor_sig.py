@@ -507,7 +507,8 @@ def test_the_unsigned_text_is_what_it_was_before_this_feature_and_the_new_json_k
     for defect, outcome, code in (("none", "VERIFIED (ALL_ASSERTIONS_VERIFIED)", 0), ("discount", "FAILED (ASSERTION_FAILED)", 1)):
         loc = str(GOLDEN / f"bundle-{defect}.tar")
         got_code, text, _ = cli("verify", loc)
-        assert got_code == code and text == expected.format(loc=loc, outcome=outcome)
+        without_pin_notes = "".join(l for l in text.splitlines(keepends=True) if not l.startswith("  note: the tool versions in the lock differ"))      # a note that depends on which pin set the suite runs under
+        assert got_code == code and without_pin_notes == expected.format(loc=loc, outcome=outcome)
         doc = json.loads(cli("verify", loc, "--json")[1])
         assert sorted(doc) == ["accepted", "agreeing_assertions", "anchor", "anchor_signature", "assurance", "engine_verifier_disagreements", "exit_code", "findings", "notes", "plan",
                                "recomputed_assertions", "run_outcome", "schema", "schema_version"]
