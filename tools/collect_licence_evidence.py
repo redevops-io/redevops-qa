@@ -42,13 +42,7 @@ NODE_CLASSES: Dict[str, str] = {
     "gtest": "BSD-3-Clause", "nghttp2": "MIT", "large_pages": "MIT", "caja": "Apache-2.0", "brotli": "MIT", "zstd": "BSD-3-Clause", "HdrHistogram": "CC0-1.0 OR BSD-2-Clause",
     "node-heapdump": "ISC", "rimraf": "ISC", "uvwasi": "MIT", "ngtcp2": "MIT", "nghttp3": "MIT", "node-fs-extra": "MIT", "on-exit-leak-free": "MIT", "sonic-boom": "MIT",
 }
-#: words a section must contain for the licence read from it: a list of alternatives, each a tuple of words that must all be there
-SUPPORT = {
-    "MIT": [("permission is hereby granted, free of charge",)], "Apache-2.0": [("apache license",)],
-    "BSD-3-Clause": [("neither the name",), ("names of the contributors may not be used to endorse",)], "ISC": [("permission to use, copy, modify, and/or distribute",)],
-    "Zlib": [("altered source versions must be plainly marked",)], "Unicode-3.0": [("unicode license v3",)], "BlueOak-1.0.0": [("blue oak model license",)], "Artistic-2.0": [("artistic license 2.0",)],
-    "CC0-1.0": [("dedicated", "public domain")], "CC0-1.0 OR BSD-2-Clause": [("creativecommons.org/publicdomain/zero", "bsd 2-clause license")],
-}
+SUPPORT = cal.NODE_SPDX_SUPPORT
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -123,7 +117,8 @@ def npm_inlined(wheel: Path, retrieved_on: str) -> dict:
                      "tarball_sha256": sha256_bytes(tarball), "tarball_sha512_verified": bool(verified), "licence_files_in_tarball": dict(sorted(files.items())),
                      "notice_text_contains_tarball_licence_file": contained})
         print(f"{key}: {licence} integrity={verified} files={sorted(files)} contained={contained}", file=sys.stderr)
-    return {"schema": cal.NPM_TABLE_SCHEMA, "retrieved_on": retrieved_on, "source_members": list(NPM_MEMBERS), "count": len(rows),
+    return {"schema": cal.NPM_TABLE_SCHEMA, "retrieved_on": retrieved_on, "source_members": list(NPM_MEMBERS), "count": len(rows), "distinct": len({r["package"] for r in rows}),
+            "derived_digests": cal.npm_table_digests({"packages": rows}),
             "note": "one row per notice section (chokidar and readdirp have a section in both sidecar files); for each npm package inlined into the Playwright driver: the registry entry of that exact version, its tarball (checked against the registry's sha512 integrity value) and whether the notice text of the wheel contains the licence file of the tarball",
             "packages": rows}
 

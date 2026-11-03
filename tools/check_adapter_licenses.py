@@ -56,11 +56,11 @@ BUNDLE_CHECK = {"inspected", "not_inspected"}
 ALLOWED, REVIEW, UNVERIFIED, BLOCKED = 0, 1, 2, 3
 RANK_NAME = {ALLOWED: "allowed", REVIEW: "review", UNVERIFIED: "unverified", BLOCKED: "blocked"}
 EVIDENCE_STATUS = {"verified", "declared_only", "unverified"}
-EVIDENCE_ROLES = {"licence_text", "declared_licence", "identification", "integrity"}
+EVIDENCE_ROLES = {"licence_text", "related_licence_text", "declared_licence", "identification", "integrity"}
 NOTICES_LOCK_SCHEMA = "redevops-qa/third-party-notices-lock"
 NOTICES_LOCK = ROOT / "third_party" / "notices" / "notices.lock.json"
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_CLAIMS = re.compile(r"\b(cleared|approved|clearance)\b", re.I)
+_CLAIMS = re.compile(r"\b(cleared|approved|clearance|compatible|permitted)\b", re.I)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _EXACT = re.compile(r"^\d+(\.\d+)*([.-]?(a|b|rc|beta|dev)\d+)?$")
 _TOKEN = re.compile(r"\s*(\(|\)|[A-Za-z0-9.+:_-]+)")
@@ -225,6 +225,14 @@ def check_matrix(matrix: dict) -> List[Finding]:
         by_id[cid] = comp
     for cid, comp in by_id.items():
         findings.extend(_check_component(cid, comp, policy, by_id))
+        for text in _strings(comp):
+            if _CLAIMS.search(text):                    # the whole entry, not only the evidence: this file records facts and decisions, it never says a component is cleared, approved, compatible or permitted
+                findings.append(Finding("MATRIX_CLAIM", cid, f"the matrix never says a component is cleared, approved, compatible or permitted ({text[:70]!r})"))
+                break
+    if any((c.get("redistribution") or {}).get("status") == "staged_unmodified" for c in by_id.values()):
+        block = matrix.get("bundle_public_distribution")
+        if not isinstance(block, dict) or block.get("status") != "owner_decision_required" or block.get("pending_decisions") != pending_decisions(matrix):
+            findings.append(Finding("BUNDLE_PUBLIC_DISTRIBUTION", "matrix", f"bundle_public_distribution must say status: owner_decision_required and list exactly the shipped items without a settled owner decision: {pending_decisions(matrix)}"))
     return findings
 
 
@@ -347,6 +355,8 @@ def _check_component(cid: str, comp: dict, policy: dict, by_id: Dict[str, dict])
         if red.get("default_enabled") is not False:
             out.append(Finding("ENABLED_BY_DEFAULT_NOT_APPROVED", cid, "a staged entry is not enabled by default"))
     out += _check_evidence(cid, comp, policy)
+    if status == "staged_unmodified":
+        out += _check_owner_decision(cid, "the shipped component", comp.get("owner_decision"))
     # --- requires
     for req in comp.get("requires") or []:
         other = by_id.get(req)
@@ -375,8 +385,10 @@ def _nonempty(value: object) -> bool:
 
 def _check_evidence(cid: str, comp: dict, policy: dict) -> List[Finding]:
     """The ``third_party_evidence`` items of one component. ``verified`` is a claim about facts and needs all of them: the exact component and version, how it was identified from the shipped
-    bytes, and for each source the URL, the retrieval date and the sha256 of what was fetched, with at least one licence text that is shipped (a notice id of the notices lock). ``declared_only``
-    says a licence is declared by the primary source but no licence text exists there; ``unverified`` says nothing could be established. Nothing here clears anything."""
+    bytes, and for each source the URL, the retrieval date and the sha256 of what was fetched (a source whose digest is that of one of this repository's own evidence tables is refused: a table
+    is derived, not fetched), with at least one licence text that is shipped (a notice id of the notices lock). ``declared_only`` says a licence is declared by the primary source but no licence
+    text could be established for the shipped bytes; every declaring source quotes the declaration verbatim. ``unverified`` says nothing could be established. Nothing here clears anything.
+    Every item also carries an owner_decision block (``none yet`` when the owner has not decided)."""
     out: List[Finding] = []
     items = comp.get("third_party_evidence")
     red = comp.get("redistribution") or {}
@@ -401,10 +413,7 @@ def _check_evidence(cid: str, comp: dict, policy: dict) -> List[Finding]:
         for key in ("component", "version", "spdx", "residual"):
             if not _nonempty(item.get(key)):
                 out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: {key} is missing or empty"))
-        for text in _strings(item):
-            if _CLAIMS.search(text):
-                out.append(Finding("EVIDENCE_CLAIM", cid, f"{at}: evidence records facts and never says a component is cleared or approved ({text[:60]!r})"))
-                break
+        out += _check_owner_decision(cid, at, item.get("owner_decision"))
         sources = item.get("sources")
         if status == "unverified":
             if not _nonempty(item.get("reason")):
@@ -422,17 +431,22 @@ def _check_evidence(cid: str, comp: dict, policy: dict) -> List[Finding]:
             if not isinstance(src, dict) or src.get("role") not in EVIDENCE_ROLES:
                 out.append(Finding("EVIDENCE_SCHEMA", cid, f"{at}: every source has a role of {sorted(EVIDENCE_ROLES)}"))
                 continue
-            roles.add(src["role"])
+            role = src["role"]
+            roles.add(role)
             if not str(src.get("url", "")).startswith("https://"):
-                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {src['role']} source needs an https url"))
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {role} source needs an https url"))
             if not _DATE.match(str(src.get("retrieved_on", ""))):
-                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {src['role']} source needs retrieved_on as YYYY-MM-DD"))
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {role} source needs retrieved_on as YYYY-MM-DD"))
             if not _SHA256.match(str(src.get("sha256", ""))):
-                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {src['role']} source needs the sha256 of what was fetched (64 lowercase hex digits)"))
-            if src["role"] == "licence_text" and not _nonempty(src.get("notice")):
-                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a licence_text source names the notice id that ships it"))
-            if src["role"] == "licence_text" and not isinstance(src.get("ships_as_fetched"), bool):
-                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a licence_text source says whether the shipped notice is the fetched file as it is (ships_as_fetched: true or false)"))
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {role} source needs the sha256 of what was fetched (64 lowercase hex digits)"))
+            if role in ("licence_text", "related_licence_text") and not _nonempty(src.get("notice")):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {role} source names the notice id that ships it"))
+            if role in ("licence_text", "related_licence_text") and not isinstance(src.get("ships_as_fetched"), bool):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a {role} source says whether the shipped notice is the fetched file as it is (ships_as_fetched: true or false)"))
+            if role == "declared_licence" and not _nonempty(src.get("quote")):
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: a declared_licence source quotes the declaration verbatim (quote)"))
+            if src.get("derived") is not None and not _nonempty(src.get("derived")):
+                out.append(Finding("EVIDENCE_SCHEMA", cid, f"{at}: derived, when present, names what the digest was derived from"))
         if "identification" not in roles:
             out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: at least one identification source is required"))
         texts = item.get("licence_texts")
@@ -447,7 +461,7 @@ def _check_evidence(cid: str, comp: dict, policy: dict) -> List[Finding]:
             if "declared_licence" not in roles:
                 out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: declared_only needs a declared_licence source"))
             if not _nonempty(item.get("licence_text_absent")):
-                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: declared_only states where the licence text was looked for and not found (licence_text_absent)"))
+                out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: declared_only states what could not be established and where the text was looked for (licence_text_absent)"))
             if not isinstance(item.get("options"), list) or not item.get("options"):
                 out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"{at}: declared_only lists the options the owner has (options)"))
     # the open items are the blockers for public distribution, and the entry says so
@@ -456,24 +470,136 @@ def _check_evidence(cid: str, comp: dict, policy: dict) -> List[Finding]:
         listed = red.get("public_distribution_blockers")
         if not isinstance(listed, list) or sorted(listed) != open_ids:
             out.append(Finding("EVIDENCE_BLOCKERS", cid, f"public_distribution_blockers must list exactly the evidence items that are not verified: {open_ids} (found {listed!r})"))
-    # bundled content that names evidence agrees with it
+    # bundled content that names evidence agrees with it: a licence is claimed exactly when the evidence is verified
     for dep in comp.get("bundled_deps") or []:
         refs = dep.get("evidence")
+        spdx = str(dep.get("spdx", "")).strip()
         if refs is None:
-            if str(dep.get("spdx", "")).strip() == "unverified" and red.get("status") == "staged_unmodified":
+            if spdx == "unverified" and red.get("status") == "staged_unmodified":
                 out.append(Finding("EVIDENCE_MISSING_FIELD", cid, f"bundled {dep.get('name')}: an unverified licence in a shipped wheel needs an evidence item that states why"))
             continue
-        refs = refs if isinstance(refs, list) else [refs]
-        for ref in refs:
+        for ref in refs if isinstance(refs, list) else [refs]:
             item = ids.get(ref)
             if item is None:
                 out.append(Finding("EVIDENCE_SCHEMA", cid, f"bundled {dep.get('name')}: evidence {ref!r} is not an item of this entry"))
-            elif item.get("status") == "verified" and str(dep.get("spdx", "")).strip() == "unverified":
+            elif item.get("status") == "verified" and spdx == "unverified":
                 out.append(Finding("EVIDENCE_SCHEMA", cid, f"bundled {dep.get('name')}: its evidence {ref} is verified but the licence is still marked unverified"))
-            elif item.get("status") != "verified" and str(dep.get("spdx", "")).strip() not in ("unverified",) and item.get("status") == "unverified":
-                out.append(Finding("EVIDENCE_SCHEMA", cid, f"bundled {dep.get('name')}: its evidence {ref} is unverified but a licence is claimed"))
+            elif item.get("status") != "verified" and spdx != "unverified":
+                out.append(Finding("EVIDENCE_SCHEMA", cid, f"bundled {dep.get('name')}: its evidence {ref} is {item.get('status')} but the licence is claimed as {spdx!r}; only a verified item supports a licence, an open one stays unverified"))
     return out
 
+
+DECISIONS = {"accepted", "accepted provisionally", "conditional acceptance", "none yet"}
+CONDITION_KINDS = {"notices_shipped", "residuals_retained", "documented", "declaration_verified", "table_section"}
+
+
+def _check_owner_decision(cid: str, at: str, block: object) -> List[Finding]:
+    """The structure of an owner_decision block: a decision from DECISIONS; anything but ``none yet`` needs the date, ``decided_by: owner`` and at least one condition (id, text, kind, a recorded
+    status). The conditions are evaluated by check_owner_conditions, which needs the notices lock and the repository."""
+    if not isinstance(block, dict) or block.get("decision") not in DECISIONS:
+        return [Finding("OWNER_DECISION_MISSING", cid, f"{at}: an owner_decision block with a decision of {sorted(DECISIONS)} is required (a shipped item has either a decision or 'none yet')")]
+    if block["decision"] == "none yet":
+        return []
+    out: List[Finding] = []
+    if not _DATE.match(str(block.get("date", ""))) or block.get("decided_by") != "owner":
+        out.append(Finding("OWNER_DECISION_INCOMPLETE", cid, f"{at}: a recorded decision needs date (YYYY-MM-DD) and decided_by: owner"))
+    conds = block.get("conditions")
+    if not isinstance(conds, list) or not conds:
+        out.append(Finding("OWNER_DECISION_INCOMPLETE", cid, f"{at}: a recorded decision needs its conditions"))
+        return out
+    seen = set()
+    for cond in conds:
+        if not isinstance(cond, dict) or not _nonempty(cond.get("id")) or cond.get("id") in seen or not _nonempty(cond.get("text")) or cond.get("kind") not in CONDITION_KINDS or cond.get("status") not in ("satisfied", "open"):
+            out.append(Finding("OWNER_DECISION_INCOMPLETE", cid, f"{at}: every condition needs a unique id, text, a kind of {sorted(CONDITION_KINDS)} and a status (satisfied or open)"))
+            continue
+        seen.add(cond["id"])
+    if block["decision"] == "conditional acceptance" and block.get("elected_licence") is not None and not _nonempty(block.get("elected_licence")):
+        out.append(Finding("OWNER_DECISION_INCOMPLETE", cid, f"{at}: elected_licence, when present, names the licence"))
+    return out
+
+
+def _eval_condition(cond: dict, item: dict, items_by_id: Dict[str, dict], lock_by_id: Dict[str, dict], root: Path) -> Tuple[bool, str]:
+    """Whether one condition is evidenced, computed from the matrix, the notices lock and the repository files. Returns (satisfied, detail)."""
+    kind = cond.get("kind")
+    if kind == "notices_shipped":
+        ids = cond.get("notices") or []
+        missing = [i for i in ids if i not in lock_by_id]
+        if not ids or missing:
+            return False, f"notices not in the notices lock: {missing or ids}"
+        wanted = str(cond.get("label_contains", ""))
+        bad = [i for i in ids if wanted and wanted.lower() not in str(lock_by_id[i].get("label", "")).lower()]
+        if bad:
+            return False, f"notices without the label {wanted!r}: {bad}"
+        return True, "shipped"
+    if kind == "residuals_retained":
+        text = str(item.get("residual", "")).lower()
+        absent = [w for w in cond.get("contains", []) if str(w).lower() not in text]
+        return (not absent and bool(cond.get("contains")), f"the residual no longer mentions {absent}")
+    if kind == "documented":
+        if not _nonempty(item.get("licence_text_absent")) or item.get("status") != "declared_only":
+            return False, "the item does not record what is missing (declared_only with licence_text_absent)"
+        for rel, words in (cond.get("files") or {}).items():
+            path = Path(root) / rel
+            if not path.is_file():
+                return False, f"{rel} does not exist"
+            body = path.read_text(encoding="utf-8", errors="replace")
+            lacking = [w for w in words if w not in body]
+            if lacking:
+                return False, f"{rel} does not mention {lacking}"
+        return bool(cond.get("files")), "documented"
+    if kind == "declaration_verified":
+        token, need = str(cond.get("token", "")), int(cond.get("min_sources", 0) or 0)
+        quoted = [s for s in item.get("sources") or [] if isinstance(s, dict) and s.get("role") == "declared_licence" and token and token in str(s.get("quote", ""))]
+        elected = item.get("owner_decision", {}).get("elected_licence")
+        if elected != token:
+            return False, f"the elected licence is {elected!r}, the condition names {token!r}"
+        if token not in str(item.get("declared_spdx", "")):
+            return False, f"the declared expression {item.get('declared_spdx')!r} does not offer {token}"
+        return (len(quoted) >= need > 0, f"{len(quoted)} declaring sources quote {token}, {need} needed")
+    if kind == "table_section":
+        ref = items_by_id.get(str(cond.get("item")))
+        table = (ref or {}).get("table")
+        if not isinstance(table, dict) or not (Path(root) / str(table.get("path", ""))).is_file():
+            return False, "the table is missing"
+        sections = [s for s in _load_json(Path(root) / table["path"]).get("sections", []) if s.get("name") == cond.get("name")]
+        return (len(sections) == 1 and sections[0].get("spdx") == cond.get("spdx"), f"the table has no section {cond.get('name')} with {cond.get('spdx')}")
+    return False, "unknown condition kind"
+
+
+def check_owner_decisions(matrix: dict, lock: dict, root: Path = ROOT) -> List[Finding]:
+    """Evaluate the conditions of every recorded owner decision (items and shipped components): the status the matrix records must be the one computed, and a decision whose condition is not evidenced
+    is a finding. Also computes the bundle-level list of pending decisions."""
+    out: List[Finding] = []
+    lock_by_id = {f.get("id"): f for f in lock.get("files", []) if isinstance(f, dict)}
+    for comp in matrix.get("components", []):
+        items = {i.get("id"): i for i in comp.get("third_party_evidence") or [] if isinstance(i, dict)}
+        for owner_item in [comp, *items.values()]:
+            block = owner_item.get("owner_decision")
+            if not isinstance(block, dict) or block.get("decision") in (None, "none yet"):
+                continue
+            label = owner_item.get("id")
+            for cond in block.get("conditions") or []:
+                if not isinstance(cond, dict):
+                    continue
+                ok, detail = _eval_condition(cond, owner_item, items, lock_by_id, root)
+                if (cond.get("status") == "satisfied") != ok:
+                    out.append(Finding("OWNER_CONDITION_STATUS", str(comp.get("id")), f"{label}: condition {cond.get('id')} is recorded as {cond.get('status')} but computes as {'satisfied' if ok else 'open'}: {detail}"))
+                if not ok:
+                    out.append(Finding("OWNER_CONDITION_UNEVIDENCED", str(comp.get("id")), f"{label}: the decision {block.get('decision')!r} rests on condition {cond.get('id')}, which is not evidenced: {detail}"))
+    return out
+
+
+def pending_decisions(matrix: dict) -> List[str]:
+    """Ids of the shipped items (staged components and their evidence items) that have no owner decision yet or a decision with an open condition."""
+    pending = []
+    for comp in matrix.get("components", []):
+        if (comp.get("redistribution") or {}).get("status") != "staged_unmodified":
+            continue
+        for label, holder in [(comp["id"], comp), *[(i["id"], i) for i in comp.get("third_party_evidence") or [] if isinstance(i, dict) and "id" in i]]:
+            block = holder.get("owner_decision") or {}
+            if block.get("decision") in (None, "none yet") or any(c.get("status") != "satisfied" for c in block.get("conditions") or [] if isinstance(c, dict)):
+                pending.append(label)
+    return sorted(pending)
 
 # --------------------------------------------------------------------------------------------- what the repository installs
 UNSCANNABLE = "<unscannable>"
@@ -609,6 +735,13 @@ _NPM_BODY_TAIL = re.compile(r"\n=+\s*$")
 NODE_TABLE_SCHEMA = "redevops-qa/node-licence-sections"
 NPM_TABLE_SCHEMA = "redevops-qa/npm-inlined-packages"
 #: licences the registry declares and the notice text classifies as, for the same package (the one pair that is allowed to differ is a package with no licence text at all)
+#: words a Node.js LICENSE section must contain for the licence its table row states: a list of alternatives, each a tuple of words that must all be there (whitespace collapsed, lower case)
+NODE_SPDX_SUPPORT = {
+    "MIT": [("permission is hereby granted, free of charge",)], "Apache-2.0": [("apache license",)],
+    "BSD-3-Clause": [("neither the name",), ("names of the contributors may not be used to endorse",)], "ISC": [("permission to use, copy, modify, and/or distribute",)],
+    "Zlib": [("altered source versions must be plainly marked",)], "Unicode-3.0": [("unicode license v3",)], "BlueOak-1.0.0": [("blue oak model license",)], "Artistic-2.0": [("artistic license 2.0",)],
+    "CC0-1.0": [("dedicated", "public domain")], "CC0-1.0 OR BSD-2-Clause": [("creativecommons.org/publicdomain/zero", "bsd 2-clause license")],
+}
 _NPM_AGREE = {"MIT": "MIT", "ISC": "ISC", "BSD-3-Clause": "BSD-3-Clause", "BSD-2-Clause": "BSD-2-Clause", "BlueOak-1.0.0": "BlueOak-1.0.0"}
 
 
@@ -702,6 +835,10 @@ def check_notices_lock(matrix: dict, lock: dict, root: Path = ROOT) -> List[Find
             if kind == "upstream":
                 if not str(origin.get("url", "")).startswith("https://") or not _DATE.match(str(origin.get("retrieved_on", ""))):
                     out.append(Finding("NOTICES_LOCK", fid, "an upstream file records the https url it was fetched from and the date (retrieved_on)"))
+                if origin.get("excerpt") and not str(f.get("label", "")).startswith("EXCERPT"):
+                    out.append(Finding("NOTICES_LOCK", fid, "an excerpt is labelled EXCERPT (label), so that nobody reads it as a whole file"))
+                if "original" in str(f.get("dest", "")).lower() and not _nonempty(f.get("label")):
+                    out.append(Finding("NOTICES_LOCK", fid, "a text of a related project (original, candidate, upstream of a fork) carries a label that says whose it is"))
         else:
             out.append(Finding("NOTICES_LOCK", fid, "origin.kind must be wheel, upstream or authored"))
     base = Path(root) / "third_party" / "notices"
@@ -743,6 +880,15 @@ def check_notices_lock(matrix: dict, lock: dict, root: Path = ROOT) -> List[Find
     return out
 
 
+def npm_table_digests(data: dict) -> Dict[str, str]:
+    """Digests over what was FETCHED, derived from an npm table: the sorted 'package tarball-sha256' lines (one per distinct package) and the sorted 'package licence-file sha256' lines.
+    An evidence source may name one of them (``derived``) instead of a digest of the table file itself."""
+    rows = {r.get("package"): r for r in data.get("packages", [])}
+    tarballs = "\n".join(sorted(f"{k} {r.get('tarball_sha256')}" for k, r in rows.items()))
+    files = "\n".join(sorted(f"{k} {f} {h}" for k, r in rows.items() for f, h in (r.get("licence_files_in_tarball") or {}).items()))
+    return {"npm-table:tarballs": hashlib.sha256(tarballs.encode()).hexdigest(), "npm-table:licence-files": hashlib.sha256(files.encode()).hexdigest()}
+
+
 def check_evidence_tables(matrix: dict, root: Path = ROOT) -> List[Finding]:
     """The JSON tables an evidence item points at (``table: {path, sha256, kind}``): present, with the recorded digest and the right schema."""
     out: List[Finding] = []
@@ -763,6 +909,30 @@ def check_evidence_tables(matrix: dict, root: Path = ROOT) -> List[Finding]:
             want = {"node-licence-sections": NODE_TABLE_SCHEMA, "npm-inlined-packages": NPM_TABLE_SCHEMA}.get(table.get("kind"))
             if want is None or data.get("schema") != want:
                 out.append(Finding("EVIDENCE_TABLE", at, f"{table.get('path')}: kind {table.get('kind')!r} and schema {data.get('schema')!r} do not agree"))
+            elif table.get("kind") == "npm-inlined-packages":
+                if data.get("count") != len(data.get("packages", [])):
+                    out.append(Finding("EVIDENCE_TABLE", at, f"{table.get('path')}: count {data.get('count')} is not the number of rows {len(data.get('packages', []))}"))
+                if data.get("distinct") != len({r.get("package") for r in data.get("packages", [])}):
+                    out.append(Finding("EVIDENCE_TABLE", at, f"{table.get('path')}: distinct is not the number of distinct packages"))
+            elif data.get("count") != len(data.get("sections", [])):
+                out.append(Finding("EVIDENCE_TABLE", at, f"{table.get('path')}: count {data.get('count')} is not the number of sections {len(data.get('sections', []))}"))
+    # a source digest must be of something fetched or derived from what was fetched, never the digest of one of this repository's own evidence tables
+    own = {hashlib.sha256(p.read_bytes()).hexdigest(): p.name for p in sorted((Path(root) / "third_party" / "evidence").glob("*.json"))} if (Path(root) / "third_party" / "evidence").is_dir() else {}
+    for comp in matrix.get("components", []):
+        by_item = {i.get("id"): i for i in comp.get("third_party_evidence") or [] if isinstance(i, dict)}
+        for item in by_item.values():
+            for src in item.get("sources") or []:
+                if not isinstance(src, dict):
+                    continue
+                at = f"{comp.get('id')}/{item.get('id')}"
+                if src.get("sha256") in own:
+                    out.append(Finding("EVIDENCE_SELF_REFERENCE", at, f"a {src.get('role')} source carries the sha256 of the repository's own table {own[src['sha256']]}: a table is derived, not fetched (name what it was derived from with `derived`)"))
+                if src.get("derived"):
+                    table = item.get("table")
+                    if not isinstance(table, dict) or table.get("kind") != "npm-inlined-packages" or not (Path(root) / str(table.get("path", ""))).is_file():
+                        out.append(Finding("EVIDENCE_DERIVED", at, "a derived source needs the npm table of its own item"))
+                    elif npm_table_digests(_load_json(Path(root) / table["path"])).get(src["derived"]) != src.get("sha256"):
+                        out.append(Finding("EVIDENCE_DERIVED", at, f"the sha256 of the source is not {src['derived']} recomputed from the table's rows"))
     return out
 
 
@@ -927,6 +1097,14 @@ def _check_wheel_evidence(comp: dict, rec: dict, zf, at: str, root: Path) -> Lis
                 out.append(Finding("NODE_TABLE_MISMATCH", iid, f"{member} lists {len(now)} components, the table records {len(have)}, or a section's text or place differs"))
             if any(not _nonempty(sec.get("spdx")) for sec in data.get("sections", [])):
                 out.append(Finding("NODE_TABLE_MISMATCH", iid, "every section of the table states the licence its text names (spdx)"))
+            hits = list(_NODE_ITEM.finditer(text))
+            for n, sec in enumerate(data.get("sections", [])):
+                if n >= len(hits):
+                    break
+                body = re.sub(r"\s+", " ", text[hits[n].start(): hits[n + 1].start() if n + 1 < len(hits) else len(text)].lower())
+                alts = NODE_SPDX_SUPPORT.get(sec.get("spdx"))
+                if alts is None or not any(all(w in body for w in alt) for alt in alts):
+                    out.append(Finding("NODE_TABLE_MISMATCH", iid, f"{sec.get('name')}: the section's own text does not support the licence {sec.get('spdx')!r} the table states"))
         elif table.get("kind") == "npm-inlined-packages":
             now: Dict[Tuple[str, str], Tuple[str, str]] = {}
             for member in table.get("source_members") or []:
@@ -936,6 +1114,8 @@ def _check_wheel_evidence(comp: dict, rec: dict, zf, at: str, root: Path) -> Lis
                 for key, (kind, digest) in npm_notice_sections(zf.read(member).decode("utf-8", "replace")).items():
                     now[(key, member.rsplit("/", 1)[-1])] = (kind, digest)
             have_pk = {(p.get("package"), p.get("notice_file")): p for p in data.get("packages", [])}
+            if data.get("count") != len(now) or data.get("distinct") != len({k[0] for k in now}):
+                out.append(Finding("NPM_TABLE_MISMATCH", iid, f"the table says {data.get('count')} sections of {data.get('distinct')} packages, the wheel's notice files have {len(now)} of {len({k[0] for k in now})}"))
             for key in sorted(set(now) - set(have_pk)):
                 out.append(Finding("NPM_TABLE_MISMATCH", iid, f"{key[0]} has a notice section in {key[1]} but no row in the table"))
             for key in sorted(set(have_pk) - set(now)):
@@ -1017,7 +1197,9 @@ def run(matrix_path: Path = DEFAULT_MATRIX, root: Path = ROOT, upstream: bool = 
     notices_path = mroot / "third_party" / "notices" / "notices.lock.json"
     if notices_path.is_file():
         try:
-            findings += check_notices_lock(matrix, load_notices_lock(notices_path), mroot)
+            lock_ = load_notices_lock(notices_path)
+            findings += check_notices_lock(matrix, lock_, mroot)
+            findings += check_owner_decisions(matrix, lock_, mroot)
         except (OSError, ValueError) as exc:
             findings.append(Finding("NOTICES_LOCK", str(notices_path), f"{type(exc).__name__}: {exc}"))
     elif any(c.get("third_party_evidence") for c in matrix["components"]) or any(c.get("shipped_wheels") for c in matrix["components"]):

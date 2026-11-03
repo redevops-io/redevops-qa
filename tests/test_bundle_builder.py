@@ -471,7 +471,8 @@ def test_a_second_notices_wheel_or_none_is_found(ncopy):
 def test_the_readme_states_what_is_verified_what_is_open_and_that_acceptability_is_the_owners_decision():
     text = (ROOT / "bundle" / "README.md").read_text(encoding="utf-8")
     for phrase in ("THIRD_PARTY_NOTICES", "Node.js 24.22.1", "byte for byte the executable of the official nodejs.org release", "79 distinct npm packages", "proxy-agent-negotiate", "tablesorter 2.30.5",
-                   "Handlebars 4.7.9", "mark.js 8.11.1", "source-map 0.6.1", "is an owner decision", "None of this approves anything", "stays open for the owner"):
+                   "Handlebars 4.7.9", "mark.js 8.11.1", "source-map 0.6.1", "is an owner decision", "None of this settles distribution", "`none yet`", "jQuery Templates", "JSXCompressor", "codicon icon font", "browser logo SVGs",
+                   "accepted provisionally", "conditionally accepted"):
         assert phrase in text, phrase
     assert not re.search(r"\b(cleared|approved|clearance)\b", text, re.I)
     assert "81 npm packages inlined" not in text and "not classified one by one" not in text

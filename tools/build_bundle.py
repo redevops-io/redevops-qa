@@ -323,9 +323,9 @@ def build_notices(lock: dict, wheels: Dict[str, Path], root: Path = ROOT) -> Dic
         if sha256_bytes(data) != f["sha256"]:
             raise BuildError(f"{f['dest']}: does not have the sha256 the notices lock records (the file changed since it was reviewed)")
         out[f["dest"]] = data
-        index.append({"path": f["dest"], "sha256": f["sha256"], "size": len(data), "origin": origin, "covers": f.get("covers", [])})
+        index.append({"path": f["dest"], "sha256": f["sha256"], "size": len(data), "origin": origin, "covers": f.get("covers", []), **({"label": f["label"]} if f.get("label") else {})})
     out["INDEX.json"] = (json.dumps({"schema": NOTICES_INDEX_SCHEMA, "version": 1,
-                                     "note": "the licence and notice texts of the third-party software this bundle ships; each file is byte for byte a file of a shipped wheel or of the upstream source named in its origin; not legal advice and not an approval of any component",
+                                     "note": "the licence and notice texts of the third-party software this bundle ships; each file is byte for byte a file of a shipped wheel or of the upstream source named in its origin, except the files whose label says EXCERPT (line excerpts of an upstream file); not legal advice and not an approval of any component",
                                      "files": index}, indent=2, sort_keys=True) + "\n").encode("utf-8")
     return out
 

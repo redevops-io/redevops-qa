@@ -8,7 +8,38 @@
     "kind": "authored",
     "path": "third_party/notices/README.md"
    },
-   "sha256": "1bb23659b480f86534d305178f40c73c8f010c50015c44e24ba8181e926393b2"
+   "sha256": "322a6d4fb3998b1cd639f985e5f7f6fe98bb10aadbbdf786801585f50b4ee43e"
+  },
+  {
+   "covers": [
+    "pw-vite-browser-logos"
+   ],
+   "dest": "upstream/browser-logos-58881b8/LICENSE.txt",
+   "id": "browser-logos-repo-license",
+   "label": "LICENSE.txt (MIT) of the alrra/browser-logos repository; its README says the logos are trademarks of their owners and only 'everything else' is MIT, so this text is not a licence of the logo artwork",
+   "origin": {
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/browser-logos-58881b8/LICENSE.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/LICENSE.txt"
+   },
+   "sha256": "a8fa11ef7da0447b701294ffa4c9649670f33bd727ceac0ac47f7e0cce4087c4"
+  },
+  {
+   "covers": [
+    "pw-vite-codemirror"
+   ],
+   "dest": "upstream/codemirror-5.65.18/LICENSE",
+   "id": "codemirror-5.65.18-license",
+   "origin": {
+    "kind": "upstream",
+    "member": "package/LICENSE",
+    "path": "third_party/notices/upstream/codemirror-5.65.18/LICENSE",
+    "retrieved_on": "2026-11-03",
+    "tarball_sha256": "775b7a711166c3f39899e56179a7fc8b5b755c3a043ee973c54ae5838023400f",
+    "url": "https://registry.npmjs.org/codemirror/-/codemirror-5.65.18.tgz"
+   },
+   "sha256": "168a4becc968f5001e2ee2e0291b6e4daabafc1894a11ade1e11d56e96096e07"
   },
   {
    "covers": [
@@ -54,6 +85,37 @@
   },
   {
    "covers": [
+    "rf-jquery-tmpl"
+   ],
+   "dest": "upstream/jquery-tmpl-07d08cb/jquery.tmpl.js-header.txt",
+   "id": "jquery-tmpl-source-header",
+   "label": "EXCERPT (leading comment block) of jquery.tmpl.js in the cited repository at the cited tag or commit; not a whole file",
+   "origin": {
+    "excerpt": "leading comment block",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/jquery-tmpl-07d08cb/jquery.tmpl.js-header.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/jquery/jquery-tmpl/07d08cb72c7556e950593d6c011d5725db54228e/jquery.tmpl.js"
+   },
+   "sha256": "fca95d6a5c4a1d6bcd8c1bbc0e844dda7fedbb1f0a49c4ebb2dfcbe28f364403"
+  },
+  {
+   "covers": [
+    "rf-jsxcompressor"
+   ],
+   "dest": "upstream/jsxgraph-jsxcompressor-7f2e58c/LICENSE.APACHE",
+   "id": "jsxcompressor-apache-license",
+   "label": "LICENSE.APACHE of the JSXGraph repository's JSXCompressor directory: candidate text for the Apache-2.0 alternative named in the header of the shipped file; the shipped file is not byte for byte any file of that repository",
+   "origin": {
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/jsxgraph-jsxcompressor-7f2e58c/LICENSE.APACHE",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/jsxgraph/jsxgraph/7f2e58cacb86cbafe21113564ce2677cc4ac09dc/JSXCompressor/LICENSE.APACHE"
+   },
+   "sha256": "c1b9df1275e769f3dbab000d1e457a2d4b0f28eb5da6c77e48dc37eeba202ed7"
+  },
+  {
+   "covers": [
     "rf-libdoc-mark-js"
    ],
    "dest": "upstream/mark.js-8.11.1/LICENSE",
@@ -82,6 +144,23 @@
   },
   {
    "covers": [
+    "pw-minimatch"
+   ],
+   "dest": "upstream/minimatch-10.2.5/package.json",
+   "id": "minimatch-10.2.5-package-json",
+   "label": "package.json of the published npm package minimatch 10.2.5, shipped for the author and copyright attribution it carries (the Blue Oak text itself names no author)",
+   "origin": {
+    "kind": "upstream",
+    "member": "package/package.json",
+    "path": "third_party/notices/upstream/minimatch-10.2.5/package.json",
+    "retrieved_on": "2026-11-03",
+    "tarball_sha256": "a6cea46915bfc6c3fae60f9bd003ea4f9d6a4233aa59a9ca729474d3824ca9e5",
+    "url": "https://registry.npmjs.org/minimatch/-/minimatch-10.2.5.tgz"
+   },
+   "sha256": "4b3a08a7ad20dead8bbe4b4fe97a2746bded7c51d218ef3034eb4e330ad31f08"
+  },
+  {
+   "covers": [
     "rf-libdoc-parcel-runtime"
    ],
    "dest": "upstream/parcel-2.16.4/LICENSE",
@@ -93,6 +172,133 @@
     "url": "https://raw.githubusercontent.com/parcel-bundler/parcel/v2.16.4/LICENSE"
    },
    "sha256": "5cfba9d5711264d45a2431a53c79f597cef12720cc7c764db2602daa92d0bd2a"
+  },
+  {
+   "covers": [
+    "pw-vendored-sources"
+   ],
+   "dest": "upstream/playwright-vendored-sources-1.64.1/devtools.ts-header.txt",
+   "id": "pw-vendored-devtools-header",
+   "label": "EXCERPT (the two licence comment blocks before the first import) of packages/trace-viewer/src/third_party/devtools.ts in the cited repository at the cited tag or commit; not a whole file",
+   "origin": {
+    "excerpt": "the two licence comment blocks before the first import",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/playwright-vendored-sources-1.64.1/devtools.ts-header.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/trace-viewer/src/third_party/devtools.ts"
+   },
+   "sha256": "b1d521648490ed4d1777e9f663fcff1ccbbf1e1de490dff7b820d76dd58f9a5c"
+  },
+  {
+   "covers": [
+    "pw-vendored-sources"
+   ],
+   "dest": "upstream/playwright-vendored-sources-1.64.1/extractZip.ts-header.txt",
+   "id": "pw-vendored-extractzip-header",
+   "label": "EXCERPT (leading comment block) of packages/utils/third_party/extractZip.ts in the cited repository at the cited tag or commit; not a whole file",
+   "origin": {
+    "excerpt": "leading comment block",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/playwright-vendored-sources-1.64.1/extractZip.ts-header.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/utils/third_party/extractZip.ts"
+   },
+   "sha256": "b0c9dc2d4237608eaa8135cda58aeb74e526067134bbe03ac5619f1559766c0f"
+  },
+  {
+   "covers": [
+    "pw-vendored-sources"
+   ],
+   "dest": "upstream/playwright-vendored-sources-1.64.1/lockfile.ts-header.txt",
+   "id": "pw-vendored-lockfile-header",
+   "label": "EXCERPT (leading comment block) of packages/utils/third_party/lockfile.ts in the cited repository at the cited tag or commit; not a whole file",
+   "origin": {
+    "excerpt": "leading comment block",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/playwright-vendored-sources-1.64.1/lockfile.ts-header.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/utils/third_party/lockfile.ts"
+   },
+   "sha256": "15aae51ea8a767555d2f8af5624f425830079d2b95f68f6b74fe7ddba2eb3c46"
+  },
+  {
+   "covers": [
+    "pw-vendored-sources"
+   ],
+   "dest": "upstream/playwright-vendored-sources-1.64.1/pixelmatch.js-header.txt",
+   "id": "pw-vendored-pixelmatch-header",
+   "label": "EXCERPT (leading comment block) of packages/utils/third_party/pixelmatch.js in the cited repository at the cited tag or commit; not a whole file",
+   "origin": {
+    "excerpt": "leading comment block",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/playwright-vendored-sources-1.64.1/pixelmatch.js-header.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/utils/third_party/pixelmatch.js"
+   },
+   "sha256": "c629fe1d08532097ccd08f04f720577672776a149bfa74c275b034d7c8238e2e"
+  },
+  {
+   "covers": [
+    "pw-vite-codicon"
+   ],
+   "dest": "upstream/playwright-vscode-third-party-1.64.1/LICENSE.txt",
+   "id": "playwright-vscode-license",
+   "label": "LICENSE.txt of the folder packages/web/src/third_party/vscode of the Playwright repository at v1.64.1: the licence Playwright files next to its copy of the codicon font",
+   "origin": {
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/playwright-vscode-third-party-1.64.1/LICENSE.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/microsoft/playwright/v1.64.1/packages/web/src/third_party/vscode/LICENSE.txt"
+   },
+   "sha256": "20535828272932407c2f5172aeb714ac7b374a34e5ecb1825af509f2902cde54"
+  },
+  {
+   "covers": [
+    "pw-vite-react"
+   ],
+   "dest": "upstream/react-19.2.7/LICENSE",
+   "id": "react-19.2.7-license",
+   "origin": {
+    "kind": "upstream",
+    "member": "package/LICENSE",
+    "path": "third_party/notices/upstream/react-19.2.7/LICENSE",
+    "retrieved_on": "2026-11-03",
+    "tarball_sha256": "d0065884db7670ffb89046826995cf0d7754a31653d23908532e52671bf83d7d",
+    "url": "https://registry.npmjs.org/react/-/react-19.2.7.tgz"
+   },
+   "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+  },
+  {
+   "covers": [
+    "rf-jquery-highlight"
+   ],
+   "dest": "upstream/sandbox-js-highlight-09bab14/README-line-4.txt",
+   "id": "jquery-highlight-readme-licence-line",
+   "label": "EXCERPT (line 4) of README in the cited repository at the cited tag or commit; not a whole file",
+   "origin": {
+    "excerpt": "line 4",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/sandbox-js-highlight-09bab14/README-line-4.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/bartaz/sandbox.js/09bab1454d2251d129e0cc21bddddf99352ed01e/README"
+   },
+   "sha256": "841aa46e7915b4f0294ffc342a3c3fc683039041145cf6e9b855aa500a1d1a59"
+  },
+  {
+   "covers": [
+    "rf-jquery-highlight"
+   ],
+   "dest": "upstream/sandbox-js-highlight-09bab14/jquery.highlight.js-header.txt",
+   "id": "jquery-highlight-source-header",
+   "label": "EXCERPT (leading comment block) of jquery.highlight.js in the cited repository at the cited tag or commit; not a whole file",
+   "origin": {
+    "excerpt": "leading comment block",
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/sandbox-js-highlight-09bab14/jquery.highlight.js-header.txt",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/bartaz/sandbox.js/09bab1454d2251d129e0cc21bddddf99352ed01e/jquery.highlight.js"
+   },
+   "sha256": "14f28ea406a13a8ff43a0067474210736ce5047b313503bdaf34cea697ee5187"
   },
   {
    "covers": [
@@ -114,7 +320,9 @@
    ],
    "dest": "upstream/tablesorter-2.30.5/README.md-lines-48-52.txt",
    "id": "tablesorter-2.30.5-readme-licensing",
+   "label": "EXCERPT (lines 48-52) of README.md of the Mottie fork at v2.30.5; not a whole file and not a licence text",
    "origin": {
+    "excerpt": "line excerpt",
     "kind": "upstream",
     "path": "third_party/notices/upstream/tablesorter-2.30.5/README.md-lines-48-52.txt",
     "retrieved_on": "2026-11-03",
@@ -128,13 +336,92 @@
    ],
    "dest": "upstream/tablesorter-2.30.5/jquery.tablesorter.js-lines-11-29.txt",
    "id": "tablesorter-2.30.5-source-header",
+   "label": "EXCERPT (lines 11-29) of dist/js/jquery.tablesorter.js of the Mottie fork at v2.30.5; not a whole file and not a licence text",
    "origin": {
+    "excerpt": "line excerpt",
     "kind": "upstream",
     "path": "third_party/notices/upstream/tablesorter-2.30.5/jquery.tablesorter.js-lines-11-29.txt",
     "retrieved_on": "2026-11-03",
     "url": "https://raw.githubusercontent.com/Mottie/tablesorter/v2.30.5/dist/js/jquery.tablesorter.js"
    },
    "sha256": "34594a58d644465700105402114d0d7d1b5d59ebd34a9b64c11c275eed523bf0"
+  },
+  {
+   "covers": [
+    "rf-tablesorter-2.30.5"
+   ],
+   "dest": "upstream/tablesorter-original-christianbach-07e0918/LICENSE",
+   "id": "tablesorter-original-license",
+   "label": "LICENSE of the ORIGINAL repository christianbach/tablesorter (MIT, Copyright (c) 2014 Christian Bach). It is not the Mottie fork that Robot Framework ships, and the fork has no licence text of its own",
+   "origin": {
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/tablesorter-original-christianbach-07e0918/LICENSE",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/christianbach/tablesorter/07e0918254df3c2057d6d8e4653a0769f1881412/LICENSE"
+   },
+   "sha256": "fbde400ea6ffef56297ea7aac231ed2f46eac16b32697adcfdef0b05acd9c2da"
+  },
+  {
+   "covers": [
+    "pw-vite-codicon"
+   ],
+   "dest": "upstream/vscode-codicons-6200d18/LICENSE",
+   "id": "vscode-codicons-license",
+   "label": "LICENSE (Creative Commons Attribution 4.0 International) of the microsoft/vscode-codicons repository, the upstream of the icon font: candidate licence of the font, not established for the copy Playwright ships",
+   "origin": {
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/vscode-codicons-6200d18/LICENSE",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/microsoft/vscode-codicons/6200d186bea39354a18737cfff73fe19dbc5fcff/LICENSE"
+   },
+   "sha256": "af5e030844efddbc7ab00dcfea8b019703753d4d9f5172d727c533a492aec665"
+  },
+  {
+   "covers": [
+    "pw-vite-codicon"
+   ],
+   "dest": "upstream/vscode-codicons-6200d18/LICENSE-CODE",
+   "id": "vscode-codicons-license-code",
+   "label": "LICENSE-CODE (MIT) of the microsoft/vscode-codicons repository: the licence of its code, not of the font",
+   "origin": {
+    "kind": "upstream",
+    "path": "third_party/notices/upstream/vscode-codicons-6200d18/LICENSE-CODE",
+    "retrieved_on": "2026-11-03",
+    "url": "https://raw.githubusercontent.com/microsoft/vscode-codicons/6200d186bea39354a18737cfff73fe19dbc5fcff/LICENSE-CODE"
+   },
+   "sha256": "9906940f61b1f0b533fa7d99baf55178b2808fbe113ea51dfbfad8572ccd5f2b"
+  },
+  {
+   "covers": [
+    "pw-vite-xterm"
+   ],
+   "dest": "upstream/xterm-5.5.0/LICENSE",
+   "id": "xterm-5.5.0-license",
+   "origin": {
+    "kind": "upstream",
+    "member": "package/LICENSE",
+    "path": "third_party/notices/upstream/xterm-5.5.0/LICENSE",
+    "retrieved_on": "2026-11-03",
+    "tarball_sha256": "bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2783d26491f59d2",
+    "url": "https://registry.npmjs.org/@xterm/xterm/-/xterm-5.5.0.tgz"
+   },
+   "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd"
+  },
+  {
+   "covers": [
+    "pw-vite-xterm"
+   ],
+   "dest": "upstream/xterm-addon-fit-0.10.0/LICENSE",
+   "id": "xterm-addon-fit-0.10.0-license",
+   "origin": {
+    "kind": "upstream",
+    "member": "package/LICENSE",
+    "path": "third_party/notices/upstream/xterm-addon-fit-0.10.0/LICENSE",
+    "retrieved_on": "2026-11-03",
+    "tarball_sha256": "917ac44972453d5eed52edc1e50260c76398ce48cf2290c2e60671102bba0b33",
+    "url": "https://registry.npmjs.org/@xterm/addon-fit/-/addon-fit-0.10.0.tgz"
+   },
+   "sha256": "e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f"
   },
   {
    "covers": [],
@@ -174,7 +461,8 @@
   },
   {
    "covers": [
-    "pw-node-runtime"
+    "pw-node-runtime",
+    "pw-node-icu"
    ],
    "dest": "wheels/playwright-1.64.1/playwright/driver/LICENSE",
    "id": "playwright-playwright-driver-license",
@@ -253,7 +541,9 @@
    "sha256": "1362b7f413c08083af537384162ab69a323d019fe26e0a2cd78536fafd6b9cbf"
   },
   {
-   "covers": [],
+   "covers": [
+    "pw-webp-codec"
+   ],
    "dest": "wheels/playwright-1.64.1/playwright/driver/package/lib/webp_codec.LICENSE",
    "id": "playwright-playwright-driver-package-lib-webp-codec-license",
    "origin": {

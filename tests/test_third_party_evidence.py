@@ -152,7 +152,7 @@ def test_the_blockers_list_must_name_exactly_the_items_that_are_not_verified():
 def test_an_evidence_item_never_says_cleared_or_approved_and_public_distribution_cannot_be_changed():
     m = fresh()
     item(m, "robotframework", "rf-jquery-3.5.1")["residual"] = "approved for public distribution"
-    assert "EVIDENCE_CLAIM" in codes(findings_of(m))
+    assert "MATRIX_CLAIM" in codes(findings_of(m))
     m = fresh()
     comp(m, "robotframework")["redistribution"]["public_distribution"] = "cleared"
     assert "STAGED_PUBLIC_CLAIM" in codes(findings_of(m))
@@ -184,6 +184,8 @@ def make_repo(tmp_path):
     """A copy of the parts of the repository the notices checks read: the notices tree, the evidence tables and the matrix."""
     shutil.copytree(ROOT / "third_party" / "notices", tmp_path / "third_party" / "notices")
     shutil.copytree(ROOT / "third_party" / "evidence", tmp_path / "third_party" / "evidence")
+    (tmp_path / "bundle").mkdir()
+    shutil.copyfile(ROOT / "bundle" / "README.md", tmp_path / "bundle" / "README.md")
     return tmp_path
 
 
@@ -323,20 +325,20 @@ def test_a_recorded_licence_bearing_file_and_an_ordinary_file_pass(tmp_path):
 
 
 def test_the_node_table_is_checked_against_the_licence_file_of_the_wheel(tmp_path):
-    text = ("Node.js is licensed for use as follows:\n\n- Alpha, located at deps/alpha, is licensed as follows:\n  MIT text one\n\n- Beta, located at tools/beta/, is licensed as follows:\n  BSD text two\n")
+    text = ("Node.js is licensed for use as follows:\n\n- Alpha, located at deps/alpha, is licensed as follows:\n  Permission is hereby granted, free of charge, MIT one\n\n- Beta, located at tools/beta/, is licensed as follows:\n  Permission is hereby granted, free of charge, two\n")
     sections = chk.node_license_sections(text)
     assert [(s["name"], s["location_class"]) for s in sections] == [("Alpha", "source-dependency"), ("Beta", "tools-or-test-path")]
     evidence = tmp_path / "third_party" / "evidence"
     evidence.mkdir(parents=True)
-    table = {"schema": chk.NODE_TABLE_SCHEMA, "license_file_sha256": hashlib.sha256(text.encode()).hexdigest(), "sections": [dict(s, spdx="MIT") for s in sections]}
+    table = {"schema": chk.NODE_TABLE_SCHEMA, "count": 2, "license_file_sha256": hashlib.sha256(text.encode()).hexdigest(), "sections": [dict(s, spdx="MIT") for s in sections]}
     (evidence / "n.json").write_text(json.dumps(table))
     item_ = {"id": "n", "table": {"kind": "node-licence-sections", "path": "third_party/evidence/n.json", "source_member": "w/nodelist.txt"}}
     matrix = one_wheel_matrix(tmp_path, {"w/nodelist.txt": text}, {"third_party_evidence": [item_]})
     assert chk.check_wheelhouse(matrix, tmp_path, tmp_path) == []
-    matrix2 = one_wheel_matrix(tmp_path / "b", {"w/nodelist.txt": text.replace("- Beta, located at tools/beta/, is licensed as follows:\n  BSD text two\n", "")}, {"third_party_evidence": [item_]}) if (tmp_path / "b").mkdir() is None else None
+    matrix2 = one_wheel_matrix(tmp_path / "b", {"w/nodelist.txt": text.replace("- Beta, located at tools/beta/, is licensed as follows:\n  Permission is hereby granted, free of charge, two\n", "")}, {"third_party_evidence": [item_]}) if (tmp_path / "b").mkdir() is None else None
     found = chk.check_wheelhouse(matrix2, tmp_path / "b", tmp_path)                           # a component dropped from the wheel's licence file
     assert "NODE_TABLE_MISMATCH" in codes(found)
-    matrix3 = one_wheel_matrix(tmp_path / "c", {"w/nodelist.txt": text.replace("MIT text one", "MIT text ONE")}, {"third_party_evidence": [item_]}) if (tmp_path / "c").mkdir() is None else None
+    matrix3 = one_wheel_matrix(tmp_path / "c", {"w/nodelist.txt": text.replace("Permission is hereby granted, free of charge, MIT one", "MIT text ONE")}, {"third_party_evidence": [item_]}) if (tmp_path / "c").mkdir() is None else None
     assert "NODE_TABLE_MISMATCH" in codes(chk.check_wheelhouse(matrix3, tmp_path / "c", tmp_path))     # a section's text changed
 
 
@@ -355,7 +357,7 @@ def test_the_npm_table_is_checked_against_the_sidecar_notice_files(tmp_path):
              "licence_files_in_tarball": {}, "notice_text_contains_tarball_licence_file": []}]
     evidence = tmp_path / "third_party" / "evidence"
     evidence.mkdir(parents=True)
-    (evidence / "n.json").write_text(json.dumps({"schema": chk.NPM_TABLE_SCHEMA, "packages": rows}))
+    (evidence / "n.json").write_text(json.dumps({"schema": chk.NPM_TABLE_SCHEMA, "count": 2, "distinct": 2, "packages": rows}))
     item_ = {"id": "n", "table": {"kind": "npm-inlined-packages", "path": "third_party/evidence/n.json", "source_members": ["w/sidecar.txt"]}}
     matrix = one_wheel_matrix(tmp_path, {"w/sidecar.txt": sidecar}, {"third_party_evidence": [item_]})
     assert chk.check_wheelhouse(matrix, tmp_path, tmp_path) == []
@@ -371,7 +373,7 @@ def test_the_npm_table_is_checked_against_the_sidecar_notice_files(tmp_path):
         matrix_n = one_wheel_matrix(sub, {"w/sidecar.txt": text}, {"third_party_evidence": [item_]})
         assert expected in codes(chk.check_wheelhouse(matrix_n, sub, tmp_path)), n
     rows[0]["registry_license"] = "GPL-3.0-only"                                                              # the registry declares something the notice does not say
-    (evidence / "n.json").write_text(json.dumps({"schema": chk.NPM_TABLE_SCHEMA, "packages": rows}))
+    (evidence / "n.json").write_text(json.dumps({"schema": chk.NPM_TABLE_SCHEMA, "count": 2, "distinct": 2, "packages": rows}))
     assert "NPM_LICENCE_DISAGREES" in codes(chk.check_wheelhouse(matrix, tmp_path, tmp_path))
 
 
@@ -406,3 +408,280 @@ def test_the_bundle_job_checks_the_notices_tree_against_the_lock_and_the_shipped
     assert "--notices" in bundle and "THIRD_PARTY_NOTICES" in bundle and "--wheelhouse" in bundle
     licences = "\n".join(str(s.get("run", "")) for s in wf["jobs"]["adapter-licences"]["steps"])
     assert "tests/test_third_party_evidence.py" in licences
+
+
+# ------------------------------------------------------------------------------------------------------------------------------- owner decisions
+def decision_findings(matrix, root, lock=None):
+    return chk.check_owner_decisions(matrix, lock or copy.deepcopy(NOTICES_LOCK), root)
+
+
+def test_the_owner_decisions_of_2026_11_03_are_recorded_with_date_and_conditions_and_every_other_shipped_item_says_none_yet(tmp_path):
+    pw, rf = comp(REAL, "playwright-python"), comp(REAL, "robotframework")
+    want = {"pw-node-runtime": "accepted provisionally", "pw-node-icu": "accepted", "pw-minimatch": "accepted", "pw-proxy-agent-negotiate": "conditional acceptance", "rf-tablesorter-2.30.5": "conditional acceptance"}
+    decided = {}
+    for c in (pw, rf):
+        for i in c["third_party_evidence"]:
+            block = i["owner_decision"]
+            if block["decision"] != "none yet":
+                decided[i["id"]] = block["decision"]
+                assert block["date"] == "2026-11-03" and block["decided_by"] == "owner" and block["conditions"] and all(k["status"] == "satisfied" for k in block["conditions"])
+            else:
+                assert set(block) == {"decision"}
+    assert decided == want
+    assert item(REAL, "robotframework", "rf-tablesorter-2.30.5")["owner_decision"]["elected_licence"] == "MIT"
+    for cid in ("playwright-python", "robotframework", "playwright-python-direct-deps", "typing-extensions-shipped", "pyyaml-shipped"):
+        assert comp(REAL, cid)["owner_decision"] == {"decision": "none yet"}
+    pending = REAL["bundle_public_distribution"]
+    assert pending["status"] == "owner_decision_required" and pending["pending_decisions"] == chk.pending_decisions(REAL) and "pw-vite-codicon" in pending["pending_decisions"] and "pw-minimatch" not in pending["pending_decisions"]
+    assert decision_findings(REAL, make_repo(tmp_path)) == []
+
+
+def test_every_open_item_and_every_item_found_in_the_review_has_no_owner_decision_yet():
+    for iid, cid in (("pw-webp-codec", "playwright-python"), ("pw-vite-react", "playwright-python"), ("pw-vite-codemirror", "playwright-python"), ("pw-vite-xterm", "playwright-python"), ("pw-vite-codicon", "playwright-python"),
+                     ("pw-vite-browser-logos", "playwright-python"), ("pw-vendored-sources", "playwright-python"), ("rf-jquery-tmpl", "robotframework"), ("rf-jquery-highlight", "robotframework"), ("rf-jsxcompressor", "robotframework")):
+        assert item(REAL, cid, iid)["owner_decision"] == {"decision": "none yet"}, iid
+
+
+def test_a_shipped_item_or_component_with_neither_a_decision_nor_none_yet_is_found():
+    m = fresh()
+    del item(m, "playwright-python", "pw-vite-react")["owner_decision"]
+    assert "OWNER_DECISION_MISSING" in codes(findings_of(m))
+    m = fresh()
+    del comp(m, "pyyaml-shipped")["owner_decision"]
+    assert "OWNER_DECISION_MISSING" in codes(findings_of(m))
+    m = fresh()
+    item(m, "playwright-python", "pw-vite-react")["owner_decision"] = {"decision": "approved"}
+    assert "OWNER_DECISION_MISSING" in codes(findings_of(m))
+
+
+@pytest.mark.parametrize("edit", ["date", "decided_by", "conditions", "condition_text", "condition_kind", "condition_status"])
+def test_a_recorded_decision_without_its_date_or_conditions_is_found(edit):
+    m = fresh()
+    block = item(m, "playwright-python", "pw-minimatch")["owner_decision"]
+    if edit == "date": del block["date"]
+    elif edit == "decided_by": block["decided_by"] = "someone"
+    elif edit == "conditions": block["conditions"] = []
+    elif edit == "condition_text": del block["conditions"][0]["text"]
+    elif edit == "condition_kind": block["conditions"][0]["kind"] = "trust_me"
+    else: block["conditions"][0]["status"] = "probably"
+    assert "OWNER_DECISION_INCOMPLETE" in codes(findings_of(m))
+
+
+def test_a_conditional_decision_whose_condition_is_not_evidenced_is_found(tmp_path):
+    root = make_repo(tmp_path)
+    m = fresh()                                                                                    # tablesorter: fewer than five sources quote the MIT alternative
+    it = item(m, "robotframework", "rf-tablesorter-2.30.5")
+    next(sr for sr in it["sources"] if sr["role"] == "declared_licence")["quote"] = "Dual licensed under the GPL"
+    found = decision_findings(m, root)
+    assert "OWNER_CONDITION_UNEVIDENCED" in codes(found) and "OWNER_CONDITION_STATUS" in codes(found)
+    m = fresh()
+    item(m, "robotframework", "rf-tablesorter-2.30.5")["owner_decision"]["elected_licence"] = "GPL-2.0"      # the elected alternative is not MIT
+    assert "OWNER_CONDITION_UNEVIDENCED" in codes(decision_findings(m, root))
+    m = fresh()
+    item(m, "playwright-python", "pw-proxy-agent-negotiate")["licence_text_absent"] = ""                      # the missing text is no longer documented in the item
+    assert "OWNER_CONDITION_UNEVIDENCED" in codes(decision_findings(m, root))
+    (root / "bundle" / "README.md").write_text((root / "bundle" / "README.md").read_text().replace("proxy-agent-negotiate", "the package"))    # nor where a redistributor reads it
+    assert any("bundle/README.md does not mention" in f.message for f in decision_findings(fresh(), root))
+
+
+def test_the_provisional_decision_on_node_needs_its_notices_and_its_retained_residuals(tmp_path):
+    root = make_repo(tmp_path)
+    m = fresh()
+    it = item(m, "playwright-python", "pw-node-runtime")
+    it["residual"] = it["residual"].replace("signature", "checksum")                                           # the unresolved release-signature check is no longer retained in the record
+    assert any("residual" in f.message for f in decision_findings(m, root))
+    lock = copy.deepcopy(NOTICES_LOCK)
+    lock["files"] = [f for f in lock["files"] if not f["id"].endswith("driver-package-notice")]               # a required notice is no longer shipped
+    assert "OWNER_CONDITION_UNEVIDENCED" in codes(decision_findings(fresh(), root, lock))
+
+
+def test_the_acceptance_of_minimatch_needs_its_licence_text_and_its_attribution_file(tmp_path):
+    root = make_repo(tmp_path)
+    lock = copy.deepcopy(NOTICES_LOCK)
+    entry = next(f for f in lock["files"] if f["id"] == "minimatch-10.2.5-package-json")
+    assert "attribution" in entry["label"] and entry["origin"]["member"] == "package/package.json"
+    assert json.loads((root / entry["origin"]["path"]).read_text())["author"].startswith("Isaac Z. Schlueter")
+    entry["label"] = "package.json"                                                                           # no longer labelled as the attribution
+    assert "OWNER_CONDITION_UNEVIDENCED" in codes(decision_findings(fresh(), root, lock))
+    lock["files"] = [f for f in lock["files"] if f["id"] != "minimatch-10.2.5-package-json"]
+    assert "OWNER_CONDITION_UNEVIDENCED" in codes(decision_findings(fresh(), root, lock))
+
+
+def test_the_icu_acceptance_needs_the_icu_section_of_the_table(tmp_path):
+    root = make_repo(tmp_path)
+    path = root / "third_party" / "evidence" / "node-24.22.1-licence-sections.json"
+    table = json.loads(path.read_text())
+    next(sec for sec in table["sections"] if sec["name"] == "ICU")["spdx"] = "MIT"
+    path.write_text(json.dumps(table))
+    assert any("no section ICU" in f.message for f in decision_findings(fresh(), root))
+
+
+def test_a_condition_recorded_with_the_wrong_status_is_found():
+    m = fresh()
+    item(m, "playwright-python", "pw-minimatch")["owner_decision"]["conditions"][0]["status"] = "open"
+    found = decision_findings(m, ROOT)
+    assert "OWNER_CONDITION_STATUS" in codes(found)
+    assert chk.pending_decisions(m) != REAL["bundle_public_distribution"]["pending_decisions"] and "BUNDLE_PUBLIC_DISTRIBUTION" in codes(findings_of(m))
+
+
+def test_the_bundle_level_block_stays_owner_decision_required_and_lists_exactly_the_pending_items():
+    m = fresh()
+    m["bundle_public_distribution"]["status"] = "permitted"
+    assert "BUNDLE_PUBLIC_DISTRIBUTION" in codes(findings_of(m))
+    m = fresh()
+    m["bundle_public_distribution"]["pending_decisions"].remove("pw-vite-react")
+    assert "BUNDLE_PUBLIC_DISTRIBUTION" in codes(findings_of(m))
+    m = fresh()
+    del m["bundle_public_distribution"]
+    assert "BUNDLE_PUBLIC_DISTRIBUTION" in codes(findings_of(m))
+
+
+def test_the_run_function_evaluates_the_decisions_so_the_command_line_check_does_too(tmp_path):
+    m = fresh()
+    item(m, "playwright-python", "pw-minimatch")["owner_decision"]["conditions"][1]["notices"] = ["no-such-notice"]
+    path = tmp_path / "third_party" / "adapter-license-matrix.yaml"
+    shutil.copytree(ROOT / "third_party" / "notices", tmp_path / "third_party" / "notices")
+    shutil.copytree(ROOT / "third_party" / "evidence", tmp_path / "third_party" / "evidence")
+    path.write_text(yaml.safe_dump(m, sort_keys=False))
+    assert "OWNER_CONDITION_UNEVIDENCED" in codes(chk.run(path, tmp_path))
+
+
+# ---------------------------------------------------------------------------------------------------------------- the review's follow-up findings
+def test_the_npm_item_does_not_rest_on_the_hash_of_the_authors_own_table(tmp_path):
+    root = make_repo(tmp_path)
+    it = item(REAL, "playwright-python", "pw-npm-inlined")
+    table_sha = it["table"]["sha256"]
+    assert all(src["sha256"] != table_sha for src in it["sources"]) and all(src.get("derived") for src in it["sources"])
+    assert chk.check_evidence_tables(REAL, root) == []
+    m = fresh()
+    item(m, "playwright-python", "pw-npm-inlined")["sources"][0]["sha256"] = table_sha                         # the table's own digest presented as what was fetched
+    assert "EVIDENCE_SELF_REFERENCE" in codes(chk.check_evidence_tables(m, root))
+    m = fresh()
+    item(m, "playwright-python", "pw-npm-inlined")["sources"][1]["sha256"] = "3" * 64                          # a derived digest that is not the one recomputed from the rows
+    assert "EVIDENCE_DERIVED" in codes(chk.check_evidence_tables(m, root))
+    m = fresh()
+    del item(m, "playwright-python", "pw-npm-inlined")["table"]
+    assert "EVIDENCE_DERIVED" in codes(chk.check_evidence_tables(m, root))
+
+
+def test_the_npm_table_count_and_the_derived_digests_are_recomputed(tmp_path):
+    root = make_repo(tmp_path)
+    path = root / "third_party" / "evidence" / "playwright-1.64.1-inlined-npm-packages.json"
+    data = json.loads(path.read_text())
+    assert data["derived_digests"] == chk.npm_table_digests(data)
+    data["count"] = 80
+    path.write_text(json.dumps(data))
+    m = fresh()
+    item(m, "playwright-python", "pw-npm-inlined")["table"]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert any("count 80" in f.message for f in chk.check_evidence_tables(m, root))
+
+
+def test_a_licence_claim_on_a_bundled_dependency_must_agree_with_the_evidence_status():
+    for cid, iid, name in (("robotframework", "rf-tablesorter-2.30.5", "jQuery tablesorter"), ("playwright-python", "pw-proxy-agent-negotiate", "proxy-agent-negotiate"), ("robotframework", "rf-jsxcompressor", "JSXCompressor")):
+        m = fresh()
+        dep = next(d for d in comp(m, cid)["bundled_deps"] if d.get("evidence") == iid)
+        dep["spdx"] = "MIT"                                                                                   # a claimed licence for an item that is only declared
+        assert any("only a verified item supports a licence" in f.message for f in findings_of(m)), name
+    m = fresh()
+    dep = next(d for d in comp(m, "playwright-python")["bundled_deps"] if d.get("evidence") == "pw-minimatch")
+    dep["spdx"] = "unverified"
+    assert "EVIDENCE_SCHEMA" in codes(findings_of(m))
+
+
+def test_the_command_line_check_scans_the_whole_matrix_for_cleared_approved_compatible_permitted(tmp_path):
+    for word in ("cleared", "approved", "compatible", "permitted", "clearance"):
+        m = fresh()
+        comp(m, "playwright-python")["trademark"]["note"] = f"this is {word} for use"
+        path = tmp_path / f"m-{word}.yaml"
+        path.write_text(yaml.safe_dump(m, sort_keys=False))
+        found = chk.run(path, ROOT)
+        assert "MATRIX_CLAIM" in codes(found), word
+    assert not [f for f in chk.run(MATRIX_PATH, ROOT) if f.code == "MATRIX_CLAIM"]
+
+
+def test_the_node_table_labels_are_recomputed_from_the_sections_own_text():
+    text = "- Alpha, located at deps/alpha, is licensed as follows:\n  Permission is hereby granted, free of charge, to any person\n"
+    assert chk.NODE_SPDX_SUPPORT["MIT"][0][0] in text.lower()
+    assert not any(all(w in text.lower() for w in alt) for alt in chk.NODE_SPDX_SUPPORT["Apache-2.0"])
+
+
+def test_the_node_table_with_a_wrong_licence_label_is_found_against_the_wheel(tmp_path):
+    text = "- Alpha, located at deps/alpha, is licensed as follows:\n  Permission is hereby granted, free of charge, MIT one\n"
+    sections = chk.node_license_sections(text)
+    evidence = tmp_path / "third_party" / "evidence"
+    evidence.mkdir(parents=True)
+    (evidence / "n.json").write_text(json.dumps({"schema": chk.NODE_TABLE_SCHEMA, "count": 1, "license_file_sha256": hashlib.sha256(text.encode()).hexdigest(), "sections": [dict(sections[0], spdx="Apache-2.0")]}))
+    item_ = {"id": "n", "table": {"kind": "node-licence-sections", "path": "third_party/evidence/n.json", "source_member": "w/nodelist.txt"}}
+    matrix = one_wheel_matrix(tmp_path, {"w/nodelist.txt": text}, {"third_party_evidence": [item_]})
+    assert any("does not support the licence 'Apache-2.0'" in f.message for f in chk.check_wheelhouse(matrix, tmp_path, tmp_path))
+
+
+def test_the_node_obligations_do_not_ask_a_binary_copy_for_a_zlib_notice():
+    text = item(REAL, "playwright-python", "pw-node-runtime")["obligations_as_the_texts_state"]
+    assert "MIT, BSD, ISC, Unicode-3.0 and BlueOak-1.0.0 texts" in text and "Zlib" in text and "asks nothing of a binary copy" in text and "MIT, BSD, ISC, Zlib" not in text
+
+
+def test_the_playwright_trademark_is_recorded_as_not_checked_and_the_other_unscanned_files_are_listed():
+    nc = " ".join(comp(REAL, "playwright-python")["not_checked"])
+    assert "trademark" in nc and "not checked" in nc and "xdg-open" in nc and "nbytes" in nc
+
+
+# -------------------------------------------------------------------------------------------------- the items the review found, and the original tablesorter text
+def test_libwebp_and_emscripten_are_identified_from_the_pinned_sources_and_the_notice_is_the_regenerated_one():
+    it = item(REAL, "playwright-python", "pw-webp-codec")
+    assert it["status"] == "verified" and "3757b8afeb54e305eaef18502812a9a88b7ed662" in it["version"]
+    urls = " ".join(s_["url"] for s_ in it["sources"])
+    for needle in ("webmproject/libwebp/3757b8af", "/COPYING", "/PATENTS", "emscripten-core/emscripten/6.0.2/LICENSE", "utils/libwebp-wasm/build.sh", "packages/utils/webp/webp_codec.wasm"):
+        assert needle in urls, needle
+    assert "Additional IP Rights Grant" in it["obligations_as_the_texts_state"] or "patent licence" in it["obligations_as_the_texts_state"]
+
+
+def test_the_vite_bundle_components_are_identified_with_their_versions_and_the_codicon_font_and_the_logos_stay_open():
+    assert item(REAL, "playwright-python", "pw-vite-react")["version"].startswith("react 19.2.7")
+    assert "5.65.18" in item(REAL, "playwright-python", "pw-vite-codemirror")["version"] and "5.5.0" in item(REAL, "playwright-python", "pw-vite-xterm")["version"]
+    cod = item(REAL, "playwright-python", "pw-vite-codicon")
+    assert cod["status"] == "declared_only" and "CC-BY-4.0" in cod["declared_spdx"] and "MIT" in cod["declared_spdx"] and cod["licence_texts"] == ["playwright-vscode-license", "vscode-codicons-license", "vscode-codicons-license-code"]
+    assert "Attribution" not in cod["obligations_as_the_texts_state"] and "attribution" in cod["obligations_as_the_texts_state"] and "URI or hyperlink" in cod["obligations_as_the_texts_state"]
+    logos = item(REAL, "playwright-python", "pw-vite-browser-logos")
+    assert logos["status"] == "declared_only" and "trademarks" in logos["licence_text_absent"]
+    assert sum(1 for s_ in logos["sources"] if "byte for byte the shipped" in s_.get("note", "")) == 4
+
+
+def test_the_robot_assets_the_review_found_are_open_declared_only_items_with_their_exact_quotes():
+    for iid, quote in (("rf-jquery-tmpl", "Dual licensed under the MIT or GPL Version 2 licenses."), ("rf-jquery-highlight", "Licensed under MIT license."), ("rf-jsxcompressor", "Dual licensed under the Apache License Version 2.0, or LGPL Version 3 licenses.")):
+        it = item(REAL, "robotframework", iid)
+        assert it["status"] == "declared_only" and it["spdx"] == "unverified" and any(quote in s_.get("quote", "") for s_ in it["sources"]) and it["options"] and it["licence_text_absent"]
+    assert comp(REAL, "robotframework")["redistribution"]["public_distribution_blockers"] == ["rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
+
+
+def test_tablesorter_records_five_declarations_verbatim_the_wording_difference_and_the_original_repositorys_text():
+    it = item(REAL, "robotframework", "rf-tablesorter-2.30.5")
+    declared = [s_ for s_ in it["sources"] if s_["role"] == "declared_licence"]
+    quotes = [s_["quote"] for s_ in declared]
+    assert len(declared) == 5 and sum("(MIT OR GPL-2.0)" in q_ for q_ in quotes) == 3 and any("or [GPLv2]" in q_ for q_ in quotes) and any("MIT and GPL" in q_ for q_ in quotes)
+    assert "MIT and GPL" in it["residual"] and "carries NO licence header" in it["identified_by"] and "the fork has no text of its own" in it["residual"] and "has no licence text" in it["licence_text_absent"]
+    original = next(s_ for s_ in it["sources"] if s_["role"] == "related_licence_text")
+    assert "christianbach/tablesorter" in original["url"] and original["notice"] == "tablesorter-original-license" and "ORIGINAL repository" in original["note"]
+    assert any("christianbach/tablesorter" in s_.get("quote", "") for s_ in it["sources"] if s_["role"] == "identification")        # the fork's README names it as the original
+    entry = next(f for f in NOTICES_LOCK["files"] if f["id"] == "tablesorter-original-license")
+    assert "ORIGINAL" in entry["label"] and "not the Mottie fork" in entry["label"] and entry["dest"].startswith("upstream/tablesorter-original-christianbach")
+
+
+def test_an_excerpt_or_a_related_text_without_its_label_is_found(tmp_path):
+    root = make_repo(tmp_path)
+    lock = copy.deepcopy(NOTICES_LOCK)
+    next(f for f in lock["files"] if f["id"] == "tablesorter-2.30.5-source-header")["label"] = "a file"
+    assert "NOTICES_LOCK" in codes(lock_findings(REAL, lock, root))
+    lock = copy.deepcopy(NOTICES_LOCK)
+    del next(f for f in lock["files"] if f["id"] == "tablesorter-original-license")["label"]
+    assert "NOTICES_LOCK" in codes(lock_findings(REAL, lock, root))
+    for f in NOTICES_LOCK["files"]:
+        if f["origin"].get("excerpt"):
+            assert f["label"].startswith("EXCERPT"), f["id"]
+
+
+def test_the_notices_readme_says_which_files_are_excerpts_and_which_texts_belong_to_a_related_project():
+    text = (ROOT / "third_party" / "notices" / "README.md").read_text(encoding="utf-8")
+    assert "EXCERPT" in text and "are not whole files" in text and "ORIGINAL tablesorter repository" in text and "not of the Mottie fork" in text
+    assert "every other file is byte for byte" not in text.lower()
+    assert not re.search(r"\b(cleared|approved|clearance|compatible|permitted)\b", text, re.I)

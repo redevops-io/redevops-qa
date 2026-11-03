@@ -69,9 +69,10 @@ def test_selenium_manager_crates_with_mpl_keep_selenium_out_of_the_redistributab
     assert rank == chk.REVIEW and any("MPL-2.0" in w for w in why)
 
 
-def test_the_one_robot_framework_asset_without_a_licence_text_in_any_primary_source_is_still_recorded_as_unverified():
+def test_the_robot_framework_assets_without_a_licence_text_tied_to_the_shipped_file_are_recorded_as_unverified():
     rank, why = chk.effective_rank(comp(REAL, "robotframework"), POLICY)
-    assert rank == chk.UNVERIFIED and sum("unverified" in w for w in why) == 1 and "tablesorter" in " ".join(why)     # jquery.min.js and libdoc.html are now identified with their licence texts
+    joined = " ".join(why)
+    assert rank == chk.UNVERIFIED and sum("unverified" in w for w in why) == 4 and all(n in joined for n in ("tablesorter", "Templates", "Highlight", "JSXCompressor"))     # jquery.min.js and libdoc.html are identified with their licence texts
 
 
 def test_the_playwright_pin_in_the_package_is_the_pin_in_the_matrix():
@@ -471,19 +472,21 @@ def test_the_playwright_entry_describes_the_node_runtime_the_inlined_npm_package
         assert needle in text, needle
     paths = {lf["path"] for lf in pw["shipped_wheels"][0]["license_files"]}
     assert {"playwright/driver/LICENSE", "playwright/driver/package/NOTICE", "playwright/driver/package/lib/utilsBundle.js.LICENSE", "playwright/driver/package/lib/webp_codec.LICENSE"} <= paths
-    assert [d["name"].split(" ")[0] for d in pw["bundled_deps"] if d["spdx"] == "unverified"] == ["proxy-agent-negotiate@1.1.0"]          # the one component without a licence text is not claimed
+    assert sorted(d["evidence"] for d in pw["bundled_deps"] if d["spdx"] == "unverified") == ["pw-proxy-agent-negotiate", "pw-vite-browser-logos", "pw-vite-codicon"]          # the components without a licence text tied to the shipped bytes are not claimed
 
 
-def test_the_robot_assets_are_identified_and_the_one_without_a_licence_text_is_recorded_unverified_with_its_exact_path():
+def test_the_robot_assets_are_identified_and_those_without_a_licence_text_are_recorded_unverified_with_their_exact_paths():
     rb = comp(REAL, "robotframework")
     unverified = [d for d in rb["bundled_deps"] if d["spdx"] == "unverified"]
-    assert len(unverified) == 1
+    assert sorted(d["evidence"] for d in unverified) == ["rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
     joined = json.dumps(unverified)
-    assert "robot/htmldata/lib/jquery.tablesorter.min.js" in joined and "UNVERIFIED" in joined and unverified[0]["evidence"] == "rf-tablesorter-2.30.5"
+    for path in ("robot/htmldata/lib/jquery.tablesorter.min.js", "robot/htmldata/lib/jquery.tmpl.min.js", "robot/htmldata/lib/jquery.highlight.min.js", "robot/htmldata/lib/jsxcompressor.min.js"):
+        assert path in joined, path
+    assert "UNVERIFIED" in joined
     by_name = {d["name"].split(" ")[0] + " " + d["name"].split(" ")[1]: d for d in rb["bundled_deps"]}
     assert by_name["jQuery 3.5.1"]["spdx"] == "MIT" and by_name["Handlebars 4.7.9"]["spdx"] == "MIT"
     assert all(re.search(r"sha256 [0-9a-f]{64}", d["name"]) for d in rb["bundled_deps"] if "robot/htmldata" in d["name"] and "(sha256" in d["name"])
-    assert "PRIVATE STAGING ONLY" in rb["redistribution"]["reason"] and "tablesorter" in rb["redistribution"]["reason"] and rb["redistribution"]["public_distribution_blockers"] == ["rf-tablesorter-2.30.5"]
+    assert "PRIVATE STAGING ONLY" in rb["redistribution"]["reason"] and "tablesorter" in rb["redistribution"]["reason"] and rb["redistribution"]["public_distribution_blockers"] == ["rf-jquery-highlight", "rf-jquery-tmpl", "rf-jsxcompressor", "rf-tablesorter-2.30.5"]
 
 
 def test_pyyaml_is_no_longer_described_as_never_shipped_and_typing_extensions_is_listed():
@@ -601,7 +604,7 @@ def test_the_breakdown_of_the_inlined_npm_notices_is_recorded_and_is_not_only_mi
         assert needle in text, needle
 
 
-def test_minimatch_is_verified_with_its_text_and_the_package_without_a_licence_text_stays_an_unverified_owner_decision_entry():
+def test_minimatch_is_verified_with_its_text_and_the_package_without_a_licence_text_stays_an_unverified_entry():
     pw = comp(REAL, "playwright-python")
     deps = {d["name"].split(" ")[0]: d for d in pw["bundled_deps"]}
     assert deps["minimatch@10.2.5"]["spdx"] == "BlueOak-1.0.0" and deps["minimatch@10.2.5"]["evidence"] == "pw-minimatch" and "Blue Oak" in deps["minimatch@10.2.5"]["note"]
@@ -610,7 +613,7 @@ def test_minimatch_is_verified_with_its_text_and_the_package_without_a_licence_t
     items = {i["id"]: i for i in pw["third_party_evidence"]}
     assert items["pw-minimatch"]["status"] == "verified" and items["pw-proxy-agent-negotiate"]["status"] == "declared_only"
     assert "no license text found" in items["pw-proxy-agent-negotiate"]["licence_text_absent"] and items["pw-proxy-agent-negotiate"]["declared_spdx"] == "MIT"
-    assert len(items["pw-proxy-agent-negotiate"]["options"]) >= 3 and pw["redistribution"]["public_distribution_blockers"] == ["pw-proxy-agent-negotiate"]
+    assert len(items["pw-proxy-agent-negotiate"]["options"]) >= 3 and pw["redistribution"]["public_distribution_blockers"] == ["pw-proxy-agent-negotiate", "pw-vite-browser-logos", "pw-vite-codicon"]
     assert any(d["spdx"] == "BSD-2-Clause" and d["name"].startswith("dotenv@") for d in comp(REAL, "playwright-python")["bundled_deps"])
 
 

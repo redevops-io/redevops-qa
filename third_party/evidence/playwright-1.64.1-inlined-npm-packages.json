@@ -1,5 +1,10 @@
 {
  "count": 81,
+ "derived_digests": {
+  "npm-table:licence-files": "117d512c28ad6127ad568e490624396b4f6e537171f53cdd766cf4e6d27eac73",
+  "npm-table:tarballs": "3434bed7ccf81028a0bc45cce38a6bce2f5da468bb9bd17480a968adf656c676"
+ },
+ "distinct": 79,
  "note": "one row per notice section (chokidar and readdirp have a section in both sidecar files); for each npm package inlined into the Playwright driver: the registry entry of that exact version, its tarball (checked against the registry's sha512 integrity value) and whether the notice text of the wheel contains the licence file of the tarball",
  "packages": [
   {

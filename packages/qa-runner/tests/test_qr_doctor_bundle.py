@@ -440,8 +440,14 @@ def test_an_index_that_is_not_the_one_recorded_at_install_time_fails_and_an_unre
     assert doctor.check_third_party_notices(str(prefix)).status == "FAIL"
 
 
-def test_without_a_recorded_digest_the_detail_says_a_change_made_together_with_the_index_is_not_covered(tmp_path):
+def test_an_install_whose_install_json_lacks_the_notices_index_digest_fails_whatever_the_files_say(tmp_path):
     prefix = make_prefix(tmp_path)
-    add_notices(prefix, record_digest=False)
+    add_notices(prefix, record_digest=False)                                   # the notices are consistent with their INDEX.json, only the install-time digest is missing
     c = doctor.check_third_party_notices(str(prefix))
-    assert c.status == "OK" and "not covered" in c.detail
+    assert c.status == "FAIL" and "does not record the digest" in c.detail and "reinstall" in c.remedy
+    (prefix.parent / "INSTALL.json").write_text(json.dumps({"third_party_notices_index_sha256": ""}))
+    assert doctor.check_third_party_notices(str(prefix)).status == "FAIL"        # a field that is present and empty does not count
+    (prefix.parent / "INSTALL.json").write_text("{")
+    assert doctor.check_third_party_notices(str(prefix)).status == "FAIL"        # nor does an unreadable file
+    add_notices(prefix)
+    assert doctor.check_third_party_notices(str(prefix)).status == "OK"
