@@ -135,3 +135,54 @@ def test_the_acceptance_script_downloads_and_deletes_nothing_outside_its_work_di
     for line in ACCEPT.splitlines():
         if re.search(r"\brm\b", line) and "#" not in line.split("rm")[0]:
             assert '"$WORK' in line, line
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------- the demo jobs
+DEMO_JOBS = ("demo", "demo-verify")
+
+
+@pytest.mark.parametrize("job", DEMO_JOBS)
+def test_the_demo_jobs_are_read_only_on_ubuntu_2404_and_name_no_secret_or_publishing_step(job):
+    j = MAIN["jobs"][job]
+    assert j["runs-on"] == "ubuntu-24.04" and "continue-on-error" not in j and ("permissions" not in j or all(v == "read" for v in j["permissions"].values()))
+    assert j["strategy"]["fail-fast"] is False
+    text = "\n".join(f"{s.get('run', '')} {s.get('with', '')} {s.get('env', '')}" for s in j["steps"]).lower()
+    for word in ("secrets.", "token", "release", "publish", "twine", "pypi", "docker", "gh api", "git push", "git tag", "id-token"):
+        assert word not in text, (job, word)
+
+
+def test_the_demo_jobs_run_the_three_defects_with_the_expected_exit_statuses():
+    for job in DEMO_JOBS:
+        assert MAIN["jobs"][job]["strategy"]["matrix"]["include"] == [{"defect": "none", "exit": 0}, {"defect": "discount", "exit": 1}, {"defect": "settings", "exit": 1}]
+
+
+def test_the_demo_job_installs_the_kept_bundle_with_the_readme_commands_runs_the_demo_checks_it_and_keeps_the_evidence_and_the_anchor():
+    job = MAIN["jobs"]["demo"]
+    assert job["needs"] == "bundle"
+    run = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert 'tar xOf "$RUNNER_TEMP/dl/$name.tar" "$name/README.md"' in run and run.count("tools/readme_block.py") == 2 and " unpack" in run and " install" in run
+    assert '"$HOME/redevops-qa/bin/redevops-qa" demo --defect "$DEFECT" --out "$RUNNER_TEMP/evidence"' in run and "|| status=$?" in run
+    assert "python -I \"$GITHUB_WORKSPACE/tools/check_demo_outcome.py\" run" in run and "--exit-code \"$STATUS\"" in run and "GITHUB_STEP_SUMMARY" in run
+    uploads = {s["with"]["name"]: s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact")}
+    assert set(uploads) == {"demo-evidence-${{ matrix.defect }}", "demo-anchor-${{ matrix.defect }}"}
+    assert uploads["demo-evidence-${{ matrix.defect }}"]["if"] == "always()" and all(u["with"]["if-no-files-found"] == "error" for u in uploads.values())
+    names = [s.get("name", "") for s in job["steps"]]
+    assert names.index("Run the demo (the exit status is checked in the next step)") < names.index("Check the outcome against the seeded defect and print the anchor") < names.index("Keep the evidence bundle")
+
+
+def test_the_verify_job_is_a_second_job_that_starts_from_the_kept_artifacts_in_a_new_directory_and_refuses_a_changed_bundle_and_a_wrong_anchor():
+    job = MAIN["jobs"]["demo-verify"]
+    assert job["needs"] == ["bundle", "demo"]
+    downloads = {s["with"]["name"] for s in job["steps"] if str(s.get("uses", "")).startswith("actions/download-artifact")}
+    assert downloads == {"qa-bundle-current", "demo-evidence-${{ matrix.defect }}", "demo-anchor-${{ matrix.defect }}"}
+    run = "\n".join(str(s.get("run", "")) for s in job["steps"])
+    assert './install.sh --prefix "$RUNNER_TEMP/verifier"' in run and "install-browser" not in run and "--with-deps" not in run
+    assert "verify \"$bundle\" --anchor \"$anchor\" --plan-digest \"$plan\" --require-anchor --require-plan-digest --json" in run
+    assert "check_demo_outcome.py\" verify" in run and run.count('test "$status" -eq 5') == 2 and "printf 'x' >> \"$RUNNER_TEMP/changed/report.json\"" in run
+    assert "--anchor \"sha256:$(printf '0%.0s' $(seq 64))\"" in run
+    assert not any(str(s.get("uses", "")).startswith("actions/upload-artifact") for s in job["steps"])
+
+
+def test_the_new_test_files_run_in_the_bundle_tests_job():
+    run = "\n".join(str(s.get("run", "")) for s in MAIN["jobs"]["bundle-tests"]["steps"])
+    assert "tests/test_demo_outcome.py" in run
