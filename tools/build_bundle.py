@@ -197,15 +197,19 @@ def sha256sums_text(directory: Path, exclude: Sequence[str] = ("SHA256SUMS",)) -
 
 
 # ---------------------------------------------------------------------------------------------------------------------- pinned upstreams
-def load_pins(pins_file: Path):
+def load_pins(pins_file: Path, pin_set: Optional[str] = None):
+    """The pins of ``pin_set`` (default: the file's own default set), without the per-machine overrides (``QA_PIN_*_PATH``, ``REDEVOPS_QA_PIN_SET``): the bundle is built from the trees
+    named here. The environment is put back afterwards, so a caller that runs inside a test process keeps the pin set it was started with."""
     sys.path.insert(0, str(ROOT / "packages" / "qa-bridge" / "src"))
     try:
         from redevops_qa_bridge import deps, pins as pinmod         # noqa: PLC0415
     finally:
         sys.path.pop(0)
-    for var in ("QA_PIN_CONTRACTS_PATH", "QA_PIN_HARNESS_QA_PATH", "REDEVOPS_QA_PIN_SET", "REDEVOPS_QA_PINS"):
-        os.environ.pop(var, None)                    # the bundle is built for the file's default set, from the trees named here
-    return pinmod.load_pins(pins_file), deps, pinmod
+    saved = {v: os.environ.pop(v) for v in ("QA_PIN_CONTRACTS_PATH", "QA_PIN_HARNESS_QA_PATH", "REDEVOPS_QA_PIN_SET", "REDEVOPS_QA_PINS") if v in os.environ}
+    try:
+        return pinmod.load_pins(pins_file, pin_set), deps, pinmod
+    finally:
+        os.environ.update(saved)
 
 
 def pinned_trees(pins, deps, pinned_root: Path, pins_file: Path):
