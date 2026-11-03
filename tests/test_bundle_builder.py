@@ -304,3 +304,9 @@ def test_a_first_party_wheel_without_the_family_licence_texts_is_found(mini, tmp
     resum(bad)
     found = [f for f in cb.check_bundle(bad, allow_test_target=True)]
     assert [f.code for f in found] == ["WHEEL_LICENCE"] and "LICENSE-COMMONS-CLAUSE" in found[0].message
+
+
+def test_the_readme_says_what_uninstall_needs_and_what_it_refuses():
+    text = (ROOT / "bundle" / "README.md").read_text(encoding="utf-8")
+    assert "needs a Python (`python3.12` or `python3`) on `PATH`" in text
+    assert "moved, or is reached through another mount path, is refused" in text and "remove such a directory by hand" in text

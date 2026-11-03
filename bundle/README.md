@@ -55,7 +55,7 @@ operating system libraries of `--with-deps` stay:
 ```
 
 `uninstall.sh` refuses a directory that `install.sh` did not make, or that holds anything `install.sh` did not create. `install.sh` refuses a prefix that exists and is
-not empty, and a failed install removes what it made. `uninstall.sh` also reads `INSTALL.json` and refuses a directory unless it holds exactly what `install.sh` wrote for that directory (schema, entries, the recorded prefix, a virtual environment).
+not empty, and a failed install removes what it made. `uninstall.sh` needs a Python (`python3.12` or `python3`) on `PATH` to read `INSTALL.json`, and refuses a directory unless it holds exactly what `install.sh` wrote for that directory (schema, entries, the recorded prefix, a virtual environment). The recorded prefix is the physical path at install time, so an installation that was moved, or is reached through another mount path, is refused (nothing is removed): remove such a directory by hand, or move it back.
 
 ## Roll back
 

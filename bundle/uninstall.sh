@@ -24,6 +24,14 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$prefix" ] || fail 2 "--prefix DIR is required (see --help)"
+# A trailing slash or a trailing /. names the same directory: take them off before any test of the path, or `link/` and `link/.` would slip past the symbolic-link check.
+while [ "${#prefix}" -gt 1 ]; do
+  case "$prefix" in
+    */) prefix="${prefix%/}" ;;
+    */.) prefix="${prefix%/.}" ;;
+    *) break ;;
+  esac
+done
 case "$prefix" in /*) ;; *) fail 2 "the prefix must be an absolute path" ;; esac
 case "$prefix" in /|//*) fail 2 "refusing to use $prefix" ;; esac
 [ ! -L "$prefix" ] || fail 5 "$prefix is a symbolic link: name the directory itself; nothing was removed"

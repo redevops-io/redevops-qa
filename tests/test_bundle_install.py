@@ -370,16 +370,27 @@ def test_uninstall_refuses_an_install_json_that_names_another_directory_and_a_di
     assert done.returncode == 5 and "no virtual environment" in done.stderr and (one / "venv").is_dir()
 
 
-def test_a_symbolic_link_is_refused_by_install_and_by_uninstall_and_nothing_is_left_or_removed(bundles, box):
+@pytest.mark.parametrize("suffix", ["", "/", "//", "/.", "/./", "/.//."])
+def test_a_symbolic_link_is_refused_by_install_and_by_uninstall_however_the_path_ends_and_nothing_is_left_or_removed(bundles, box, suffix):
     real = box / "real"
     assert run_script(bundles["v1"], "install.sh", ["--prefix", str(real)], box / "home").returncode == 0
     link = box / "link"
     link.symlink_to(real)
-    done = run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(link)], box / "home")
-    assert done.returncode == 5 and "symbolic link" in done.stderr and (real / "venv").is_dir() and link.is_symlink()
-    done = run_script(bundles["v1"], "install.sh", ["--prefix", str(link)], box / "home")
-    assert done.returncode == 5 and "symbolic link" in done.stderr
-    assert run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(real)], box / "home").returncode == 0 and not real.exists()
+    given = str(link) + suffix
+    done = run_script(bundles["v1"], "uninstall.sh", ["--prefix", given], box / "home")
+    assert done.returncode == 5 and "symbolic link" in done.stderr and (real / "venv").is_dir() and (real / "INSTALL.json").is_file() and link.is_symlink(), (suffix, done.stderr)
+    done = run_script(bundles["v1"], "install.sh", ["--prefix", given], box / "home")
+    assert done.returncode == 5 and "symbolic link" in done.stderr, (suffix, done.stderr)
+    link.unlink()
+    assert run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(real) + suffix], box / "home").returncode == 0 and not real.exists()      # the real directory is fine with the same endings
+
+
+def test_a_trailing_slash_or_dot_does_not_change_which_directory_is_installed_or_what_the_launcher_says(bundles, box):
+    prefix = box / "qa"
+    assert run_script(bundles["v1"], "install.sh", ["--prefix", str(prefix) + "/."], box / "home").returncode == 0
+    assert json.loads((prefix / "INSTALL.json").read_text())["prefix"] == str(prefix.resolve())
+    assert f"exec '{prefix}/venv/bin/python'" in (prefix / "bin" / "redevops-qa").read_text()          # no doubled or dotted path in the launcher
+    assert run_script(bundles["v1"], "uninstall.sh", ["--prefix", str(prefix) + "/"], box / "home").returncode == 0 and not prefix.exists()
 
 
 # ------------------------------------------------------------------------------------------------ SHA256SUMS: no duplicate, empty or malformed line
