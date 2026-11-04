@@ -34,6 +34,22 @@ def robot_egress_limitation_text(lane_ids) -> str:
             "lanes' traffic was limited to the allowed origin; each such lane's egress-profile.json records not-enforced.")
 
 
+#: the statement of a run whose Robot lane asks for the kernel layers (profile ``origin-only``): what limits it, and what does not. Derived from the plan alone, so ``verify`` can require the exact text
+ROBOT_EGRESS_LAYERS_ID = "egress-layers-robot"
+
+
+def robot_egress_layers_text(lane_ids) -> str:
+    return ("Network egress of the Robot Framework lane(s) of this run (" + ", ".join(sorted(lane_ids)) + ") is limited by kernel layers on the lane's process, not by the egress gateway: "
+            "a seccomp filter with a supervising thread lets TCP connect() through only to the plan's allow-list (one loopback address and port), refuses UDP, raw, IPv6, netlink and other "
+            "socket kinds, listen(), connect() to a local socket path, TCP Fast Open and io_uring, and records every refusal; Landlock limits TCP connect() to the allowed port and refuses every TCP bind. "
+            "Every process the lane starts inherits both, the processes the engine detaches are ended before the lane's result is written, the lane's log reaches the runner over a descriptor the engine cannot "
+            "reach, and the lane does not start if the layers cannot be installed. What this does not stop: against a hostile library the allow-list is enforced at the level of the PORT, because a second "
+            "thread (or process sharing memory) that changes the address of a connect() between the check and the call can reach another address on the allowed port (the audit log then shows the "
+            "allowed address); files, pipes and processes reachable without a socket are not confined; a TCP simultaneous open is not excluded; a caller with CAP_SYS_PTRACE or a kernel bug defeats it; a process that signals the lane child can stop or kill the supervisor, which ends in no connection at all, not in an open network; "
+            "the library allowlist is a guard, not a sandbox. Each such lane's egress-log.jsonl lists the layers that were installed and every refusal (an allowed connect is recorded up to a cap); a refused "
+            "attempt ends the lane as an engine error (egress-denied), never a pass.")
+
+
 ORIGIN_PLACEHOLDER = "{origin}"
 DEFECTS = ("none", "discount", "settings")
 

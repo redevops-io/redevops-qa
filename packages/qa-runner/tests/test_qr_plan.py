@@ -190,12 +190,18 @@ def test_the_scope_of_this_release_is_playwright_chromium_and_robot_framework_on
 
 
 # ---- the Robot lane ------------------------------------------------------------------------------------------------------------------------
-ROBOT_PLAN_DIGEST = "sha256:e38f4b06a17f5e3f6619fb974537a65e4789f6eed09132dbc8d98c228761d6b5"
+ROBOT_PLAN_DIGEST = "sha256:7a97951ea5c4c245c581ac251f72da360aec4be20e229c0b11778e12cdcb0781"
 ROBOT_EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "robot-plan.json"
 
 
 def test_the_robot_example_file_is_the_robot_plan():
     assert ROBOT_EXAMPLE.read_bytes() == (json.dumps(robot_plan(), indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def test_the_not_enforced_robot_example_file_is_the_robot_plan_with_that_profile_and_has_the_old_plan_digest(up):
+    path = ROBOT_EXAMPLE.with_name("robot-plan-not-enforced.json")
+    assert path.read_bytes() == (json.dumps(robot_plan("not-enforced"), indent=2, sort_keys=True) + "\n").encode("utf-8")
+    assert freeze_plan(up, json.loads(path.read_text(encoding="utf-8"))).plan_digest == "sha256:e38f4b06a17f5e3f6619fb974537a65e4789f6eed09132dbc8d98c228761d6b5"        # the digest the Robot plan had before the layers
 
 
 def test_the_robot_plan_freezes_with_the_suite_files_and_the_program_hash_pinned(up):
@@ -231,7 +237,7 @@ def robot_refused(up, edit, code):
     ("an unknown suite", lambda l: l.update(suite="../../etc/passwd"), "UNKNOWN_SUITE"),
     ("a suite that is not a name", lambda l: l.update(suite=["order-discount"]), "UNKNOWN_SUITE"),
     ("no suite", lambda l: l.pop("suite"), "MISSING_FIELD"),
-    ("the browser's egress profile on a robot lane", lambda l: l.update(egress="origin-only"), "BAD_EGRESS_PROFILE"),
+    ("an egress profile that does not exist on a robot lane", lambda l: l.update(egress="open"), "BAD_EGRESS_PROFILE"),
     ("steps in a robot spec", lambda l: l["spec"].update(steps=copy.deepcopy(golden_plan()["lanes"][0]["spec"]["steps"][:1])), "ROBOT_LANE_HAS_STEPS"),
     ("a playwright assertion in a robot lane", lambda l: l["spec"].update(assertions=copy.deepcopy(golden_plan()["lanes"][0]["spec"]["assertions"])), "EXECUTOR_MISMATCH"),
     ("a program hash that is not the registered one", lambda l: l["spec"]["assertions"][0]["check_program_ref"].update(program_hash="sha256:" + "0" * 64), "PROGRAM_HASH_MISMATCH"),

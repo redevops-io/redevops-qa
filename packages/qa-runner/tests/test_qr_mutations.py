@@ -23,6 +23,8 @@ CORR = "test_qr_corroborate.py"
 CORRR = "test_qr_corroborate_robot.py"
 EGCFG = "test_qr_egress_config.py"
 CRASH = "test_qr_lane_crash.py"
+UNITS = "test_qr_robot_egress_units.py"
+DOCTOR = "test_qr_doctor_bundle.py"
 ANCHOR = "test_qr_anchor_sig.py"
 
 
@@ -143,7 +145,7 @@ CASES = [
     ("an engine timeout is a timeout", "natives.py", '        if error_code == "TIMEOUT":', "        if False:", [t(ROBOT, "test_an_engine_that_hangs_is_a_timeout_and_never_verified")]),
     ("a target that did not start leaves the lane unavailable", "lane_robot.py", "    if origin is None:\n", "    if False:\n", [t(ROBOT, "test_a_target_that_does_not_start_leaves_the_robot_lane_unavailable")]),
     ("a cancelled run skips the lane", "lane_robot.py", "    if cancel is not None and cancel.cancelled:", "    if False:", [t(ROBOT, "test_a_run_cancelled_before_the_lane_starts_skips_it")]),
-    ("the egress profile of a Robot lane says not enforced", "lane_robot.py", '"profile": "not-enforced"', '"profile": "gateway"', [t(ROBOT, "test_the_egress_profile_of_a_robot_lane_says_it_is_not_enforced")]),
+    ("the egress profile of a Robot lane says not enforced", "lane_robot.py", '"profile": "not-enforced"', '"profile": "gateway"', [t(ROBOT, "test_the_egress_profile_of_a_robot_lane_that_says_not_enforced_says_it_is_not_enforced")]),
     # ---- freeze, report, inspect and the child plumbing ---------------------------------------------------------------------------------
     ("the run summary carries the anchor sentence", "cli.py", '    print(f"  external anchor: {ANCHOR_ABSENT_NOTICE} (a manifest digest', '    pass; print(f"  (a manifest digest',
      [t(FREEZE, "test_the_run_summary_says_that_integrity_against_re_forging_is_not_established")]),
@@ -368,10 +370,44 @@ CASES = [
     ("a gateway that no longer answers is a lost gateway", "lane_browser.py", "    except Exception as exc:\n        raise GatewayLost(", "    except ZeroDivisionError as exc:\n        raise GatewayLost(",
      [t(EGCFG, "test_a_gateway_that_does_not_answer_is_a_lost_gateway")]),
     ("a stopped gateway is not asked anything", "lane_browser.py", "        if not gateway.running:", "        if False:", [t(EGCFG, "test_a_gateway_that_was_stopped_is_a_lost_gateway_not_an_empty_log")]),
-    ("the report states that egress is not enforced for a Robot lane", "bundle.py", "if robot else []", "if False else []", [t(ROBOT, "test_the_report_states_that_egress_is_not_enforced_for_the_robot_lane_in_json_text_and_html")]),
+    ("the report states that egress is not enforced for a Robot lane that says so", "bundle.py", "    if open_lanes:\n", "    if False:\n",
+     [t(ROBOT, "test_the_report_states_that_egress_is_not_enforced_for_a_not_enforced_robot_lane_in_json_text_and_html"), t(UNITS, "test_extra_limitations_follow_each_lanes_profile")]),
+    ("the report states the layers and their limits for a Robot lane that asks for them", "bundle.py", "    if fenced:\n", "    if False:\n",
+     [t(ROBOT, "test_the_report_states_the_layers_and_what_they_do_not_stop_for_a_robot_lane_that_asks_for_them"), t(UNITS, "test_extra_limitations_follow_each_lanes_profile")]),
     ("verify requires the egress statement for a Robot lane", "verify.py", "    if have != want:", "    if False:",
-     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement that egress is not enforced for the Robot lane removed from the report]"),
-      t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement that egress is not enforced for the Robot lane reworded]")]),
+     [t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement of the egress layers of the Robot lane removed from the report]"),
+      t(TAMPER, "test_every_change_is_rejected_with_the_finding_that_names_it[the statement of the egress layers of the Robot lane reworded]")]),
+    # ---- the Robot lane's egress layers (what needs no kernel feature) ------------------------------------------------------------------
+    ("a Robot lane may ask for the layers", "plan.py", 'K.ENGINE_ROBOT: ("origin-only", "not-enforced")', 'K.ENGINE_ROBOT: ("not-enforced",)', [t(UNITS, "test_a_robot_lane_may_ask_for_the_layers_or_for_nothing_and_nothing_else")]),
+    ("the supervisor's default is deny", "netfence.py", 'if family != AF_INET or address is None or port is None:', "if False:", [t(UNITS, "test_the_decision_of_a_connect_is_deny_unless_the_address_and_port_are_the_allow_lists")]),
+    ("the supervisor allows the address only with the allowed port", "netfence.py", "ip in net and port == p for net, p in allowed", "ip in net for net, p in allowed",
+     [t(UNITS, "test_the_decision_of_a_connect_is_deny_unless_the_address_and_port_are_the_allow_lists")]),
+    ("the filter refuses another architecture", "netfence.py", 'a.jeq(spec["audit"], None, "kill")', 'a.jeq(spec["audit"], None, None)', [t(UNITS, "test_the_filter_begins_by_refusing_any_other_architecture_and_every_jump_stays_inside_it")]),
+    ("the filter refuses the x32 call numbers", "netfence.py", '    if spec["x32"]:\n', "    if False:\n", [t(UNITS, "test_the_x86_64_filter_also_refuses_the_x32_call_numbers")]),
+    ("the audit file's sequence is checked", "egresslog.py", 'e.get("seq") != n or', "False or", [t(UNITS, "test_a_malformed_log_is_reported_never_repaired")]),
+    ("the audit file holds no float", "egresslog.py", "parse_float=refuse", "parse_float=float", [t(UNITS, "test_a_malformed_log_is_reported_never_repaired")]),
+    ("doctor passes the layers only on a measured ok", "doctor.py", '    if result.get("ok") is True:', "    if True:", [t(UNITS, "test_a_failed_probe_is_a_fail_not_a_pass"), t(UNITS, "test_doctor_fails_clearly_when_the_plan_needs_the_layers_and_they_are_unavailable")]),
+    ("doctor does not need the layers for a plan that does not ask for them", "doctor.py", "    if not needed:\n", "    if False:\n", [t(UNITS, "test_doctor_does_not_fail_for_a_plan_that_does_not_need_the_layers")]),
+    ("a run whose Robot egress cannot be limited does not start", "cli.py", '    if check.status == "FAIL":\n        raise EnvironmentFault("ROBOT_EGRESS_UNAVAILABLE"', '    if False:\n        raise EnvironmentFault("ROBOT_EGRESS_UNAVAILABLE"',
+     [t(DOCTOR, "test_run_refuses_a_plan_whose_robot_lane_asks_for_the_layers_when_they_are_unavailable_and_starts_nothing"), t(DOCTOR, "test_the_demo_does_not_start_where_the_layers_are_unavailable")]),
+    ("a plan that does not ask for the layers is not refused for lacking them", "cli.py", "    if not has_limited_robot_lane:\n        return", "    if False:\n        return", [t(DOCTOR, "test_run_starts_a_plan_that_does_not_ask_for_the_layers_whatever_the_probe_says")]),
+    ("a refusal is dropped once the allowed connects have used their room", "netfence.py", '            if verdict != "allow" and denies >= MAX_DENY_RECORDS:', '            if verdict != "allow" and denies + allows >= MAX_ALLOW_RECORDS:',
+     [t(UNITS, "test_a_refusal_is_written_after_the_allowed_connects_have_used_their_room_and_the_rest_is_counted")]),
+    ("refusals beyond their cap are not counted", "netfence.py", "                self._deny_omitted += 1 if verdict == \"deny\" else 0", "                pass", [t(UNITS, "test_refusals_beyond_their_own_cap_are_counted_in_the_summary_and_the_count_is_the_total")]),
+    ("the self-test does not fail on a layer that does not refuse", "netfence.py", '    if not result["forbidden_tcp_refused"] or (LAYER_SECCOMP in layers and not result["udp_refused"]):', "    if False:",
+     [t(UNITS, "test_the_self_test_passes_only_when_both_the_forbidden_connect_and_the_udp_socket_are_refused")]),
+    ("a probe with a failing check is ok", "netfence.py", "    return bool(checks) and all(v is True for v in checks.values())", "    return True", [t(UNITS, "test_a_probe_with_one_check_that_fails_or_with_none_is_not_ok")]),
+    ("the probe does not stop at a layer that fails alone", "netfence.py", '            if doc.get("ok") is not True:\n                return {"ok": False, "reason": doc.get("reason", "layer-check-failed")', '            if False:\n                return {"ok": False, "reason": doc.get("reason", "layer-check-failed")',
+     [t(UNITS, "test_the_probe_judges_each_layer_alone_and_both_and_a_layer_that_does_not_enforce_by_itself_fails_it")]),
+    ("the runner ignores the refusals in the log the child sent", "lane_robot.py", '    return refused(outcome, egresslog.refusals(events), any(e.get("verdict") == "lost" for e in events), fl.lane_id), rest', "    return outcome, rest",
+     [t(UNITS, "test_the_log_the_child_sent_over_its_standard_output_decides_the_lane_s_status_not_the_files")]),
+    ("the log the child sent does not replace the file's copy", "lane_robot.py", '    files[path] = (log, "log")\n', "", [t(UNITS, "test_the_log_the_child_sent_over_its_standard_output_decides_the_lane_s_status_not_the_files")]),
+    ("the piped log is put back into a bundle that did not keep the file", "lane_robot.py", "    if path in files:  ", "    if True:  ",
+     [t(UNITS, "test_a_log_the_evidence_budget_did_not_keep_is_not_put_back_by_the_piped_copy_but_its_refusals_still_count")]),
+    ("a lane that sent no log is not an engine error", "lane_robot.py", "    if log is None:\n        return replace(outcome, native_status=", "    if False:\n        return replace(outcome, native_status=",
+     [t(UNITS, "test_a_log_that_is_missing_or_malformed_on_the_pipe_is_an_engine_error_and_a_clean_one_changes_nothing_but_the_count")]),
+    ("a lane whose layers cannot be installed is not started", "lane_robot.py", "            except netfence.FenceUnavailable as exc:", "            except ZeroDivisionError as exc:",
+     [t(ROBOT, "test_a_lane_that_asks_for_layers_that_cannot_be_installed_is_not_started")]),
     # ---- cli.py and doctor.py --------------------------------------------------------------------------------------------------------
     ("an existing bundle is never overwritten", "cli.py", "    except FileExistsError:\n        raise PlanError(\"OUTPUT_EXISTS\", f\"{safe_text(str(target / run_id))}", "    except ZeroDivisionError:\n        raise PlanError(\"OUTPUT_EXISTS\", f\"{safe_text(str(target / run_id))}",
      [t(CLI, "test_an_existing_bundle_directory_is_never_overwritten"), t(CLI, "test_a_second_run_with_the_same_id_fails_fast_before_it_executes")]),

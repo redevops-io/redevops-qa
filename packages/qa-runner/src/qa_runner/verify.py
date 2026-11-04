@@ -30,7 +30,7 @@ from qa_evidence.sources import SourceError
 from qa_evidence.verify import verify_bundle, verify_source
 
 from . import anchor_sig as asig
-from . import constants as K
+from . import constants as K, egresslog
 from .bundle import extra_limitations, finalize_results
 from .corroborate import BundleBlobs, plain_json, lane_origin, record_contradicts_itself
 from .deps import Upstreams, pin_summary, verified_bootstrap
@@ -122,6 +122,18 @@ def _anchor_json(anchor: Any) -> Dict[str, Any]:
 
 
 OVER_CAP = ("NATIVE_ERROR", "evidence-over-cap")
+EGRESS_RAW = ("egress-denied", "egress-fence-lost")         # the raw status of a Robot lane that the kernel layers refused something of, or whose supervisor was lost: always an engine error
+
+
+def _egress_log(files: Mapping[str, bytes], lane_id: str):
+    data = files.get(f"lanes/{lane_id}/{egresslog.LOG_NAME}")
+    return None if data is None else egresslog.parse(data)
+
+
+def _egress_refused(files: Mapping[str, bytes], lane_id: str) -> bool:
+    """Whether the lane's own egress log records at least one refusal (or a lost supervisor): what an ``egress-denied`` status rests on."""
+    parsed = _egress_log(files, lane_id)
+    return parsed is not None and not parsed[2] and egresslog.denied(parsed[1]) > 0
 NOT_KEPT_NAME_RE = re.compile(r"^(lanes|logs)/[\x21-\x7e]{1,150}$")
 
 
@@ -295,11 +307,71 @@ def _check_report_fields(frozen: FrozenPlan, files: Mapping[str, bytes], report:
             v.add("REPORT_FIELD_MISMATCH", safe_text(str(r.get("assertion_id")), 64), "the result names another native status than its lane's")
     if report.get("redaction") != REDACTION:
         v.add("REPORT_FIELD_MISMATCH", "redaction", "the redaction note is not the one the runner writes")
-    have = [(x.get("id"), x.get("text")) for x in report.get("limitations", []) if isinstance(x, dict) and x.get("id") == K.ROBOT_EGRESS_LIMITATION_ID]
+    ids = (K.ROBOT_EGRESS_LIMITATION_ID, K.ROBOT_EGRESS_LAYERS_ID)
+    have = [(x.get("id"), x.get("text")) for x in report.get("limitations", []) if isinstance(x, dict) and x.get("id") in ids]
     want = [(x["id"], x["text"]) for x in extra_limitations(frozen)]
     if have != want:
-        v.add("EGRESS_STATEMENT_MISSING" if not have and want else "EGRESS_STATEMENT_WRONG", "limitations",
-              "the report must state that egress is not enforced for the plan's Robot lane(s), in the runner's words, and only when the plan has one")
+        v.add("EGRESS_STATEMENT_MISSING" if len(have) < len(want) and all(w in want for w in have) else "EGRESS_STATEMENT_WRONG", "limitations",
+              "the report must state what limits the egress of the plan's Robot lane(s) (that it is not enforced, or which kernel layers apply and what they do not stop), in the runner's words, and only for the lanes the plan has")
+
+
+def _check_robot_egress(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification) -> None:
+    """The audit file of every Robot lane that asked for the kernel layers: well formed; written by the layers the plan's profile needs (both, a self-test that passed, the allow-list of the egress profile);
+    every allowed decision inside that allow-list; and the lane's native status agrees with it: a refusal (or a lost supervisor) in the log means the lane is an engine error (egress-denied or
+    egress-fence-lost), never a completed lane, and such a status needs a refusal in the log. The report's count of refusals is the log's."""
+    lanes = {l["lane_id"]: l["native"] for l in report["lanes"]}
+    total = 0
+    for fl in frozen.lanes:
+        if fl.engine != K.ENGINE_ROBOT or fl.egress != "origin-only":
+            continue
+        lid = fl.lane_id
+        path = f"lanes/{lid}/{egresslog.LOG_NAME}"
+        native = lanes.get(lid)
+        if native is None:
+            continue
+        parsed = _egress_log(files, lid)
+        if parsed is None:
+            if native["raw_status"] in EGRESS_RAW:
+                v.add("EGRESS_DENIAL_NOT_IN_LOG", path, "the lane is reported as ended by the egress layers but its egress log is not in the bundle")
+            continue                                             # a missing file of a lane that completed is EXPECTED_FILE_MISSING (_check_required)
+        header, events, problems = parsed
+        if problems:
+            v.add("EGRESS_LOG_MALFORMED", path, safe_text("; ".join(problems[:3]), 200))
+            continue
+        if f"lanes/{lid}/egress-profile.json" not in files:
+            continue                                             # not kept (the evidence budget) and listed as such, or EXPECTED_FILE_MISSING (_check_required)
+        origin = lane_origin(fl, files)
+        if origin is None:
+            v.add("EGRESS_PROFILE_MISSING", f"lanes/{lid}/egress-profile.json", "the egress profile is malformed, or not exactly the one the plan's profile gives for the origin it names")
+            continue
+        allowed = [f"127.0.0.1/32:{origin.rsplit(':', 1)[1]}"]
+        if header.get("event") == "unavailable":
+            if native["raw_status"] != "egress-unavailable" or native["status"] != "NATIVE_UNAVAILABLE":
+                v.add("EGRESS_LOG_MALFORMED", path, "the log says the layers were unavailable but the lane is not reported as unavailable for that reason")
+            continue
+        if native["raw_status"] == "egress-unavailable":
+            v.add("EGRESS_LOG_MALFORMED", path, "the lane is reported unavailable (egress-unavailable) but its log says the layers were installed")
+            continue
+        if header.get("layers") != list(egresslog.ALL_LAYERS) or header.get("allowed") != allowed or header["selftest"].get("forbidden_tcp_refused") is not True \
+                or header["selftest"].get("udp_refused") is not True or type(header.get("landlock_abi")) is not int or header["landlock_abi"] < 4:
+            v.add("EGRESS_MECHANISM_WRONG", path, "the log does not show both layers installed around the allow-list of the egress profile with a self-test that passed")
+        for e in events:
+            if e.get("verdict") == "allow" and not (e["syscall"] == "connect" and e.get("family") == "AF_INET" and e.get("address") == "127.0.0.1" and f"127.0.0.1/32:{e.get('port')}" in allowed):
+                v.add("EGRESS_ALLOW_OUTSIDE_POLICY", path, f"record {e['seq']} allows something that is not the allow-list's address and port")
+                break
+        refused = egresslog.denied(events)
+        total += egresslog.refusals(events)
+        if refused and native["status"] in ("NATIVE_PASS", "NATIVE_FAIL"):
+            v.add("EGRESS_DENIAL_NOT_REFLECTED", path, f"the log records {refused} refused attempt(s) but the lane is reported as completed ({native['status']}): a refusal ends the lane as an engine error")
+        if native["raw_status"] in EGRESS_RAW and (native["status"] != "NATIVE_ERROR" or not refused):
+            v.add("EGRESS_DENIAL_NOT_IN_LOG", path, "the lane is reported as ended by the egress layers but its log records no refusal")
+        if native["raw_status"] == "egress-fence-lost" and not any(e.get("verdict") == "lost" for e in events):
+            v.add("EGRESS_DENIAL_NOT_IN_LOG", path, "the lane is reported as having lost its egress supervisor but its log does not say so")
+    reported = (report.get("extensions") or {}).get("egress_fence_denied")
+    fenced = [fl for fl in frozen.lanes if fl.engine == K.ENGINE_ROBOT and fl.egress == "origin-only"]
+    complete = all(f"lanes/{fl.lane_id}/{egresslog.LOG_NAME}" in files for fl in fenced)          # a log the evidence budget did not keep cannot be counted (its absence is judged by _check_required)
+    if reported is not None and fenced and complete and reported != total:
+        v.add("REPORT_FIELD_MISMATCH", "extensions.egress_fence_denied", "the number of refused attempts in the report is not the number in the lanes' egress logs")
 
 
 def _check_native(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mapping[str, Any], v: Verification, tol: Tolerance = Tolerance()) -> None:
@@ -337,6 +409,9 @@ def _check_native(frozen: FrozenPlan, files: Mapping[str, bytes], report: Mappin
         elif derived is not None and derived != got and got == OVER_CAP and lid in tol.over:
             v.notes.append(f"lane {safe_text(lid, 20)}: reported as an engine error (evidence-over-cap) although its own files say {derived[0]} ({safe_text(derived[1], 40)}): the run kept an incomplete record "
                            "and does not rely on it (a lower result than the files give, accepted; the reverse is never accepted)")
+        elif derived is not None and derived != got and got[0] == "NATIVE_ERROR" and got[1] in EGRESS_RAW and _egress_refused(files, lid):
+            v.notes.append(f"lane {safe_text(lid, 20)}: reported as an engine error ({got[1]}) although its own files say {derived[0]} ({safe_text(derived[1], 40)}): its egress log records a refused attempt "
+                           "(a lower result than the files give, accepted; the reverse is never accepted)")
         elif derived is not None and derived != got:
             v.add("NATIVE_STATUS_RELABELLED", f"lanes/{lid}", f"the report says {got[0]} ({got[1]}); the engine's own files say {derived[0]} ({derived[1]})")
 
@@ -430,6 +505,8 @@ def _expected_files(frozen: FrozenPlan, tol: Tolerance = Tolerance()) -> Tuple[f
         else:
             names |= {base + n for n in ("native/output.xml", "native/robot-summary.json", "native/adapter-result.json")}
             names |= {base + "suite/" + n for n in lane.suite_files}
+            if lane.egress == "origin-only":
+                names.add(base + egresslog.LOG_NAME)
     return frozenset(names), blobs
 
 
@@ -442,6 +519,9 @@ def _required_files(frozen: FrozenPlan, report: Mapping[str, Any], tol: Toleranc
     for lane in frozen.lanes:
         lid, base = lane.lane_id, f"lanes/{lane.lane_id}/"
         done = status.get(lid) in ("NATIVE_PASS", "NATIVE_FAIL")
+        refused = next((l["native"]["raw_status"] for l in report["lanes"] if l["lane_id"] == lid), "") in EGRESS_RAW
+        if lane.engine == K.ENGINE_ROBOT and lane.egress == "origin-only" and (done or refused):
+            need.append(base + egresslog.LOG_NAME)           # the audit of the kernel layers: required of a lane that completed and of one that was ended because they refused something
         if not done and lid not in tol.over:
             continue
         need += [base + "egress-profile.json", base + "target-requests.jsonl"]
@@ -529,6 +609,7 @@ def verify_snapshot(snapshot: Any, *, anchor: Optional[str] = None, plan_digest:
                 _check_required(frozen, files, report, v, tol)
                 _check_not_kept_names(frozen, files, v, tol)
                 _check_report_fields(frozen, files, report, v)
+                _check_robot_egress(frozen, files, report, v)
             v.run_exit_code = exit_code_for(report)
         except EnvironmentFault as exc:
             v.unavailable = True

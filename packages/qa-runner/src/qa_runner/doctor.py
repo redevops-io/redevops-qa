@@ -403,7 +403,31 @@ def check_egress_gateway() -> Check:
         return Check("egress gateway", "FAIL", "the browser launch configuration does not make the gateway the only way out (" + "; ".join(problems) + "); the run refuses to continue without it",
                      "reinstall qa-egress from this checkout")
     return Check("egress gateway", "OK", "binds on loopback and builds the launch configuration whose flags force browser traffic through it (loopback is not bypassed); no traffic was sent "
-                 "here: enforcement is shown by the browser tests, not by this check. Egress is not enforced for a Robot lane")
+                 "here: enforcement is shown by the browser tests, not by this check. A Robot lane does not pass this gateway: see the robot egress layers check")
+
+
+def check_robot_egress(probe: Optional[Callable[[], Dict]] = None, *, needed: bool = True) -> Check:
+    """Whether the kernel layers that limit a Robot lane's egress work on this host, MEASURED: a throwaway child process installs them around a synthetic allow-list (one loopback listener) and
+    tries what must pass (a connect to the allowed listener) and what must be refused (a connect to another listener, a UDP socket, an IPv6 socket). A plan whose Robot lane asks for the layers
+    (``"egress": "origin-only"``) does not start where this fails: there is no weaker mode. A plan that names ``not-enforced`` does not need them (``needed=False``)."""
+    if not needed:
+        return Check("robot egress layers", "OK", "not needed: no Robot lane of this plan asks for them (a Robot lane that says not-enforced runs with no limit on its network traffic, and its report says so)")
+    if probe is None:
+        from . import netfence
+        probe = netfence.probe
+    result = probe()
+    if result.get("ok") is True:
+        facts = result.get("facts") or {}
+        checks = result.get("checks") or {}
+        return Check("robot egress layers", "OK", f"seccomp user notification and Landlock (ABI {facts.get('landlock_abi')}) work on this host (kernel {facts.get('kernel')}, {facts.get('machine')}): measured in a throwaway "
+                     f"process, a connect to the allowed listener works and a connect to another port, a UDP socket and an IPv6 socket are refused ({', '.join(sorted(k for k, ok in checks.items() if ok))}). "
+                     "This is a measurement of this host, not of a lane: what the layers do not stop is in the report's limitations and in the egress matrix of the documentation")
+    reason = str(result.get("reason", "unknown"))[:60]
+    message = str(result.get("message", ""))[:300]
+    return Check("robot egress layers", "FAIL", f"the kernel layers that limit a Robot lane's egress cannot be provided here ({reason}: {message}); a plan whose Robot lane asks for them does not start, and "
+                 "there is no weaker mode",
+                 "use Linux x86_64 with a kernel that has Landlock network rules (6.7 or later, Landlock enabled) in a container whose seccomp profile allows seccomp user notification and the landlock "
+                 "system calls (Docker's default profile does), or run a plan whose Robot lane says \"egress\": \"not-enforced\" (no limit on that lane's traffic; the report says so)")
 
 
 def check_workdir() -> Check:
@@ -415,7 +439,7 @@ def check_workdir() -> Check:
     return Check("temporary directory", "OK", "writable")
 
 
-def run_doctor(engines: Sequence[str] = (K.ENGINE_PLAYWRIGHT,), *, include: Optional[Sequence[Callable[[], Check]]] = None) -> List[Check]:
+def run_doctor(engines: Sequence[str] = (K.ENGINE_PLAYWRIGHT,), *, include: Optional[Sequence[Callable[[], Check]]] = None, robot_egress: bool = True) -> List[Check]:
     checks: List[Callable[[], Check]] = [check_python, check_platform, check_workdir, lambda: check_path_policy(robot=K.ENGINE_ROBOT in engines), check_first_party_modules, check_pins, check_pinned_files, check_third_party_notices]
     if K.ENGINE_PLAYWRIGHT in engines:
         # The browser is checked against the pin first and is only launched if that check did not fail: launching a tree that differs from the pin would run the changed files.
@@ -432,6 +456,7 @@ def run_doctor(engines: Sequence[str] = (K.ENGINE_PLAYWRIGHT,), *, include: Opti
         checks += [browser_build, launch]
     if K.ENGINE_ROBOT in engines:
         checks.append(check_robot)
+        checks.append(lambda: check_robot_egress(needed=robot_egress))
     checks += [check_fixture_app, check_egress_gateway]
     return [c() for c in (include if include is not None else checks)]
 

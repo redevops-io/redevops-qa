@@ -68,23 +68,98 @@ def test_the_bundle_holds_the_engine_report_the_record_and_the_reviewed_files(up
         assert "sha256:" + hashlib.sha256(s.bundle.files[f"lanes/robot/suite/{rel}"]).hexdigest() == digest
 
 
-def test_the_egress_profile_of_a_robot_lane_says_it_is_not_enforced(up, frozen):
-    s = run(up, frozen, "live")
+@pytest.fixture(scope="module")
+def frozen_open(up):
+    """The same lane with the profile that asks for nothing: ``not-enforced``."""
+    return freeze_plan(up, robot_plan("not-enforced"))
+
+
+def test_the_egress_profile_of_a_robot_lane_that_says_not_enforced_says_it_is_not_enforced(up, frozen_open):
+    s = run(up, frozen_open, "live")
     profile = json.loads(s.bundle.files["lanes/robot/egress-profile.json"])
-    assert profile["profile"] == "not-enforced" and "own sockets" in profile["note"]
+    assert profile["profile"] == "not-enforced" and "own sockets" in profile["note"] and "lanes/robot/egress-log.jsonl" not in s.bundle.files
 
 
-def test_the_report_states_that_egress_is_not_enforced_for_the_robot_lane_in_json_text_and_html(up, frozen, tmp_path):
+def test_the_report_states_that_egress_is_not_enforced_for_a_not_enforced_robot_lane_in_json_text_and_html(up, frozen_open, tmp_path):
     from qa_evidence.inspector import inspect_bundle
     from qa_evidence.render import render_html, render_text
-    s = run(up, frozen, "live")
+    s = run(up, frozen_open, "live")
     (lim,) = [x for x in rep(s)["limitations"] if x["id"] == K.ROBOT_EGRESS_LIMITATION_ID]
     assert lim["text"] == K.robot_egress_limitation_text(["robot"]) and "NOT enforced" in lim["text"] and "(robot)" in lim["text"]
     assert "guard, not a sandbox" in lim["text"] and "Nothing in this report shows" in lim["text"]
+    assert K.ROBOT_EGRESS_LAYERS_ID not in [x["id"] for x in rep(s)["limitations"]]
     target = tmp_path / "bundle"
     s.bundle.write_directory(str(target))
     ins = inspect_bundle(str(target))
     assert lim["text"] in render_text(ins) and "egress-not-enforced-robot" in render_html(ins)
+
+
+def test_the_egress_profile_of_a_robot_lane_that_asks_for_the_layers_is_the_allow_list_and_the_log_names_the_layers(up, frozen):
+    from qa_runner import egresslog
+    from qa_runner.egress import policy_config
+    s = run(up, frozen, "live")
+    origin = json.loads(s.bundle.files["lanes/robot/egress-profile.json"])
+    port = origin["private"][0]["ports"][0]
+    assert origin == policy_config("origin-only", f"http://127.0.0.1:{port}")
+    header, events, problems = egresslog.parse(s.bundle.files["lanes/robot/egress-log.jsonl"])
+    assert not problems and header["layers"] == list(egresslog.ALL_LAYERS) and header["allowed"] == [f"127.0.0.1/32:{port}"] and header["selftest"]["forbidden_tcp_refused"] is True
+    assert {e["verdict"] for e in events} <= {"allow"}                      # the double asks the target and nothing else
+    roles = {f["path"]: f["role"] for f in s.bundle.manifest["files"]}
+    assert roles["lanes/robot/egress-log.jsonl"] == "log"
+
+
+def test_the_report_states_the_layers_and_what_they_do_not_stop_for_a_robot_lane_that_asks_for_them(up, frozen, tmp_path):
+    from qa_evidence.inspector import inspect_bundle
+    from qa_evidence.render import render_html, render_text
+    s = run(up, frozen, "live")
+    (lim,) = [x for x in rep(s)["limitations"] if x["id"] == K.ROBOT_EGRESS_LAYERS_ID]
+    assert lim["text"] == K.robot_egress_layers_text(["robot"]) and "(robot)" in lim["text"] and "What this does not stop" in lim["text"] and "egress-denied" in lim["text"]
+    assert K.ROBOT_EGRESS_LIMITATION_ID not in [x["id"] for x in rep(s)["limitations"]]
+    assert "NOT enforced" not in lim["text"]
+    target = tmp_path / "bundle"
+    s.bundle.write_directory(str(target))
+    ins = inspect_bundle(str(target))
+    assert lim["text"] in render_text(ins) and K.ROBOT_EGRESS_LAYERS_ID in render_html(ins)
+
+
+def test_a_lane_that_asks_for_layers_that_cannot_be_installed_is_not_started(up, frozen, monkeypatch):
+    """No weaker mode: the lane child cannot install the layers (here: the installer refuses), so the engine never starts and the lane is unavailable, with the reason in its egress log."""
+    import qa_runner.lane_robot as lane_robot
+    from qa_runner import netfence
+
+    def refuse(policy, layers=netfence.ALL_LAYERS):
+        raise netfence.FenceUnavailable("landlock-network-rules-unavailable", "the engine must not start")
+    monkeypatch.setattr(netfence, "install", refuse)
+    out = frozen_unavailable_outcome(up, frozen, lane_robot, refuse)
+    assert (out.native_status, out.raw_status) == ("NATIVE_UNAVAILABLE", "egress-unavailable")
+    row = json.loads(out.files["lanes/robot/egress-log.jsonl"][0].decode())
+    assert row["event"] == "unavailable" and row["reason"] == "landlock-network-rules-unavailable" and not out.native_files and "lanes/robot/native/output.xml" not in out.files
+
+
+def frozen_unavailable_outcome(up, frozen, lane_robot, refuse):
+    """What the lane child writes when ``netfence.install`` raises: run its ``main`` in this process with a lane input, as the supervised child does."""
+    import os
+    import tempfile
+    from qa_evidence.canon import dumps_canonical
+    from qa_runner.egress import policy_config
+    from qa_runner.safe_read import Budget
+    fl = frozen.lane("robot")
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "out"
+        out.mkdir()
+        cfg = {"schema": K.LANE_INPUT_SCHEMA, "schema_version": K.SCHEMA_VERSION, "lane_id": "robot", "engine": fl.engine, "suite": fl.suite, "suite_files": dict(fl.suite_files), "run_id": "r0-x",
+               "origin": "http://127.0.0.1:1", "deadline_s": 5, "out_dir": str(out), "workdir": tmp, "suite_dir": str(suites.SUITE_DIR), "launcher": None, "parent_pid": None,
+               "evidence_budget": 1 << 20, "egress": "origin-only", "egress_policy": policy_config("origin-only", "http://127.0.0.1:1")}
+        (Path(tmp) / "in.json").write_bytes(dumps_canonical(cfg))
+        import signal
+        saved = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}          # main() installs its own handlers: put them back
+        try:
+            assert lane_robot.main([str(Path(tmp) / "in.json")]) == 0
+        finally:
+            for sig, handler in saved.items():
+                signal.signal(sig, handler)
+        outcome, _ = lane_robot._read_outcome(fl, out, Budget(1 << 20, root=tmp))
+    return outcome
 
 
 def test_a_plan_without_a_robot_lane_does_not_carry_the_statement(up, golden_frozen):

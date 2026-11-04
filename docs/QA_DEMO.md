@@ -4,6 +4,11 @@ The output below is copied from a CI run on the main branch, not written by hand
 head commit `d856bab` of `main`, on a GitHub-hosted `ubuntu-24.04` runner (Linux x86_64, CPython 3.12.15, Playwright 1.64.1 with Chromium, Robot Framework 7.5). The same jobs run on every push; run ids,
 timestamps and anchors differ from run to run, the plan digest, the outcomes, the counts and the exit statuses do not.
 
+**This page quotes a run from before the Robot lane's kernel layers.** In that run the plan froze the Robot lane with the egress profile `not-enforced`, and the plan digest below is that plan's. The demo plan of the
+current source names `origin-only` for the Robot lane (a different plan digest): the Robot lane then runs under seccomp and Landlock layers (the report's limitation `egress-layers-robot` says what they stop and what
+they do not; `lanes/robot/egress-log.jsonl` is their audit file), and `demo` refuses to start, before anything runs, on a host where `doctor` cannot measure them. The next run on the main branch replaces the numbers
+on this page; until then none of them describes the layers.
+
 ## What was run
 
 The bundle the `bundle` job had just built was installed with the commands of its own README (`install.sh`, then the separate browser step), and then:
@@ -72,6 +77,6 @@ interpreter, the guard script or a `TMPDIR` under a refused path (the paths that
 * `verify` is a recomputation by the same code the run used, in a separate process; it is not an independent implementation of the verdicts. "Independent" in the output means independent of the engine's own status.
 * Two assertions of the browser lane (`A-SAVED`, `A-URL`) are about what the browser shows and have no independent probe; the output says so.
 * One platform, one Python minor, two engines: Linux x86_64, CPython 3.12, Playwright Chromium and Robot Framework. Chromium is downloaded by the bundle's browser step and checked against the pin `browser.lock.json` (archives by sha256 before unpacking, the unpacked tree file by file; the operating system libraries and the download host are not covered). The Robot lane's
-  traffic does not pass the egress gateway.
+  traffic does not pass the egress gateway (in the run quoted here nothing limited it; since then the plan can ask for kernel layers, whose limits are in the runner's README).
 * The bundle is source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source; the harness it carries is plain AGPL-3.0-or-later, and the third-party wheels keep their own licences
   (see the bundle's README).

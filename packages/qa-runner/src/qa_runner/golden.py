@@ -88,12 +88,12 @@ def robot_spec() -> Dict[str, Any]:
     }
 
 
-def robot_lane() -> Dict[str, Any]:
+def robot_lane(egress: str = "origin-only") -> Dict[str, Any]:
     """The reviewed suite and library are PINNED here by the sha256 of their files (``suite_sha256``): ``freeze`` refuses a suite or library that hashes otherwise, and the
     digests are part of the plan digest. ``examples/robot-plan.json`` is the committed copy a reviewer reads; a changed file shows as a diff of it."""
     from .suites import suite_digests
     orders = [f"GET /api/orders/{i}" for i in (101, 102, 103, 104)]
-    return {"lane_id": "robot", "engine": K.ENGINE_ROBOT, "egress": "not-enforced", "deadline_s": 120, "suite": "order-discount", "suite_sha256": suite_digests("order-discount"),
+    return {"lane_id": "robot", "engine": K.ENGINE_ROBOT, "egress": egress, "deadline_s": 120, "suite": "order-discount", "suite_sha256": suite_digests("order-discount"),
             "spec": robot_spec(), "requests": {"required": orders, "allowed": []}, "probes": {"A-ORDER-RULE": "discount-rule"}}
 
 
@@ -103,9 +103,9 @@ def browser_lane() -> Dict[str, Any]:
             "probes": {"A-NOTIF-ON": "settings-persistence", "A-SAVED": "ui-only", "A-URL": "ui-only"}}
 
 
-def robot_plan() -> Dict[str, Any]:
-    """A one-lane plan with the Robot lane (``examples/robot-plan.json``)."""
-    return {"schema": K.PLAN_SCHEMA, "schema_version": K.PLAN_SCHEMA_VERSION, "plan_id": "golden-fixture-robot", "target": {"kind": "fixture-app"}, "lanes": [robot_lane()]}
+def robot_plan(egress: str = "origin-only") -> Dict[str, Any]:
+    """A one-lane plan with the Robot lane (``examples/robot-plan.json``). ``egress`` is the Robot lane's profile: ``origin-only`` (the kernel layers; the committed example) or ``not-enforced``."""
+    return {"schema": K.PLAN_SCHEMA, "schema_version": K.PLAN_SCHEMA_VERSION, "plan_id": "golden-fixture-robot", "target": {"kind": "fixture-app"}, "lanes": [robot_lane(egress)]}
 
 
 def demo_plan() -> Dict[str, Any]:

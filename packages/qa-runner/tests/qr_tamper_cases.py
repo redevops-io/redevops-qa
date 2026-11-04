@@ -235,10 +235,10 @@ CASES = [
     Case("an assertion made inconclusive by the report over evidence that satisfies it", "none",
          lambda up, f: _forge_report_states(up, f, {"A-URL": ("INCONCLUSIVE", "EVIDENCE_UNUSABLE")}), ("VERDICT_RECOMPUTE_MISMATCH",), "forged"),
     # ---- what the report says about egress ----------------------------------------------------------------------------------------------------
-    Case("the statement that egress is not enforced for the Robot lane removed from the report", "none",
-         lambda up, f: rechain(edit_json(f, "report.json", lambda r: r.update(limitations=[x for x in r["limitations"] if x["id"] != "egress-not-enforced-robot"]))), ("EGRESS_STATEMENT_MISSING",), "rechained"),
-    Case("the statement that egress is not enforced for the Robot lane reworded", "discount",
-         lambda up, f: rechain(edit_json(f, "report.json", lambda r: [x.update(text="Egress is enforced.") for x in r["limitations"] if x["id"] == "egress-not-enforced-robot"])), ("EGRESS_STATEMENT_WRONG",), "rechained"),
+    Case("the statement of the egress layers of the Robot lane removed from the report", "none",
+         lambda up, f: rechain(edit_json(f, "report.json", lambda r: r.update(limitations=[x for x in r["limitations"] if x["id"] != "egress-layers-robot"]))), ("EGRESS_STATEMENT_MISSING",), "rechained"),
+    Case("the statement of the egress layers of the Robot lane reworded", "discount",
+         lambda up, f: rechain(edit_json(f, "report.json", lambda r: [x.update(text="Egress is enforced.") for x in r["limitations"] if x["id"] == "egress-layers-robot"])), ("EGRESS_STATEMENT_WRONG",), "rechained"),
     # ---- the frozen assertions -------------------------------------------------------------------------------------------------------------
     Case("edited expected value in the plan lock", "none", lambda up, f: _edit_lock(f, lambda l: l["lanes"][1]["assertions"][0]["predicate"]["expected"]["observations"].update(order_101_total_cents=10500)),
          ("LOCK_REJECTED",), "rechained"),
@@ -340,7 +340,7 @@ def _edited(doc, fn):
 
 
 # ---- the checks, shared by the offline suite (golden bundles) and the end-to-end suite (bundles written by the run under test) ------------------------------------------
-PLAN_DIGEST = "sha256:3e53d5b170e6541bd7fb37188a17c99c766af1d161d5aed452af68a56e68b943"
+PLAN_DIGEST = "sha256:67f553bab6744a83ea8f39b8759d15b8b1a3e7dabdd888c3e4bbc86ae4eb444c"
 CONSISTENT = [c for c in CASES if c.kind == "forged" and not c.expect]
 CLAIMS = [c for c in CASES if c.kind == "claim"]
 REJECTED = [c for c in CASES if c.expect]
