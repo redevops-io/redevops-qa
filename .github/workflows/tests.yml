@@ -21,10 +21,10 @@ jobs:
     name: pins.toml is well formed (a TEMP-PIN is allowed only on a feature branch)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Check every pin set
@@ -41,16 +41,44 @@ jobs:
             PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --pin-set "$set" $flag
           done
 
+  dev-checkout:
+    name: developer checkout (fresh clone; ONLY the three commands the README prints — audit item P1-5)
+    # This job owns no command of its own: it extracts the fenced block marked `dev-checkout` from README.md with
+    # tools/readme_block.py and runs it verbatim. A README that does not reproduce a working checkout fails here,
+    # in the same suite every other change faces. No secret and no token input, no cache trust: plain git fetch over
+    # HTTPS for the pinned upstreams, then pytest. Needs `pins` so a TEMP-PIN is refused before anything is fetched.
+    runs-on: ubuntu-24.04
+    needs: pins
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - name: Run the README's developer-checkout block, verbatim, with no other command
+        # The three lines are the README's own, extracted, not retyped. They run under the same scrubbed
+        # environment every other test job in this repository uses (`env -i` with a temporary HOME): the suite
+        # contains tests that fail unless the run carries no ambient user state — HOME outside a temp directory
+        # and USER present in an archive built during the run — so running the documented checkout in the
+        # runner's own environment fails those guards rather than the checkout. Scrubbing the environment makes
+        # this job *more* faithful to "from a fresh clone", and it changes no test and skips nothing.
+        run: |
+          python tools/readme_block.py README.md dev-checkout > "$RUNNER_TEMP/dev-checkout.sh"
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 bash "$RUNNER_TEMP/dev-checkout.sh"
+      - name: Fail if the checkout commands dirtied the repository (they own .venv/ and .pinned/, both ignored)
+        run: test -z "$(git status --porcelain)"
+
   adapter-licences:
     name: adapter licence matrix (unknown or incompatible redistributables fail; technical triage, not legal advice)
     # Offline and independent of the pinned upstreams: reads third_party/adapter-license-matrix.yaml and the install lists of the
     # packages and workflows. No download, no secret.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install test tools
@@ -70,10 +98,10 @@ jobs:
     # tools/check_neutral_wording.py; a hit is reported as file:line. Offline, read-only, no secret.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install test tools
@@ -93,10 +121,10 @@ jobs:
     # values in the tests are generated at run time.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install test tools
@@ -121,10 +149,10 @@ jobs:
       matrix:
         python: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: ${{ matrix.python }}
       - name: Install test tools
@@ -146,10 +174,10 @@ jobs:
     # tests are the same constants on every host; this job is their Linux evidence, and it prints the digests it rebuilt.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install test tools
@@ -178,24 +206,24 @@ jobs:
       matrix:
         python: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: ${{ matrix.python }}
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -229,24 +257,24 @@ jobs:
     runs-on: ubuntu-24.04
     needs: pins
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -282,24 +310,24 @@ jobs:
     runs-on: ubuntu-24.04
     needs: pins
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -334,24 +362,24 @@ jobs:
     runs-on: ubuntu-24.04
     needs: pins
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -382,24 +410,24 @@ jobs:
     runs-on: ubuntu-24.04
     needs: pins
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -451,24 +479,24 @@ jobs:
     runs-on: ubuntu-24.04
     needs: pins
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -503,24 +531,24 @@ jobs:
     runs-on: ubuntu-24.04
     needs: pins
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -549,24 +577,24 @@ jobs:
     runs-on: ubuntu-24.04
     needs: pins
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -607,7 +635,7 @@ jobs:
           sha256sum "$RUNNER_TEMP"/build-1/*.tar
           cat "$RUNNER_TEMP"/build-1/*.tar.sha256
       - name: Keep the bundle (a workflow artifact only)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: qa-bundle-current
           path: |
@@ -616,7 +644,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Keep the previous-bundle stand-in
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: qa-bundle-previous
           path: |
@@ -634,19 +662,19 @@ jobs:
     runs-on: ubuntu-24.04
     needs: bundle
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Download the bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: qa-bundle-current
           path: ${{ runner.temp }}/current
       - name: Download the previous-bundle stand-in
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: qa-bundle-previous
           path: ${{ runner.temp }}/previous
@@ -677,14 +705,14 @@ jobs:
           - defect: settings
             exit: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Download the bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: qa-bundle-current
           path: ${{ runner.temp }}/current
@@ -720,14 +748,14 @@ jobs:
           { echo "### demo $DEFECT"; echo; echo '```'; cat "$RUNNER_TEMP/anchor.out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Keep the evidence bundle
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: demo-evidence-${{ matrix.defect }}
           path: ${{ runner.temp }}/evidence
           if-no-files-found: error
           retention-days: 14
       - name: Keep the anchor
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: demo-anchor-${{ matrix.defect }}
           path: ${{ runner.temp }}/anchor/anchor-${{ matrix.defect }}.txt
@@ -752,14 +780,14 @@ jobs:
           - defect: settings
             exit: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Download the bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: qa-bundle-current
           path: ${{ runner.temp }}/current
@@ -775,12 +803,12 @@ jobs:
           { echo "set -euo pipefail"; python tools/readme_block.py "$RUNNER_TEMP/blocks/README.md" unpack; echo './install.sh --prefix "$RUNNER_TEMP/verifier"'; } > "$RUNNER_TEMP/blocks/install.sh"
           cd "$RUNNER_TEMP/dl" && bash "$RUNNER_TEMP/blocks/install.sh"
       - name: Download the evidence bundle the demo kept
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: demo-evidence-${{ matrix.defect }}
           path: ${{ runner.temp }}/evidence
       - name: Download the anchor the demo kept
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: demo-anchor-${{ matrix.defect }}
           path: ${{ runner.temp }}/anchor
@@ -840,24 +868,24 @@ jobs:
       matrix:
         pin_set: [c3, c4]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --pin-set "${{ matrix.pin_set }}" --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -886,25 +914,25 @@ jobs:
       matrix:
         pin_set: [c3, c4]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --pin-set "${{ matrix.pin_set }}" --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -939,7 +967,7 @@ jobs:
             python -m redevops_qa_bridge.conformance.cli verify "$OUT/compat-receipt-${{ matrix.pin_set }}.json" $flag
       - name: Upload the receipt and the divergence report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: compat-receipt-${{ matrix.pin_set }}
           path: |
@@ -956,24 +984,24 @@ jobs:
     runs-on: ubuntu-24.04
     needs: pins
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Read the pinned commits
         id: pins
         run: PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --github-output >> "$GITHUB_OUTPUT"
       - name: Fetch runtime-contracts at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.contracts_repo }}
           ref: ${{ steps.pins.outputs.contracts_commit }}
           path: ${{ steps.pins.outputs.contracts_path }}
           persist-credentials: false
       - name: Fetch agent-harness at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ steps.pins.outputs.harness_qa_repo }}
           ref: ${{ steps.pins.outputs.harness_qa_commit }}
@@ -1006,11 +1034,11 @@ jobs:
     # installed only to cross-check the strict validator the offline tests use; a missing package fails the step.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install test tools and the cross-check validator
@@ -1028,10 +1056,10 @@ jobs:
     name: "selenium adapter (offline - fake browser, recorded pytest JUnit reports, real pytest under the supervisor; no Selenium installed)"
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install test tools
@@ -1052,10 +1080,10 @@ jobs:
     # page the test serves from loopback.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install the pinned test tools and Selenium
@@ -1092,7 +1120,7 @@ jobs:
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-selenium-browser.xml"
       - name: Keep the JUnit report (also when the lane failed)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: junit-selenium-browser
           path: ${{ runner.temp }}/junit-selenium-browser.xml
@@ -1100,7 +1128,7 @@ jobs:
           retention-days: 14
       - name: Keep the ChromeDriver and Chrome logs of a failed run
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: selenium-browser-logs
           path: ${{ runner.temp }}/selenium-logs
@@ -1117,10 +1145,10 @@ jobs:
     name: "robot adapter (offline - recorded output.xml from real runs, allowlist, strict import; no Robot Framework installed)"
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install test tools
@@ -1139,10 +1167,10 @@ jobs:
     # The only job that installs Robot Framework. No browser, no emulator, no secret; read-only. The suites are written by the tests.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install the pinned test tools and Robot Framework
@@ -1162,10 +1190,10 @@ jobs:
     name: "appium adapters (offline - fake device, capabilities, server policy, iOS reports unavailable; no Appium installed)"
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install test tools
@@ -1185,10 +1213,10 @@ jobs:
     # adapter's capabilities and a worker without a device is reported as unavailable. Read-only, no secret. The server listens on loopback only.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install the pinned test tools and Appium Python client
@@ -1232,20 +1260,20 @@ jobs:
     # another job and never conditional; a failed step fails the job, nothing is skipped.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
       - name: Read the pinned commit
         id: profile
         run: python3 -c "import json; print('commit=' + json.load(open('qa-install-profiles.json'))['source']['pinned_commit'])" >> "$GITHUB_OUTPUT"
       - name: Fetch the repository at the pinned commit (the source phase of the profile)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ github.repository }}
           ref: ${{ steps.profile.outputs.commit }}
           path: .profile-src
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Run the profile - install, smoke, check
@@ -1253,7 +1281,7 @@ jobs:
           python tools/run_install_profile.py --profile local-python-robot --host linux-x86_64 --channel stable --work "$RUNNER_TEMP/profile-work" \
             --checkout "$GITHUB_WORKSPACE/.profile-src" --phases install,smoke,check
       - name: Keep the evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: evidence-local-python-robot
           path: ${{ runner.temp }}/profile-work/evidence
@@ -1270,20 +1298,20 @@ jobs:
     # another job and never conditional; a failed step fails the job, nothing is skipped.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
       - name: Read the pinned commit
         id: profile
         run: python3 -c "import json; print('commit=' + json.load(open('qa-install-profiles.json'))['source']['pinned_commit'])" >> "$GITHUB_OUTPUT"
       - name: Fetch the repository at the pinned commit (the source phase of the profile)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ github.repository }}
           ref: ${{ steps.profile.outputs.commit }}
           path: .profile-src
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Locate the runner's Chrome and ChromeDriver (fail when either is missing)
@@ -1312,7 +1340,7 @@ jobs:
             --param chrome_binary="$QA_CHROME_BINARY" --param chromedriver_path="$QA_CHROMEDRIVER_PATH"
       - name: Keep the evidence (also when a step above failed, so a failed run keeps its JUnit report)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: evidence-local-python-selenium
           path: ${{ runner.temp }}/profile-work/evidence
@@ -1331,20 +1359,20 @@ jobs:
     # another job and never conditional; a failed step fails the job, nothing is skipped.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
       - name: Read the pinned commit
         id: profile
         run: python3 -c "import json; print('commit=' + json.load(open('qa-install-profiles.json'))['source']['pinned_commit'])" >> "$GITHUB_OUTPUT"
       - name: Fetch the repository at the pinned commit (the source phase of the profile)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           repository: ${{ github.repository }}
           ref: ${{ steps.profile.outputs.commit }}
           path: .profile-src
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Run the profile - install, smoke, check
@@ -1352,7 +1380,7 @@ jobs:
           python tools/run_install_profile.py --profile local-python-appium-android --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
             --checkout "$GITHUB_WORKSPACE/.profile-src" --phases install,smoke,check
       - name: Keep the evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: evidence-local-python-appium-android
           path: ${{ runner.temp }}/profile-work/evidence
@@ -1369,14 +1397,14 @@ jobs:
     runs-on: ubuntu-24.04
     needs: bundle
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Download the bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: qa-bundle-current
           path: ${{ runner.temp }}/current
@@ -1385,7 +1413,7 @@ jobs:
           python tools/run_install_profile.py --profile local-python-qa --host linux-x86_64 --channel experimental --work "$RUNNER_TEMP/profile-work" \
             --phases source,install,smoke,check --param bundle_dir="$RUNNER_TEMP/current"
       - name: Keep the evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: evidence-local-python-qa
           path: ${{ runner.temp }}/profile-work/evidence
@@ -1406,11 +1434,11 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Install test tools and the cross-check validator
