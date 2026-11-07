@@ -57,9 +57,15 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run the README's developer-checkout block, verbatim, with no other command
+        # The three lines are the README's own, extracted, not retyped. They run under the same scrubbed
+        # environment every other test job in this repository uses (`env -i` with a temporary HOME): the suite
+        # contains tests that fail unless the run carries no ambient user state — HOME outside a temp directory
+        # and USER present in an archive built during the run — so running the documented checkout in the
+        # runner's own environment fails those guards rather than the checkout. Scrubbing the environment makes
+        # this job *more* faithful to "from a fresh clone", and it changes no test and skips nothing.
         run: |
           python tools/readme_block.py README.md dev-checkout > "$RUNNER_TEMP/dev-checkout.sh"
-          bash "$RUNNER_TEMP/dev-checkout.sh"
+          env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 bash "$RUNNER_TEMP/dev-checkout.sh"
       - name: Fail if the checkout commands dirtied the repository (they own .venv/ and .pinned/, both ignored)
         run: test -z "$(git status --porcelain)"
 
