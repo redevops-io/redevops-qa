@@ -11,7 +11,7 @@ license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
 dependencies = []
 
 [project.optional-dependencies]
-android = ["Appium-Python-Client==6.1.1"]
+android = ["Appium-Python-Client==6.1.4"]
 dev = ["pytest>=8"]
 
 [build-system]
