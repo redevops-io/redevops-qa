@@ -26,6 +26,23 @@ and what it does not check are in [bundle/README.md](bundle/README.md); `python 
 ([docs/QA_INSTALL_PROFILES.md](docs/QA_INSTALL_PROFILES.md)) lists the same steps as data and is run by CI. A real run, with its output, is in [docs/QA_DEMO.md](docs/QA_DEMO.md).
 Chromium is downloaded by the bundle's separate browser step and checked against `bundle/browser.lock.json`: the sha256 of the three archives before they are unpacked, then every file and mode of the unpacked tree (in a bundle installation `doctor` and `run` repeat the tree check; a source checkout has no pin and no check); the operating system libraries and the availability of the download host are outside that check. macOS and Windows are not claimed.
 
+## Developer checkout (from a fresh clone, three commands)
+
+A source checkout needs the two pinned upstreams fetched into `.pinned/` at their exact pinned commits before `pytest` can even collect
+(`agent_harness` and `runtime_contracts` are imported from those paths, never installed; nothing else about them is hard-coded anywhere
+but [pins.toml](pins.toml)). `tools/fetch_pins.py` does the fetch and the verification CI does — HEAD at the pinned commit, clean tree,
+distribution and vector digests — over plain HTTPS with no token. Requires a CPython 3.12 on `PATH` (macOS and Windows are not claimed;
+on a machine where 3.12 is not the default `python3`, point the first command at it):
+
+<!-- bundle-commands: dev-checkout -->
+```bash
+python3.12 -m venv .venv && .venv/bin/python -m pip install -q "pytest>=8,<10" "pyyaml>=6,<7" "jsonschema==4.26.0"
+.venv/bin/python tools/fetch_pins.py
+.venv/bin/python -m pytest -q
+```
+A CI job (`dev-checkout` in `tests.yml`) runs exactly these three lines, extracted from this README by `tools/readme_block.py` — if the
+README lies, CI says so. `.venv/` and `.pinned/` are gitignored; `git status` stays clean, as other CI jobs insist.
+
 ## Layout
 Packages (under `packages/`): `qa-runner`, `qa-playwright`, `qa-evidence`, `qa-bridge`, `qa-egress`, `qa-adapter-kit`, `qa-selenium`, `qa-robot`, `qa-appium`, `qa-checks`, `qa-fixture-app`.
 Also in the repository: the pinned bundle (`bundle/`, `tools/build_bundle.py`), the tools of the CI checks (`tools/`), the licence matrix (`third_party/`), and examples that ship with the runner
