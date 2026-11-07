@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
+# Dependabot (audit item P1-4). It raises pull requests; it changes nothing by itself, and every PR still
+# faces the full read-only test suite plus the secret scan. The pip entries are the pyprojects that actually
+# declare dependencies: the workspace root pyproject holds pytest configuration only, so it is not listed.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns:
+          - "actions/*"
+  - package-ecosystem: "pip"
+    directories:
+      - "/packages/qa-runner"
+      - "/packages/qa-playwright"
+      - "/packages/qa-selenium"
+      - "/packages/qa-robot"
+      - "/packages/qa-appium"
+      - "/packages/qa-adapter-kit"
+      - "/packages/qa-evidence"
+      - "/packages/qa-bridge"
+      - "/packages/qa-egress"
+      - "/packages/qa-checks"
+      - "/packages/qa-fixture-app"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
