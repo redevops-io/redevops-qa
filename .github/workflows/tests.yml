@@ -41,6 +41,28 @@ jobs:
             PYTHONPATH=packages/qa-bridge/src python -m redevops_qa_bridge.pins --pin-set "$set" $flag
           done
 
+  dev-checkout:
+    name: developer checkout (fresh clone; ONLY the three commands the README prints — audit item P1-5)
+    # This job owns no command of its own: it extracts the fenced block marked `dev-checkout` from README.md with
+    # tools/readme_block.py and runs it verbatim. A README that does not reproduce a working checkout fails here,
+    # in the same suite every other change faces. No secret and no token input, no cache trust: plain git fetch over
+    # HTTPS for the pinned upstreams, then pytest. Needs `pins` so a TEMP-PIN is refused before anything is fetched.
+    runs-on: ubuntu-24.04
+    needs: pins
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+      - name: Run the README's developer-checkout block, verbatim, with no other command
+        run: |
+          python tools/readme_block.py README.md dev-checkout > "$RUNNER_TEMP/dev-checkout.sh"
+          bash "$RUNNER_TEMP/dev-checkout.sh"
+      - name: Fail if the checkout commands dirtied the repository (they own .venv/ and .pinned/, both ignored)
+        run: test -z "$(git status --porcelain)"
+
   adapter-licences:
     name: adapter licence matrix (unknown or incompatible redistributables fail; technical triage, not legal advice)
     # Offline and independent of the pinned upstreams: reads third_party/adapter-license-matrix.yaml and the install lists of the
