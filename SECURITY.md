@@ -14,3 +14,17 @@ does not support.
 
 ## Supported versions
 There is no tagged release yet, so only the default branch is supported. This will be stated here when the first release is tagged.
+
+## Secret scanning
+Two scanners run over the **full public history** (`--all`) on every push, every pull request and weekly
+(`.github/workflows/secret-scan.yml`): gitleaks 8.30.1 and trufflehog 3.99.8, each pinned by exact version and by the
+sha256 of the exact release archive it downloads. A finding fails the job; a new entry in `.gitleaksignore` needs a
+comment saying why.
+
+One-time history scan, 2026-11-07: gitleaks found 2 findings, both false positives (`generic-api-key` on a test
+identifier `generate_private_key` that asserts no key is generated, and on the fixture order id `api-discount-10000`);
+both are ignored with a per-line justification in `.gitleaksignore`. trufflehog (3.99.8) found 0 verified and 0
+unverified findings across 3,950 chunks, which is why its job gates on *any* finding. The public history is not
+rewritten (owner decision D3, 2026-11-07): the scanning record and the allow-list are the disclosure. A clean scan is
+not proof that no secret ever existed — the regex audit of 2026-11-05 and these tools agree on "clean", and new findings
+are handled through the private report channel above.
