@@ -11,7 +11,7 @@ license-files = ["LICENSE*"]      # the family licence texts; tools/build_bundle
 dependencies = []
 
 [project.optional-dependencies]
-robot = ["robotframework==7.5"]
+robot = ["robotframework==7.5.1"]
 dev = ["pytest>=8"]
 
 [build-system]
