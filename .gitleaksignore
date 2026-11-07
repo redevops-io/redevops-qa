@@ -1,0 +1,12 @@
+# Secret-scan allow-list for gitleaks, one entry per finding, each justified below — no blanket exclusion.
+# One-time full-history scan 2026-11-07 (gitleaks 8.30.1, `gitleaks git . --log-opts="--all"`): 2 findings, both
+# false positives; the working-tree scan reports the same two. The public history is never rewritten (owner
+# decision D3 of 2026-11-07), so these entries — with the lines they point at — are the record.
+#
+# The flagged "secret" is the identifier `generate_private_key`: a test that asserts no private key is ever
+# generated during signed-anchor tests. It names a capability the code refuses; it contains no credential bytes.
+68f6f5532ec0b6c5c91ca93add3e40113ccb4ce3:packages/qa-runner/tests/test_qr_anchor_sig.py:generic-api-key:617
+#
+# The flagged "secret" is the fixture order id `api-discount-10000`: seeded data of the bundled fixture app's
+# discount defect. An opaque order number in demo data, not a key of any kind.
+a69621665864e0d4ece96338e3398cfa9d74dea5:packages/qa-fixture-app/tests/test_qfa_defects.py:generic-api-key:17
