@@ -150,3 +150,8 @@ def test_the_workflow_scans_everything_and_gates_results_rather_than_narrowing_t
     assert "--allow tools/trufflehog_baseline.txt" in steps
     # 0 = clean, 183 = findings (the code trufflehog exits with under --fail); anything else must not pass
     assert "-ne 183" in steps and "did not complete" in steps
+    # The runner executes steps with `bash -e`: without `|| status=$?` the scan's own 183 aborts the step and the
+    # gate never runs. This assertion exists because that is exactly how the first version of this job failed.
+    assert "|| status=$?" in steps
+    assert all(ln.strip() != "status=$?" for ln in steps.splitlines()), "a bare capture is never reached under bash -e"
+
