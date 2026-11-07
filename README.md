@@ -3,6 +3,12 @@
 QA runner that executes versioned test specifications against a target, checks
 immutable assertions deterministically, and keeps reproducible evidence.
 
+**Scope first, from the opening screen (audit item P0-4):** today `run` and `demo` **run only against the bundled fixture app**
+(`packages/qa-fixture-app`): `orchestrate.py` hard-wires the target to `fixture-app`, and no external application can be pointed at it yet —
+the external target is audit item P2-1, still design work. Do not describe this as general-purpose QA support until P2-1 ships.
+Supported platform: CPython 3.12 (the fixture-app CI also runs 3.11) on Linux x86_64 only — macOS and Windows are not claimed,
+the real-device Android lane has run only by hand on one emulator, and there is no iOS evidence.
+
 **Status: pre-release.** There is no tagged release of this repository yet, and no package is published to PyPI; you work from a checkout. It is built
 against pinned *releases* of its dependencies, [`runtime-contracts`](https://github.com/redevops-io/runtime-contracts) (`v0.3.15` and `v0.3.16`) and
 [`agent-harness`](https://github.com/redevops-io/agent-harness) (`v0.2.0`), recorded with their digests in [pins.toml](pins.toml); it does not vendor them.
