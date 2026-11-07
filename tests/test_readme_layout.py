@@ -43,6 +43,22 @@ def test_the_readme_does_not_call_the_project_open_source_and_does_not_claim_oth
     assert "macos and windows are not claimed" in low and "linux x86_64" in low
 
 
+ORCH = (ROOT / "packages" / "qa-runner" / "src" / "qa_runner" / "orchestrate.py").read_text(encoding="utf-8")
+FIRST_SCREEN = README.split("## What runs in CI", 1)[0]
+
+
+def test_the_first_screen_admits_the_fixture_only_scope_while_the_code_hard_wires_it():
+    """Audit item P0-4, testable form: while `run` still hard-wires `target fixture-app`, the opening screen must
+    say the runner runs only against the bundled fixture app, and it must list the unsupported platforms there.
+    When P2-1 removes the hard-wiring the condition lifts; the sentence may then move, but it may not be dropped
+    while the code still refuses an external target."""
+    hard_wired = "target fixture-app" in ORCH or '"target": "fixture-app"' in ORCH
+    if hard_wired:
+        assert "run only against the bundled fixture app" in FIRST_SCREEN, \
+            "orchestrate.py hard-wires the fixture app: the README first screen must say so"
+    assert "linux x86_64" in FIRST_SCREEN.lower() and "macos and windows are not claimed" in FIRST_SCREEN.lower()
+
+
 # ------------------------------------------------------------------------------------------------------------------ the demo page cites a run on main
 DEMO = (ROOT / "docs" / "QA_DEMO.md").read_text(encoding="utf-8")
 
