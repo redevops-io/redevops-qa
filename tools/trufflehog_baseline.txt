@@ -1,0 +1,10 @@
+# trufflehog allow-list — one finding per line, one reason per finding.
+# Format: <DetectorName>|<repo-relative path>|<first 12 hex of sha256 of trufflehog's REDACTED rendering>|<why this is not a secret>
+# Adding a line requires the reason; an entry that silences nothing fails CI, so this list cannot outlive its need.
+# The scan itself is never narrowed (no --exclude-paths, no --only-verified): every tracked file and every commit of
+# every ref is still scanned, and any finding not listed here fails the job. See tools/check_trufflehog_baseline.py.
+PhraseAccessToken|tools/check_neutral_wording.py|e3b0c44298fc|The detector reads a deny-list SHA-256 digest printed in that guard as an access token; it is the hash of a forbidden phrase, not a credential
+URI|packages/qa-runner/tests/test_qr_browser_pin.py|3ca3aefde7f9|A fake proxy URL with a fake password used by the browser-pin tests to prove proxy values are masked; no service exists behind it
+URI|packages/qa-runner/tests/test_qr_browser_pin.py|48cc6c036fc5|A second fake proxy URL in the same browser-pin tests, same purpose; the host is under .example, reserved for examples by RFC 6761
+URI|packages/qa-selenium/tests/test_sel_adapter.py|5db40ec73081|A fake proxy URL in the Selenium adapter tests asserting rejection of credential-bearing proxies; the hosts are under .test, reserved for testing by RFC 2606
+URI|tests/test_bundle_browser.py|c2be9fbb377a|A deliberately credential-shaped 127.0.0.1 URL inside a redaction test; the test asserts the value is masked in emitted evidence, and it is a test literal, not a credential

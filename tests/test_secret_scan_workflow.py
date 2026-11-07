@@ -66,3 +66,87 @@ def test_the_gitleaks_allow_list_is_fingerprints_of_justified_existing_lines():
         assert 0 < int(lineno) <= len(body), f"{path}:{lineno} is past the end of the file"
     # the two judged lines are the ones documented in SECURITY.md and the ignore-file comments
     assert "generate_private_key" in IGNORE and "api-discount-10000" in IGNORE
+
+
+# ---- the trufflehog result gate (tools/check_trufflehog_baseline.py) -------------------------------------------
+# The scan is total; only individual, justified findings are silenced. These tests hold the gate to failing closed,
+# so relaxing it is a deliberate edit to this file and not an accident in a workflow.
+import importlib.util  # noqa: E402  (the gate lives in tools/, which is not an importable package)
+
+_SPEC = importlib.util.spec_from_file_location("ctb", ROOT / "tools" / "check_trufflehog_baseline.py")
+GATE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(GATE)
+
+BASELINE = (ROOT / "tools" / "trufflehog_baseline.txt").read_text(encoding="utf-8")
+
+
+def _rec(detector="URI", path="tests/something_test.py", redacted="http://user:********@example.invalid"):
+    import json
+    return json.dumps({"DetectorName": detector, "Redacted": redacted,
+                       "SourceMetadata": {"Data": {"Git": {"file": path, "commit": "0" * 40}}}})
+
+
+def _allow(tmp_path, *lines):
+    p = tmp_path / "allow.txt"
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return p
+
+
+def test_the_gate_fails_on_a_finding_that_is_not_allow_listed(tmp_path):
+    allow = _allow(tmp_path, "URI|tests/other_test.py|000000000000|a different finding entirely")
+    out = tmp_path / "scan.json"
+    out.write_text(_rec() + "\n", encoding="utf-8")
+    assert GATE.main(["--json", str(out), "--allow", str(allow), "--exit-status", "183"]) == 1
+
+
+def test_the_gate_fails_on_an_allow_list_entry_that_silences_nothing(tmp_path):
+    allow = _allow(tmp_path, "URI|tests/something_test.py|abcdef012345|matches no finding in this scan")
+    out = tmp_path / "scan.json"
+    out.write_text("\n".join(_rec(redacted="http://quiet:********@example.invalid")) + "\n", encoding="utf-8")
+    assert GATE.main(["--json", str(out), "--allow", str(allow), "--exit-status", "183"]) == 1
+
+
+def test_the_gate_passes_only_when_the_digest_of_the_redacted_match_matches(tmp_path):
+    import hashlib
+    digest = hashlib.sha256(b"http://user:********@example.invalid").hexdigest()[:12]
+    allow = _allow(tmp_path, f"URI|tests/something_test.py|{digest}|the one finding of this scan, and why it is inert")
+    out = tmp_path / "scan.json"
+    out.write_text(_rec() + "\n", encoding="utf-8")
+    assert GATE.main(["--json", str(out), "--allow", str(allow), "--exit-status", "183"]) == 0
+
+
+def test_the_gate_fails_when_trufflehog_itself_did_not_complete(tmp_path):
+    allow = _allow(tmp_path, "URI|tests/something_test.py|abcdef012345|unused here")
+    out, err = tmp_path / "scan.json", tmp_path / "scan.err"
+    out.write_text("", encoding="utf-8")
+    err.write_text("error: could not read the repository\n", encoding="utf-8")
+    assert GATE.main(["--json", str(out), "--allow", str(allow), "--exit-status", "7", "--stderr", str(err)]) == 1
+
+
+def test_an_allow_list_entry_without_a_justification_is_refused(tmp_path):
+    allow = _allow(tmp_path, "URI|tests/something_test.py|abcdef012345|")
+    out = tmp_path / "scan.json"
+    out.write_text("", encoding="utf-8")
+    assert GATE.main(["--json", str(out), "--allow", str(allow)]) == 1
+
+
+def test_the_shipped_trufflehog_allow_list_is_justified_and_points_at_real_files():
+    entries = [ln for ln in BASELINE.splitlines() if ln.strip() and not ln.startswith("#")]
+    assert entries, "the trufflehog allow-list must account for every finding the scan reports"
+    for line in entries:
+        detector, path, digest, reason = [p.strip() for p in line.split("|", 3)]
+        assert detector and reason, line
+        assert len(reason) > 20, f"{path}: a one-word reason is not a justification"
+        assert len(digest) >= 12 and all(c in "0123456789abcdef" for c in digest), line
+        assert (ROOT / path).is_file(), path
+
+
+def test_the_workflow_scans_everything_and_gates_results_rather_than_narrowing_the_scan():
+    steps = "\n".join(str(s.get("run", "")) for s in WF["jobs"]["trufflehog"]["steps"])
+    for forbidden in ("--exclude-paths", "--exclude-globs", "--only-verified", "--exclude-detectors"):
+        assert forbidden not in steps, f"{forbidden} would stop files or detectors from being scanned at all"
+    assert "./trufflehog git file://. --fail --no-update --json" in steps
+    assert "tools/check_trufflehog_baseline.py" in steps
+    assert "--allow tools/trufflehog_baseline.txt" in steps
+    # 0 = clean, 183 = findings (the code trufflehog exits with under --fail); anything else must not pass
+    assert "-ne 183" in steps and "did not complete" in steps
