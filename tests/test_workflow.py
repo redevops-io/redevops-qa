@@ -213,9 +213,13 @@ def test_the_android_workflow_is_manual_only_and_read_only():
     assert "needs" not in job and "NOT a required check" in job["name"]
 
 
-def test_the_android_workflow_takes_one_runner_label_and_nothing_else():
+def test_the_android_workflow_takes_one_runner_label_from_a_closed_choice_list_and_nothing_else():
     inputs = ANDROID_TRIGGERS["workflow_dispatch"]["inputs"]
-    assert set(inputs) == {"runner"} and inputs["runner"]["type"] == "string" and inputs["runner"]["required"] is True
+    runner = inputs["runner"]
+    assert set(inputs) == {"runner"} and runner["required"] is True
+    # P1-4: dispatch cannot name an arbitrary runner label — `runs-on` is fed only from this closed list.
+    assert runner["type"] == "choice" and isinstance(runner["options"], list) and len(runner["options"]) >= 1
+    assert runner["default"] in runner["options"]
     assert ANDROID_WF["jobs"]["appium-android"]["runs-on"] == "${{ inputs.runner }}"
     # the input is used only as the runner label, never inside a shell command or a step
     steps = "\n".join(str(s) for s in ANDROID_WF["jobs"]["appium-android"]["steps"])

@@ -11,7 +11,15 @@ on:
         description: "Runner label of a worker with the Android SDK and an attached emulator or device"
         required: true
         default: "ubuntu-24.04"
-        type: string
+        # P1-4: a choice list, not free text. `runs-on: ${{ inputs.runner }}` on a string input lets anyone
+        # with dispatch rights name any runner label this repository can see — a lane that must run only on a
+        # worker its operator provisioned is steerable anywhere by a string. The list is closed: dispatch can
+        # pick a hosted label (the lane then fails at its own device check, as designed) or a self-hosted
+        # worker; it cannot name a machine by arbitrary label.
+        type: choice
+        options:
+          - ubuntu-24.04
+          - self-hosted
 
 permissions:
   contents: read
@@ -28,10 +36,10 @@ jobs:
     # qa-appium README) and has never run in CI. It fails when no device is attached, so it is run by hand on a worker that has one.
     runs-on: ${{ inputs.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.12"
       - name: Require an attached Android emulator or device (fail when there is none)
