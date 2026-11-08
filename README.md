@@ -5,7 +5,7 @@ immutable assertions deterministically, and keeps reproducible evidence.
 
 **Scope first, from the opening screen (audit item P0-4):** today `run` and `demo` **run only against the bundled fixture app**
 (`packages/qa-fixture-app`): `orchestrate.py` hard-wires the target to `fixture-app`, and no external application can be pointed at it yet —
-the external target is audit item P2-1, still design work. Do not describe this as general-purpose QA support until P2-1 ships.
+the external target is audit item P2-1, still design work ([docs/P2_1_EXTERNAL_TARGET_DESIGN.md](docs/P2_1_EXTERNAL_TARGET_DESIGN.md)). Do not describe this as general-purpose QA support until P2-1 ships.
 Supported platform: CPython 3.12 (the fixture-app CI also runs 3.11) on Linux x86_64 only — macOS and Windows are not claimed,
 the real-device Android lane has run only by hand on one emulator, and there is no iOS evidence.
 
