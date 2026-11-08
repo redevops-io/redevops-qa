@@ -1,6 +1,7 @@
 # P2-1 — pointing the engine at an external target: technical design
 
-**Status: design and acceptance criteria only. Nothing here is implemented, and no Projects QA tab is implied.**
+**Status: design finalized — the four owner decisions are recorded in §6. Nothing here is implemented, no Projects
+QA tab is implied, and §6.2 gates it.**
 Written as the prerequisite the UI/QA external-reuse plan assumes exists: until this ships, `run` and `demo`
 drive the bundled fixture app and nothing else, and that must stay the stated claim. Licence: source-available
 under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source.
@@ -138,20 +139,40 @@ documentation cannot silently outrun the code.
 - Windows/macOS lanes, and anything that lets the README's fixture-only sentence be softened before
   AC-1…AC-12 are green on Linux CI.
 
-## 6. Open questions for the owner
+## 6. Decisions (owner, 2026-11-11) — the four that gated this design
 
-1. **Credential resolution point.** Resolve `env:NAME` in the runner process (simplest; the value then lives
-   in the runner's memory) or in the gateway (better isolation: the browser never holds it, and it belongs
-   with the pinned-connection design). Recommendation: gateway.
-2. **First external target.** The Edge Sentinel dashboard is the obvious candidate — it now has a read-only
-   fixture mode that is safe to point a QA run at (`EDGE_SENTINEL_DEMO=1`, loopback, refuses every CrowdSec
-   side effect), which makes it a low-risk first consumer while still being a real deployment rather than a
-   test double.
-3. **Verification cap.** Is `CORROBORATED` the right ceiling without an independent restatement, or should an
-   external target reach `VERIFIED` when an operator-supplied expected-value file is frozen into the lock?
-   Recommendation: keep the cap; treat a frozen expectation file as a later feature with its own trust rules.
-4. **Plan provenance.** Does `declared_by` need a signature (the repository already has signing machinery in
-   `anchor_sig.py`), or is an operator-stated field plus the bundle's own digest sufficient for now?
+All four open questions were answered on 2026-11-11, each in the direction the recommendation proposed. They are
+recorded here because the acceptance criteria in §4 are only decidable given them.
+
+| # | Question | Decision | What it forces in the implementation |
+|---|---|---|---|
+| 1 | Where are `credential_refs` resolved? | **In the gateway.** | The runner process never holds a target secret; the browser never receives one. Resolution belongs with the pinned connection so the decision and the connection cannot disagree — and it means a `credential_ref` that survives to a browser context is itself a defect, not a configuration style. |
+| 2 | First external target | **Edge Sentinel's own read-only fixture mode** (`EDGE_SENTINEL_DEMO=1`, loopback, refuses every side effect). | v1 supports exactly one target profile. It is a real deployment rather than a test double, and it fails safe if the QA run does something clever — which is the property a first consumer should have. See §6.1. |
+| 3 | Verification ceiling without an independent restatement | **Cap at `CORROBORATED`.** | No external-target run may mint `VERIFIED`, whatever the operator asserts in a plan. A frozen expectation file is a later feature with its own trust rules, not a flag on this one. |
+| 4 | Does `declared_by` need a signature? | **Unsigned for now** — operator-stated field plus the bundle digest. | Revisit when a third party consumes bundles; `anchor_sig.py` already exists, so the upgrade path is a field change rather than a redesign. |
+
+### 6.1 v1 scope, in one sentence and its corollaries
+
+**v1 supports a loopback, read-only Edge Sentinel fixture target and nothing else.** Corollaries, because the
+boundaries are the part that gets eroded later:
+
+* the accepted origin is `127.0.0.1`/`[::1]` (or `localhost` resolving to them) on an operator-supplied port — a
+  hostname that *could* resolve loopback is not a loopback origin, so the gate is on the resolved address, the
+  lesson already written into the LLM trust-boundary contract in the sibling repository;
+* the target must present itself as fixture mode (`/health` reports `demo.enabled=true`) before any journey runs,
+  so a run against a real core is refused rather than discovered afterwards by an incident;
+* no `credential_ref` is required or accepted for v1 — fixture mode is reachable with the operator credential the
+  dashboard already needs, and accepting a secret is what decision 1's isolation story has to be built around;
+* write-bearing journeys stay out of v1 even against fixture mode, because the refusal path is a policy decision
+  and a QA run that produces 403s is testing the refusal, not the product.
+
+### 6.2 Gating: what must not be built before v1 is accepted
+
+Projects and Sidekick QA operations are **gated behind acceptance of this execution path**. Concretely: not until
+the §4 acceptance criteria for the loopback fixture target pass in CI, on the pinned bundle, with a recorded run
+that is honestly labelled at its ceiling. The reason is ordering, not caution — a Projects tab or a Sidekick
+action inherits whatever trust the engine can actually establish, and building the surfaces first is how an
+unearned `CORROBORATED` becomes a user-visible promise.
 
 ## 7. Sequencing and sizing
 

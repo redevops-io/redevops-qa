@@ -69,8 +69,7 @@ def test_fixture_only_is_still_the_claim_in_the_readme():
 def test_the_design_document_states_its_own_limits():
     """A design doc that promises less than the README allows is fine; one that promises more is a defect."""
     doc = DESIGN.read_text(encoding="utf-8")
-    for needle in ("design and acceptance criteria only",
-                   "Nothing here is implemented",
+    for needle in ("Nothing here is implemented",
                    "CORROBORATED`, never `VERIFIED",
                    "mutating: false` is the default and the only supported value at first",
                    "Linux x86_64",
@@ -78,10 +77,27 @@ def test_the_design_document_states_its_own_limits():
         assert needle in doc, f"the design doc lost the qualification {needle!r}"
     for ac in [f"AC-{i}" for i in range(1, 13)]:
         assert ac in doc, f"the design doc lost criterion {ac}"
-    assert "Open questions" in doc, "unresolved owner decisions must stay visible, not be resolved by prose"
+    # Owner decisions must stay visible *as decisions*, whichever way they went: an unresolved question and a
+    # resolved one are both information, and either may be quietly deleted by a prose edit that reads as tidy.
+    assert "## 6. Decisions" in doc, "the owner decisions must stay recorded in the design"
+    for decided in ("**In the gateway.**", "read-only fixture mode", "**Cap at `CORROBORATED`.**",
+                    "**Unsigned for now**"):
+        assert decided in doc, f"a recorded owner decision disappeared from the design: {decided!r}"
+    assert "Open questions" not in doc, "a resolved question must not linger as if still open"
 
 
 # ---- the tripwires (each fails when its criterion becomes implementable) ---------------------------
+
+
+def test_the_design_gates_the_projects_and_sidekick_surfaces_behind_this_path():
+    """The owner's ordering is part of the design, not a preference: surfaces that display a verification
+    level must not be built before the engine can earn it. Asserting it here means the sentence cannot be
+    dropped in a later refactor without someone deciding to drop it in a test."""
+    doc = DESIGN.read_text(encoding="utf-8")
+    assert "### 6.1 v1 scope" in doc and "loopback, read-only Edge Sentinel fixture target and nothing else" in doc
+    assert "### 6.2 Gating" in doc and "gated behind acceptance of this execution path" in doc
+    assert "127.0.0.1" in doc.split("### 6.1")[1].split("## 7.")[0], "the v1 origin must be stated, not implied"
+
 
 def test_ac2_external_origin_is_not_a_supported_target_kind_yet(up):
     """Flip this to AC-2's acceptance assertion when `external-origin` validates. Do not delete it."""
