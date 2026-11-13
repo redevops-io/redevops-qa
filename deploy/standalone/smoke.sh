@@ -62,6 +62,7 @@ api "$base/v1/runs/$last_id/report?format=html" -o "$work/report.html"; grep -q 
 api "$base/v1/runs/$last_id/bundle.tar" -o "$work/bundle.tar"
 vol="$(mktemp -d)"
 tar -xf "$work/bundle.tar" -C "$vol"
+chmod -R a+rX "$vol"            # mktemp makes the directory private to this user; the container runs as uid 10001
 # verify exits like the run did (0 VERIFIED, 1 FAILED) when it accepts the evidence; exit 5 would mean the evidence itself was rejected
 want_exit=0; [ "$last_defect" = none ] || want_exit=1
 status=0; verdict="$(docker run --rm --network none -v "$vol:/ev:ro" "$image:$tag" redevops-qa verify "/ev/$last_id")" || status=$?
