@@ -50,7 +50,7 @@ A CI job (`dev-checkout` in `tests.yml`) runs exactly these three lines, extract
 README lies, CI says so. `.venv/` and `.pinned/` are gitignored; `git status` stays clean, as other CI jobs insist.
 
 ## Layout
-Packages (under `packages/`): `qa-runner`, `qa-playwright`, `qa-evidence`, `qa-bridge`, `qa-egress`, `qa-adapter-kit`, `qa-selenium`, `qa-robot`, `qa-appium`, `qa-checks`, `qa-fixture-app`.
+Packages (under `packages/`): `qa-runner`, `qa-playwright`, `qa-evidence`, `qa-bridge`, `qa-egress`, `qa-adapter-kit`, `qa-selenium`, `qa-robot`, `qa-appium`, `qa-checks`, `qa-fixture-app`, `qa-service`.
 Also in the repository: the pinned bundle (`bundle/`, `tools/build_bundle.py`), the tools of the CI checks (`tools/`), the licence matrix (`third_party/`), and examples that ship with the runner
 (`packages/qa-runner/examples`). **Not in this repository:** `qa-api`, `qa-ui`, a `deploy/` directory (no Compose file, no Dockerfile, no Helm chart), standalone examples and benchmarks; earlier text
 named them, and none of them exists.
@@ -65,6 +65,7 @@ The Selenium adapters are in [packages/qa-selenium](packages/qa-selenium/README.
 The Robot Framework adapter is in [packages/qa-robot](packages/qa-robot/README.md).
 The Appium adapters are in [packages/qa-appium](packages/qa-appium/README.md).
 The portable evidence bundle (layout, run-report schema, offline verifier, reader) is in [packages/qa-evidence](packages/qa-evidence/README.md).
+The small authenticated HTTP service around the command (health and readiness probes, start a shipped plan, read its status, report and verification; no external target) is in [packages/qa-service](packages/qa-service/README.md).
 The deterministic fixture web app with seeded defects, the target of the end-to-end tests, is in [packages/qa-fixture-app](packages/qa-fixture-app/README.md).
 The `redevops-qa` command (`doctor`, `freeze`, `run`, `verify`, `report`, `inspect`, `demo`; Playwright Chromium and Robot Framework lanes) is in [packages/qa-runner](packages/qa-runner/README.md); its section "What verification does and does not prove" says what `verify` shows and what unkeyed hashes cannot, and its section "Egress matrix by engine" says what limits the network traffic of the browser lane and of the Robot lane, what the experiments measured, and what is not stopped.
 The engine capability manifest (what each engine has been shown to do, with its evidence) is [qa-capabilities.json](qa-capabilities.json)
