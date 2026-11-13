@@ -1,0 +1,136 @@
+# SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
+# Publishes the image ghcr.io/redevops-io/redevops-qa, built from a release TAG of this repository.
+# Manual dispatch only, from the protected branch main: a person types the confirmation. Modelled on the oci-release workflow of redevops-io/agentic-os.
+# Consumers verify with:
+#   cosign verify ghcr.io/redevops-io/redevops-qa@sha256:<index digest> \
+#     --certificate-identity 'https://github.com/redevops-io/redevops-qa/.github/workflows/oci-release.yml@refs/heads/main' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+#   gh attestation verify oci://ghcr.io/redevops-io/redevops-qa@sha256:<index digest> --repo redevops-io/redevops-qa
+name: oci-release
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag to build, for example v0.6.2"
+        required: true
+      confirm:
+        description: "Type exactly: PUBLISH <ref>"
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: oci-release
+  cancel-in-progress: false
+jobs:
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: redevops-qa, file: deploy/standalone/Dockerfile}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      NAME: ${{ matrix.name }}
+      REF: ${{ inputs.ref }}
+      CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - name: Check the confirmation and the ref
+        run: |
+          [ "$CONFIRM" = "PUBLISH $REF" ] || { echo "the confirmation does not match: type PUBLISH $REF"; exit 1; }
+          [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "ref must be a release tag like v0.6.2"; exit 1; }
+          [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "dispatch from the protected branch main only (got $GITHUB_REF)"; exit 1; }
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: refs/tags/${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build inputs (the tag must be annotated and its commit must be on main)
+        id: vars
+        run: |
+          [ "$(git cat-file -t "refs/tags/${REF}")" = "tag" ] || { echo "${REF} is not an annotated tag"; exit 1; }
+          COMMIT="$(git rev-parse HEAD)"
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$COMMIT" refs/remotes/origin/main || { echo "the commit of ${REF} is not on main"; exit 1; }
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "short=${COMMIT:0:12}" >> "$GITHUB_OUTPUT"
+          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+          echo "sde=$(git log -1 --format=%ct HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Secret scan of the full history (gitleaks 8.30.1, pinned by the sha256 of the exact archive); a finding stops the publication
+        run: |
+          set -euo pipefail
+          curl -fsSLO https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks_8.30.1_linux_x64.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          ./gitleaks git . --log-opts="--all" --redact
+          rm -f gitleaks gitleaks_8.30.1_linux_x64.tar.gz
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4.3.0
+      - uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6  # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse to overwrite an existing tag
+        run: |
+          for tag in "${{ steps.vars.outputs.version }}" "${{ steps.vars.outputs.version }}-${{ steps.vars.outputs.short }}"; do
+            if docker buildx imagetools inspect "ghcr.io/redevops-io/${NAME}:${tag}" >/dev/null 2>&1; then
+              echo "ghcr.io/redevops-io/${NAME}:${tag} already exists; tags are never moved"; exit 1
+            fi
+          done
+      - name: Build and push (linux/amd64, linux/arm64; SBOM and max provenance attached by BuildKit)
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            SOURCE_DATE_EPOCH=${{ steps.vars.outputs.sde }}
+            VERSION=${{ steps.vars.outputs.version }}
+            VCS_REF=${{ steps.vars.outputs.commit }}
+          tags: |
+            ghcr.io/redevops-io/${{ matrix.name }}:${{ steps.vars.outputs.version }}
+            ghcr.io/redevops-io/${{ matrix.name }}:${{ steps.vars.outputs.version }}-${{ steps.vars.outputs.short }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/redevops-io/redevops-qa
+            org.opencontainers.image.revision=${{ steps.vars.outputs.commit }}
+            org.opencontainers.image.version=${{ steps.vars.outputs.version }}
+          annotations: |
+            index:org.opencontainers.image.source=https://github.com/redevops-io/redevops-qa
+            index:org.opencontainers.image.revision=${{ steps.vars.outputs.commit }}
+            index:org.opencontainers.image.version=${{ steps.vars.outputs.version }}
+          outputs: type=image,push=true,rewrite-timestamp=true
+          provenance: mode=max
+          sbom: true
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+      - name: Sign by digest (index and every per-architecture manifest)
+        run: cosign sign --yes --recursive "ghcr.io/redevops-io/${NAME}@${{ steps.build.outputs.digest }}"
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
+        with:
+          subject-name: ghcr.io/redevops-io/${{ matrix.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Vulnerability and secret scan report (information for the release record, read by a person)
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/out" aquasec/trivy:0.76.2 image --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed \
+            --format json --output "/out/trivy-${NAME}.json" "ghcr.io/redevops-io/${NAME}@${{ steps.build.outputs.digest }}" || true
+      - name: Release record
+        run: |
+          {
+            echo "### ${NAME} ${{ steps.vars.outputs.version }}"
+            echo "- index digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- source: \`${{ steps.vars.outputs.commit }}\` (tag ${REF})"
+            echo "- reference by digest: \`ghcr.io/redevops-io/${NAME}@${{ steps.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: trivy-${{ matrix.name }}
+          path: trivy-${{ matrix.name }}.json
+          if-no-files-found: warn
