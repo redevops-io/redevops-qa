@@ -9,7 +9,7 @@ the external target is audit item P2-1, still design work ([docs/P2_1_EXTERNAL_T
 Supported platform: CPython 3.12 (the fixture-app CI also runs 3.11) on Linux x86_64 only — macOS and Windows are not claimed,
 the real-device Android lane has run only by hand on one emulator, and there is no iOS evidence.
 
-**Status: pre-release.** There is no tagged release of this repository yet, and no package is published to PyPI; you work from a checkout. It is built
+**Status: pre-release.** The one release is `v0.6.2` (the standalone container image, see below); no package is published to PyPI, and the bundle and the checkout are built from source. It is built
 against pinned *releases* of its dependencies, [`runtime-contracts`](https://github.com/redevops-io/runtime-contracts) (`v0.3.15` and `v0.3.16`) and
 [`agent-harness`](https://github.com/redevops-io/agent-harness) (`v0.2.0`), recorded with their digests in [pins.toml](pins.toml); it does not vendor them.
 
@@ -36,7 +36,7 @@ Chromium is downloaded by the bundle's separate browser step and checked against
 
 An image of the command and its small authenticated HTTP service, with a Compose file and Kustomize manifests, is described in [docs/standalone/README.md](docs/standalone/README.md): what runs in it
 (linux/amd64: the Playwright Chromium and Robot Framework lanes; linux/arm64: the evidence commands only), how to install it, authenticate, keep and back up results, and what it does not do.
-The image is built by `.github/workflows/oci-release.yml` from a release tag; no tag exists yet, so there is no published image to pull until one is.
+The image is built by `.github/workflows/oci-release.yml` from a release tag. `v0.6.2` is published as `ghcr.io/redevops-io/redevops-qa:0.6.2` (index digest `sha256:fa99c66bd94e64a871200eb36f4c242fa839bddca4c626f701e8df036d620065`, built from commit `d86219f5c3053ecb1659ea80975132922bc08ebc`); its signature, attestation and install check are recorded in the documentation.
 
 ## Developer checkout (from a fresh clone, three commands)
 
