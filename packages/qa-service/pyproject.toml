@@ -1,0 +1,23 @@
+[project]
+name = "redevops-qa-service"
+version = "0.1.0.dev0"
+description = "A small authenticated HTTP service around the redevops-qa command: start a built-in plan against the bundled fixture app, read its status, report and verification, download the evidence bundle"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause"
+license-files = ["LICENSE*"]
+# Standard library only. The service starts the `redevops-qa` command as a child process; it does not import the runner.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+redevops-qa-service = "qa_service.__main__:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

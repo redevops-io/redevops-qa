@@ -14,6 +14,7 @@ testpaths = [
     "packages/qa-checks/tests",
     "packages/qa-evidence/tests",
     "packages/qa-runner/tests",
+    "packages/qa-service/tests",
 ]
 pythonpath = [
     "packages/qa-bridge/src",
@@ -27,6 +28,7 @@ pythonpath = [
     "packages/qa-evidence/src",
     "packages/qa-fixture-app/src",
     "packages/qa-runner/src",
+    "packages/qa-service/src",
 ]
 # The real-browser lane (tests/browser in the browser-backed packages) is never collected by the offline suite: it needs
 # Playwright and Chromium and runs only in its own CI job, which names those directories explicitly.

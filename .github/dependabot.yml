@@ -29,6 +29,7 @@ updates:
       - "/packages/qa-egress"
       - "/packages/qa-checks"
       - "/packages/qa-fixture-app"
+      - "/packages/qa-service"
     schedule:
       interval: "weekly"
       day: "tuesday"
