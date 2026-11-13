@@ -45,6 +45,8 @@ last_id=""
 for spec in $runs; do
   plan="${spec%%:*}"; defect="${spec##*:}"
   echo "== run plan=$plan defect=$defect"
+  avail="$(api "$base/v1/info" | json 'str(d["plans"]["'"$plan"'"]["available"])+" "+str((d["plans"]["'"$plan"'"]["unavailable"] or {}).get("code",""))')"
+  [ "${avail%% *}" = True ] || fail "$plan is unavailable here (${avail#* }); /v1/info says why"
   id="$(api -X POST -d "{\"plan\":\"$plan\",\"defect\":\"$defect\"}" "$base/v1/runs" | json 'd["id"]')" || fail "start $spec"
   for _ in $(seq 1 120); do
     state="$(api "$base/v1/runs/$id" | json 'd["state"]')"; [ "$state" = running ] || break; sleep 3

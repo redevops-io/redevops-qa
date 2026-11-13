@@ -10,7 +10,6 @@ Layout under the data directory::
 Only the plans listed in ``PLANS`` can be started, only against the fixture app that ships with the runner; there is no way to name a file, a URL or a target."""
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import re
@@ -24,17 +23,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from . import capabilities as caps
 from .config import Config
 
 RUN_ID_RE = re.compile(r"^r[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$")
 DEFECTS = ("none", "discount", "settings")
-#: plan name -> (command, plan file in the plans directory, Python modules the plan's lanes need)
-PLANS: Dict[str, Tuple[str, Optional[str], Tuple[str, ...]]] = {
-    "demo": ("demo", None, ("playwright", "robot")),
-    "browser": ("run", "golden-plan.json", ("playwright",)),
-    "robot": ("run", "robot-plan.json", ("robot",)),
-    "robot-not-enforced": ("run", "robot-plan-not-enforced.json", ("robot",)),
-}
+PLANS = {k: v[:3] for k, v in caps.PLANS.items()}
 #: the runner's exit status table (packages/qa-runner/README.md)
 EXIT_MEANING = {0: "VERIFIED", 1: "FAILED", 2: "REFUSED", 3: "NOT_COMPLETED", 4: "INCONCLUSIVE", 5: "EVIDENCE_REJECTED", 6: "RUNNER_ERROR", 7: "VERIFIER_UNAVAILABLE"}
 OUTPUT_LIMIT = 1 << 20
@@ -45,9 +39,10 @@ class Busy(Exception):
 
 
 class Refused(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, unavailable: Optional[Dict[str, str]] = None):
         super().__init__(message)
         self.code = code
+        self.unavailable = unavailable
 
 
 def _now() -> str:
@@ -58,26 +53,10 @@ def new_run_id() -> str:
     return datetime.now(timezone.utc).strftime("r%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
 
 
-def available_modules(names: Tuple[str, ...]) -> List[str]:
-    return [n for n in names if importlib.util.find_spec(n) is None]
-
-
-def plan_availability(cfg: Config) -> Dict[str, Dict[str, Any]]:
-    out: Dict[str, Dict[str, Any]] = {}
-    for name, (_, plan_file, modules) in PLANS.items():
-        missing = available_modules(modules)
-        problem = None
-        if missing:
-            problem = "the Python package(s) " + ", ".join(missing) + " of this plan's lanes are not installed in this image, so it cannot run them (the arm64 image carries the evidence commands only)"
-        elif plan_file is not None and (cfg.plans_dir is None or not (cfg.plans_dir / plan_file).is_file()):
-            problem = "the plan file is not installed"
-        out[name] = {"available": problem is None, "reason": problem}
-    return out
-
-
 class RunStore:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, facts: Optional[caps.Facts] = None):
         self.cfg = cfg
+        self.facts = facts if facts is not None else caps.collect()
         self.root = cfg.data_dir / "runs"
         self._lock = threading.Lock()
         self._active: Optional[str] = None
@@ -120,15 +99,23 @@ class RunStore:
                 rec.update(state="interrupted", finished=_now(), note="the service stopped while this run was going; its evidence directory, if any, is incomplete")
                 self._write_status(rec["id"], rec)
 
+    def availability(self) -> Dict[str, Dict[str, Any]]:
+        """plan -> {"available": bool, "unavailable": None | {"code", "reason", "remedy"}}"""
+        out: Dict[str, Dict[str, Any]] = {}
+        for name in PLANS:
+            why = caps.unavailable(name, self.facts, self.cfg.plans_dir)
+            out[name] = {"available": why is None, "unavailable": why}
+        return out
+
     # ------------------------------------------------------------------ starting a run
     def start(self, plan: str, defect: str) -> Dict[str, Any]:
         if plan not in PLANS:
             raise Refused("unknown_plan", "plan must be one of: " + ", ".join(sorted(PLANS)))
         if defect not in DEFECTS:
             raise Refused("unknown_defect", "defect must be one of: " + ", ".join(DEFECTS))
-        why = plan_availability(self.cfg)[plan]
-        if not why["available"]:
-            raise Refused("plan_unavailable", why["reason"])
+        why = caps.unavailable(plan, self.facts, self.cfg.plans_dir)
+        if why is not None:
+            raise Refused("plan_unavailable", why["reason"], why)
         with self._lock:
             if self._active is not None:
                 raise Busy(self._active)
