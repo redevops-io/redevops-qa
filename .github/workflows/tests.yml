@@ -1472,10 +1472,9 @@ jobs:
           [ "$(docker image inspect redevops-qa:ci --format '{{.Config.User}}')" = "10001:10001" ]
       - name: Compose from an empty directory, the three demo runs through the API, verification, persistence
         run: QA_SMOKE_IMAGE=redevops-qa QA_SMOKE_TAG=ci bash deploy/standalone/smoke.sh
-      - name: Render and check the Kubernetes manifests
+      - name: Render the Kubernetes manifests (the checks of their content are tests/test_standalone_manifests.py)
         run: |
           kubectl kustomize deploy/standalone/k8s > "$RUNNER_TEMP/qa-k8s.yaml"
-          kubectl apply --dry-run=client --validate=false -f "$RUNNER_TEMP/qa-k8s.yaml"
           grep -q "readOnlyRootFilesystem: true" "$RUNNER_TEMP/qa-k8s.yaml" && grep -q "runAsNonRoot: true" "$RUNNER_TEMP/qa-k8s.yaml" && grep -q "kind: NetworkPolicy" "$RUNNER_TEMP/qa-k8s.yaml"
       - name: Fail if the run left anything in the working tree
         run: test -z "$(git status --porcelain)"
