@@ -101,8 +101,9 @@ def render_text(ins: Inspection, *, verdicts_recomputed: bool = True) -> str:
 _STYLE = """
 body{font:14px/1.45 system-ui,sans-serif;margin:1.5rem auto;max-width:72rem;padding:0 1rem;color:#1a1a1a;background:#fff}
 h1{font-size:1.4rem}h2{font-size:1.1rem;margin-top:1.6rem;border-bottom:1px solid #bbb;padding-bottom:.2rem}
-table{border-collapse:collapse;width:100%;margin:.4rem 0}th,td{border:1px solid #bbb;padding:.25rem .5rem;text-align:left;vertical-align:top;word-break:break-word}
-th{background:#f0f0f0}code{font-family:ui-monospace,monospace;font-size:.9em}
+table{border-collapse:collapse;width:100%;margin:.4rem 0}th,td{border:1px solid #bbb;padding:.25rem .5rem;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+th{background:#f0f0f0}code{font-family:ui-monospace,monospace;font-size:.9em;overflow-wrap:anywhere}
+p,li,.banner{overflow-wrap:anywhere}
 .banner{padding:.7rem 1rem;border:2px solid;margin:.6rem 0;font-weight:600}
 .ok{border-color:#2d6a2d;background:#eef7ee}.warn{border-color:#9a6700;background:#fff6dd}.bad{border-color:#a11;background:#fdeaea}
 .native{background:#eef3fb}.verdict{background:#f3eefb}.small{font-size:.9em;color:#444}
