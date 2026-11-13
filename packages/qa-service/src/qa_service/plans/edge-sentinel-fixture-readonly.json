@@ -1,0 +1,95 @@
+{
+ "lanes": [
+  {
+   "deadline_s": 60,
+   "egress": "origin-only",
+   "engine": "playwright-chromium",
+   "lane_id": "browser",
+   "probes": {
+    "A-HEALTH-URL": "ui-only"
+   },
+   "requests": {
+    "allowed": [],
+    "required": [
+     "GET /health"
+    ]
+   },
+   "spec": {
+    "allowed_side_effects": [],
+    "assertions": [
+     {
+      "assertion_id": "A-HEALTH-URL",
+      "determinism": "DETERMINISTIC",
+      "executor": "PLAYWRIGHT",
+      "on_unresolvable": "INDETERMINATE",
+      "predicate": {
+       "expected": "/health$",
+       "op": "MATCHES"
+      },
+      "schema_id": "runtime-contracts/qa/assertion-spec",
+      "schema_version": "0.1",
+      "subject": {
+       "inputs": [],
+       "kind": "URL",
+       "pattern": "/health$",
+       "subject_alternates": []
+      },
+      "verifier_id": "det-verifier",
+      "verifier_version_range": ">=1.0,<2"
+     }
+    ],
+    "budget": {
+     "deadline_ms": 60000,
+     "max_model_calls": 0,
+     "max_recovery_attempts": 0,
+     "max_retries": 0,
+     "max_tokens": 0
+    },
+    "cleanup": [],
+    "depends_on": [],
+    "egress_profile": "lane",
+    "fixtures": [],
+    "id": "edge-sentinel-health",
+    "preconditions": [],
+    "schema_id": "runtime-contracts/qa/test-spec",
+    "schema_version": "0.1",
+    "sensitivity_labels": [],
+    "steps": [
+     {
+      "action": {
+       "kind": "navigate",
+       "value": "{origin}/health"
+      },
+      "expected_transition": "the page changes",
+      "idempotency": "IDEMPOTENT",
+      "intent": "navigate (s1)",
+      "observation_deadline_ms": 5000,
+      "permitted_recovery": [],
+      "retry_safety": "SAFE",
+      "side_effect": "NONE",
+      "step_id": "s1",
+      "target": {
+       "kind": "ui",
+       "locator": {
+        "frame_path": [],
+        "role": "document"
+       }
+      }
+     }
+    ],
+    "target": {
+     "app_id": "qa-fixture-app",
+     "build_sha": "0123456789abcdef",
+     "environment_profile": "local"
+    },
+    "version": 1
+   }
+  }
+ ],
+ "plan_id": "edge-sentinel-fixture-readonly",
+ "schema": "redevops-qa/plan",
+ "schema_version": "1.1",
+ "target": {
+  "kind": "fixture-app"
+ }
+}
