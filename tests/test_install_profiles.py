@@ -82,13 +82,15 @@ def test_at_least_one_profile_is_verified_by_a_named_ci_job_and_the_rest_say_wha
             assert p["disabled_reason"] and not p["hosts"] and not any(p["steps"].values())
 
 
-def test_docker_compose_and_kubernetes_are_planned_with_a_reason_and_the_repository_has_none_of_their_files():
+def test_docker_compose_and_kubernetes_are_planned_with_a_reason_and_their_files_exist_only_under_deploy_standalone():
     for name in ("docker-compose", "kubernetes-helm"):
         t = PROFILES["targets"][name]
         assert t["status"] == "planned" and len(t["disabled_reason"]) > 40
     tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True).stdout.split("\n") if (ROOT / ".git").exists() else []
-    names = [Path(t).name for t in tracked if t]
+    # the standalone image's files live in deploy/standalone and are run by their own CI job; a planned target has no such file anywhere else
+    names = [Path(t).name for t in tracked if t and not t.startswith("deploy/standalone/")]
     assert not [n for n in names if re.match(r"(docker-compose|compose).*\.ya?ml|Dockerfile|Chart\.yaml", n)]
+    assert any(t == "deploy/standalone/Dockerfile" for t in tracked) and any(t == "deploy/standalone/compose.yaml" for t in tracked)
 
 
 def test_the_install_is_a_checkout_at_a_commit_with_no_registry_package_and_no_release_tag():

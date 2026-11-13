@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redevops-qa-data
+  namespace: redevops-qa
+  labels:
+    app.kubernetes.io/name: redevops-qa
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName: the cluster default is used when this is omitted

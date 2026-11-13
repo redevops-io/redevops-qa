@@ -1,0 +1,6 @@
+# The build context is the repository including .git (the bundle builder names the commit it was built from and refuses a dirty tree).
+.venv
+.pinned
+**/__pycache__
+**/*.pyc
+.pytest_cache

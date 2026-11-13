@@ -28,11 +28,11 @@
     },
     "docker-compose": {
       "status": "planned",
-      "disabled_reason": "The main branch of this repository ships no Compose file, no Dockerfile and no runner service. A Compose packaging exists only as unmerged work and its files have been validated statically, never started; a Compose profile will be offered only when one is merged and run in CI."
+      "disabled_reason": "Docker Compose files and a container image definition ship in deploy/standalone and were run on one host against an image built from this repository, but no image is published yet and no install has been run from published files on a clean host. The profile will be offered when a signed image has been installed from the documented files and that run is recorded here."
     },
     "kubernetes-helm": {
       "status": "planned",
-      "disabled_reason": "This repository ships no Helm chart and no Kubernetes manifests for the runner, so there is nothing to test; the cluster checks in qa-checks inspect other people's manifests and are not a deployment of this runtime."
+      "disabled_reason": "Kustomize manifests (there is no Helm chart) ship in deploy/standalone/k8s and were applied to a throwaway local cluster, but no image is published yet and no install has been run from published files. The cluster checks in qa-checks inspect other people's manifests and are not a deployment of this runtime. The profile will be offered when a signed image has been installed from the documented manifests and that run is recorded here."
     }
   },
   "profiles": [

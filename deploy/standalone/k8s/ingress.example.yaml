@@ -1,0 +1,23 @@
+# Optional. qa.example.com is a placeholder host; the TLS Secret and the ingress class are yours. Authentication stays the bearer token of the service itself.
+# Label the namespace of your ingress controller redevops-qa/access=true so the NetworkPolicy lets it reach the pod.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: redevops-qa
+  namespace: redevops-qa
+spec:
+  # ingressClassName: <your class>
+  tls:
+    - hosts: ["qa.example.com"]
+      secretName: qa-example-com-tls
+  rules:
+    - host: qa.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redevops-qa
+                port:
+                  name: http

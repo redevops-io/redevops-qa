@@ -1,0 +1,30 @@
+# Default deny for the namespace, then one allowance: the service port, from pods of this namespace and from namespaces you label redevops-qa/access=true
+# (for example the namespace of your ingress controller). The service needs NO outbound traffic: the lanes talk to the fixture app on the pod's own loopback, so egress stays denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: redevops-qa
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-service-port
+  namespace: redevops-qa
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redevops-qa
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              redevops-qa/access: "true"
+      ports:
+        - protocol: TCP
+          port: 8080

@@ -21,9 +21,11 @@ def test_what_the_readme_names_as_absent_is_absent_and_said_so():
     assert NOT_HERE, "the README must say what is not in the repository"
     for name in ("qa-api", "qa-ui"):
         assert f"`{name}`" in NOT_HERE and not (ROOT / "packages" / name).exists()
-    for path in ("deploy", "benchmarks", "examples"):
+    for path in ("benchmarks", "examples"):
         assert not (ROOT / path).exists()
-    assert "`deploy/`" in NOT_HERE and "benchmarks" in NOT_HERE
+    # the one deployment directory is the standalone image's, named in the README; there is no Helm chart
+    assert sorted(p.name for p in (ROOT / "deploy").iterdir()) == ["standalone"] and "deploy/standalone/" in README
+    assert "Helm chart" in NOT_HERE and "benchmarks" in NOT_HERE
 
 
 def test_no_package_is_named_outside_the_absent_list_unless_it_exists():

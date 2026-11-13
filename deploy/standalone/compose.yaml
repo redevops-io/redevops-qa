@@ -1,0 +1,38 @@
+# redevops-qa on a single Docker host. Copy this file and .env.example into an empty directory, copy .env.example to .env, fill in the values (see docs/standalone/README.md), then:
+#   docker compose up -d
+# The service answers on 127.0.0.1 only unless you change QA_BIND_ADDRESS, and it needs the token you set in QA_SERVICE_TOKEN (compose refuses to start without one).
+name: redevops-qa
+
+services:
+  qa:
+    image: "${QA_IMAGE:-ghcr.io/redevops-io/redevops-qa}:${QA_IMAGE_TAG:?set QA_IMAGE_TAG in .env to the version you install}"
+    restart: unless-stopped
+    ports:
+      - "${QA_BIND_ADDRESS:-127.0.0.1}:${QA_PORT:-8080}:8080"
+    environment:
+      QA_SERVICE_TOKEN: "${QA_SERVICE_TOKEN:?set QA_SERVICE_TOKEN in .env, generate one with openssl rand -hex 32}"
+      QA_SERVICE_RUN_TIMEOUT: "${QA_RUN_TIMEOUT:-1800}"
+    volumes:
+      - qa-data:/data
+    # Stated here as well as in the Dockerfile: an image pushed in the OCI format does not carry a HEALTHCHECK, and `docker compose up --wait` needs one.
+    healthcheck:
+      test: ["CMD", "redevops-qa-service", "healthcheck"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 15s
+    # What the container is allowed to do: nothing beyond running as an unprivileged user on a read-only root file system with two scratch directories in memory and the data volume.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,size=512m,mode=1777
+    shm_size: 512m
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: 2
+
+volumes:
+  qa-data:
