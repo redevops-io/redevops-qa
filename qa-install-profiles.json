@@ -28,11 +28,11 @@
     },
     "docker-compose": {
       "status": "planned",
-      "disabled_reason": "Docker Compose files and a container image definition ship in deploy/standalone and were run on one host against an image built from this repository, but no image is published yet and no install has been run from published files on a clean host. The profile will be offered when a signed image has been installed from the documented files and that run is recorded here."
+      "disabled_reason": "Docker Compose files ship in deploy/standalone and the image is published (ghcr.io/redevops-io/redevops-qa:0.6.2) and was installed from the published reference with those files on one host, but the profile stays planned: a profile is offered only when a named CI job of tests.yml runs it through tools/run_install_profile.py, and these profiles describe a Python checkout with a closed set of commands (git, python); no such job installs from the published image yet, and the standalone job builds the image from the commit instead."
     },
     "kubernetes-helm": {
       "status": "planned",
-      "disabled_reason": "Kustomize manifests (there is no Helm chart) ship in deploy/standalone/k8s and were applied to a throwaway local cluster, but no image is published yet and no install has been run from published files. The cluster checks in qa-checks inspect other people's manifests and are not a deployment of this runtime. The profile will be offered when a signed image has been installed from the documented manifests and that run is recorded here."
+      "disabled_reason": "Kustomize manifests (there is no Helm chart) ship in deploy/standalone/k8s and were applied to a throwaway local cluster with the arm64 image, and the image is published (ghcr.io/redevops-io/redevops-qa:0.6.2), but the profile stays planned: a profile is offered only when a named CI job of tests.yml runs it through tools/run_install_profile.py, and no job applies the manifests to a cluster; the lanes were not run in a cluster. The cluster checks in qa-checks inspect other people's manifests and are not a deployment of this runtime."
     }
   },
   "profiles": [

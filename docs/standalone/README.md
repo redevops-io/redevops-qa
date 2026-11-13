@@ -20,6 +20,24 @@ Licence: source-available under the family licence (AGPL-3.0-or-later with the C
   (installed from the same hash-checked bundle) **without** the browser and Robot wheels. `verify`, `report`, `inspect`, `freeze` and the service work (an arm64 host can verify evidence made on amd64);
   `run` and `demo` cannot start a lane, and `/v1/info` says so (`available: false` with the reason). `doctor` reports failures there because the image is not a bundle installation.
 
+## Published release
+
+`v0.6.2`, built from commit `d86219f5c3053ecb1659ea80975132922bc08ebc` by `.github/workflows/oci-release.yml` (run 43503888890):
+
+| Reference | Digest |
+|---|---|
+| `ghcr.io/redevops-io/redevops-qa:0.6.2` and `:0.6.2-d86219f5c305` (the same index) | `sha256:fa99c66bd94e64a871200eb36f4c242fa839bddca4c626f701e8df036d620065` |
+| linux/amd64 image | `sha256:4c65abb941d488e03c0685fcf7cd3f8fce0eb631803d9b365bb9faf37707d998` |
+| linux/arm64 image | `sha256:88f778e2867c7552c131ed82f42ba2f9eb899c57da28db1a7751bdb9237d44fe` |
+
+The index and both images carry a keyless cosign signature by the identity `https://github.com/redevops-io/redevops-qa/.github/workflows/oci-release.yml@refs/heads/main` (issuer
+`https://token.actions.githubusercontent.com`); the index also carries a GitHub build-provenance attestation, and BuildKit attached an SBOM and a provenance attestation per architecture.
+These checks were run against the published tags with no registry credentials: the anonymous pull, `cosign verify` on the index and both images, and `gh attestation verify` on the index.
+Install check from the published image only (the digest-pinned reference above, `compose.yaml` and a `.env` in an empty directory, a new Compose project, a clean Docker configuration, linux/amd64):
+probes open and the other paths 401 without or with a wrong token; a `browser` run ended `VERIFIED`; a `browser` run with the `settings` defect ended `FAILED` (exit status 1); both bundles were
+accepted by `redevops-qa verify` in a second container with `--network none`; the two runs survived a restart and `down` followed by `up`. The `demo` plan with the Robot lane's kernel layers was not part
+of that check (it needs a native x86_64 host); the `standalone` CI job runs it on every change.
+
 ## Requirements
 
 * Docker Engine with Compose v2 (tested with Docker 29.9.3 and Compose 5.7.0), or a Kubernetes cluster (tested on a throwaway `kind` cluster, Kubernetes 1.37; only core resources are used: Namespace, PersistentVolumeClaim,
