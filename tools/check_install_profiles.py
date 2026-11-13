@@ -66,6 +66,9 @@ LOOPBACK_URL = "http://127.0.0.1:4723"
 JOB_MARK = "NOT a required check until proven"
 RUNNERS = {"ubuntu-24.04": "linux-x86_64"}
 REAL_ENGINE_LEVELS = {"engine-backed-ci", "device-backed-local", "device-backed-ci"}
+#: The container and cluster files of the standalone image live here and are exercised by their own CI job (``standalone`` in tests.yml); the profile of such a target stays `planned`
+#: until a published, signed image has been installed from those files on a clean host and that run is recorded, so the rule below does not apply to this directory.
+STANDALONE_DIR = ("deploy", "standalone")
 PLANNED_TARGET_FILES = {
     "docker-compose": re.compile(r"^(docker-compose.*\.ya?ml|compose.*\.ya?ml|Dockerfile.*)$"),
     "kubernetes-helm": re.compile(r"^(Chart\.yaml|values\.ya?ml|kustomization\.ya?ml)$"),
@@ -264,7 +267,8 @@ def semantic_problems(profiles: Dict[str, Any], capabilities: Dict[str, Any], ro
     for tname, target in profiles["targets"].items():
         if target["status"] == "planned" and tname in PLANNED_TARGET_FILES:
             hits = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file() and ".git" not in p.relative_to(root).parts
-                    and ".pinned" not in p.relative_to(root).parts and PLANNED_TARGET_FILES[tname].match(p.name)]
+                    and ".pinned" not in p.relative_to(root).parts and p.relative_to(root).parts[:2] != STANDALONE_DIR
+                    and PLANNED_TARGET_FILES[tname].match(p.name)]
             if hits:
                 out.append(f"target {tname} is planned but the repository now has {hits[:3]}; test it, then offer it")
     if profiles["verifier"]["supported"] != any(p.get("verifier") and p["status"] != "planned" for p in profiles["profiles"]):

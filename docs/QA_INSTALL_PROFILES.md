@@ -11,8 +11,8 @@ A profile is **verified** only when a CI job runs that exact profile, step by st
 | Target | Status | Reason |
 |---|---|---|
 | local-python | available |  |
-| docker-compose | planned | The main branch of this repository ships no Compose file, no Dockerfile and no runner service. A Compose packaging exists only as unmerged work and its files have been validated statically, never started; a Compose profile will be offered only when one is merged and run in CI. |
-| kubernetes-helm | planned | This repository ships no Helm chart and no Kubernetes manifests for the runner, so there is nothing to test; the cluster checks in qa-checks inspect other people's manifests and are not a deployment of this runtime. |
+| docker-compose | planned | Docker Compose files and a container image definition ship in deploy/standalone and were run on one host against an image built from this repository, but no image is published yet and no install has been run from published files on a clean host. The profile will be offered when a signed image has been installed from the documented files and that run is recorded here. |
+| kubernetes-helm | planned | Kustomize manifests (there is no Helm chart) ship in deploy/standalone/k8s and were applied to a throwaway local cluster, but no image is published yet and no install has been run from published files. The cluster checks in qa-checks inspect other people's manifests and are not a deployment of this runtime. The profile will be offered when a signed image has been installed from the documented manifests and that run is recorded here. |
 
 Re-verification in a separate process: offered by `local-python-qa` only. Re-verification of a run's evidence in a separate process (`redevops-qa verify`: the same code the run used, so not independent of the harness and the libraries, and the hash chain it checks is unkeyed) is installed and run only by the profile local-python-qa (Playwright Chromium and Robot Framework, Linux x86_64); no other profile installs it, and an engine's own pass or fail is not a verdict.
 

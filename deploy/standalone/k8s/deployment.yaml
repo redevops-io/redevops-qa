@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redevops-qa
+  namespace: redevops-qa
+  labels:
+    app.kubernetes.io/name: redevops-qa
+spec:
+  replicas: 1                       # one run at a time, one writer of the data volume: do not scale this out
+  strategy:
+    type: Recreate                  # the volume is ReadWriteOnce
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redevops-qa
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redevops-qa
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault     # the runtime default profile allows what the Robot lane's kernel layers need
+      containers:
+        - name: qa
+          image: ghcr.io/redevops-io/redevops-qa:0.0.0   # the tag is set by kustomization.yaml (images:)
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: QA_SERVICE_TOKEN_FILE
+              value: /run/secrets/qa/token
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+            - {name: shm, mountPath: /dev/shm}
+            - {name: token, mountPath: /run/secrets/qa, readOnly: true}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: redevops-qa-data
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 512Mi}
+        - name: shm
+          emptyDir: {medium: Memory, sizeLimit: 512Mi}
+        - name: token
+          secret:
+            secretName: redevops-qa-token
+            defaultMode: 0440

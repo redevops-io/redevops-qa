@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redevops-qa
+  namespace: redevops-qa
+  labels:
+    app.kubernetes.io/name: redevops-qa
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redevops-qa
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

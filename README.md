@@ -32,6 +32,12 @@ and what it does not check are in [bundle/README.md](bundle/README.md); `python 
 ([docs/QA_INSTALL_PROFILES.md](docs/QA_INSTALL_PROFILES.md)) lists the same steps as data and is run by CI. A real run, with its output, is in [docs/QA_DEMO.md](docs/QA_DEMO.md).
 Chromium is downloaded by the bundle's separate browser step and checked against `bundle/browser.lock.json`: the sha256 of the three archives before they are unpacked, then every file and mode of the unpacked tree (in a bundle installation `doctor` and `run` repeat the tree check; a source checkout has no pin and no check); the operating system libraries and the availability of the download host are outside that check. macOS and Windows are not claimed.
 
+## Standalone container (single host or Kubernetes)
+
+An image of the command and its small authenticated HTTP service, with a Compose file and Kustomize manifests, is described in [docs/standalone/README.md](docs/standalone/README.md): what runs in it
+(linux/amd64: the Playwright Chromium and Robot Framework lanes; linux/arm64: the evidence commands only), how to install it, authenticate, keep and back up results, and what it does not do.
+The image is built by `.github/workflows/oci-release.yml` from a release tag; no tag exists yet, so there is no published image to pull until one is.
+
 ## Developer checkout (from a fresh clone, three commands)
 
 A source checkout needs the two pinned upstreams fetched into `.pinned/` at their exact pinned commits before `pytest` can even collect
@@ -52,7 +58,8 @@ README lies, CI says so. `.venv/` and `.pinned/` are gitignored; `git status` st
 ## Layout
 Packages (under `packages/`): `qa-runner`, `qa-playwright`, `qa-evidence`, `qa-bridge`, `qa-egress`, `qa-adapter-kit`, `qa-selenium`, `qa-robot`, `qa-appium`, `qa-checks`, `qa-fixture-app`, `qa-service`.
 Also in the repository: the pinned bundle (`bundle/`, `tools/build_bundle.py`), the tools of the CI checks (`tools/`), the licence matrix (`third_party/`), and examples that ship with the runner
-(`packages/qa-runner/examples`). **Not in this repository:** `qa-api`, `qa-ui`, a `deploy/` directory (no Compose file, no Dockerfile, no Helm chart), standalone examples and benchmarks; earlier text
+(`packages/qa-runner/examples`), and the standalone container image with its Compose and Kubernetes (Kustomize) files (`deploy/standalone/`, described in [docs/standalone](docs/standalone/README.md)).
+**Not in this repository:** `qa-api`, `qa-ui` (there is no web interface; the one HTML page is the static report), a Helm chart, standalone examples and benchmarks; earlier text
 named them, and none of them exists.
 
 Configuration of the pinned upstream versions: [pins.toml](pins.toml). The contracts bridge is in
