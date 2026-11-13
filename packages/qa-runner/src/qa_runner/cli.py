@@ -36,6 +36,7 @@ from . import anchor_sig
 from .inspect_cmd import inspect_text
 from .plan import MAX_PLAN_BYTES, FrozenPlan, freeze_plan, load_plan_or_lock
 from . import isolated
+from . import limits
 
 
 def _deadline(text: str) -> int:
@@ -65,6 +66,9 @@ def _parser() -> argparse.ArgumentParser:
         sp.add_argument("--defect", choices=K.DEFECTS, default="none", help="the seeded defect of the fixture app to start the target with (default: none)")
         sp.add_argument("--run-id", metavar="ID", help="run id (default: generated); lane run ids are <run id>.<lane id>")
         sp.add_argument("--lane-deadline", type=_deadline, metavar="SECONDS", help="lower every lane's deadline to this many seconds (1 to 3600)")
+
+    sp = sub.add_parser("estimate", help="say, as JSON, what a plan would do and every reason a run would refuse it, without contacting anything and without writing a bundle")
+    sp.add_argument("plan", help="a redevops-qa/plan or redevops-qa/plan-lock file")
 
     sp = sub.add_parser("run", help="run a plan (or a lock) and write the evidence bundle")
     sp.add_argument("plan", help="a redevops-qa/plan or redevops-qa/plan-lock file")
@@ -198,7 +202,60 @@ def _freeze(args, out: TextIO, err: TextIO) -> int:
     return 0
 
 
+def estimate_document(frozen: FrozenPlan) -> dict:
+    """The dry run: the same validator ``run`` uses, no connection, no bundle. Pure over the frozen plan and this host's platform."""
+    import platform as _platform
+    from .egress import policy_config
+    from .plan import v1_scope_problems
+    doc = {"schema": "redevops-qa/estimate", "schema_version": "1.0", "plan_id": frozen.plan_id, "plan_digest": frozen.plan_digest}
+    target = frozen.plan["target"]
+    record = frozen.target_record()
+    doc["target"] = {"kind": target["kind"]} if record is None else {k: record[k] for k in ("kind", "origin", "declared_by", "mutating")}
+    lanes, engines = [], []
+    for lane in frozen.lanes:
+        policy = None
+        if record is None:
+            policy = "the origin-only profile for the origin of the fixture app, which the runner starts itself on 127.0.0.1 at run time"
+        elif record["egress_policy_digest"] is not None:
+            policy = policy_config(lane.egress, record["origin"])
+        lanes.append({"lane_id": lane.lane_id, "engine": lane.engine, "egress": lane.egress, "deadline_s": lane.deadline_s, "egress_policy": policy,
+                      "requests_required": lane.requests["required"], "requests_allowed": lane.requests["allowed"]})
+        engines.append(lane.engine)
+    doc["lanes"] = lanes
+    doc["engines"] = sorted(set(engines))
+    doc["limits"] = {"lane_deadline_max_s": 3600, "max_evidence_bytes": limits.env_bytes("REDEVOPS_QA_MAX_EVIDENCE_BYTES", K.DEFAULT_MAX_EVIDENCE_BYTES), "mutating": False}
+    doc["egress_policy_digest"] = None if record is None else record["egress_policy_digest"]
+    doc["credential_refs"] = [] if record is None else list(record["credential_refs"])          # names only: a reference is resolved by nobody in this release
+    doc["verification_ceiling"] = "VERIFIED" if record is None else record["verification_ceiling"]
+    doc["platform"] = {"system": _platform.system().lower(), "machine": _platform.machine().lower(), "claim": "Linux x86_64, CPython 3.12 (fixture-app CI also 3.11)"}
+    problems = v1_scope_problems(frozen.plan)
+    doc["problems"] = problems
+    doc["would_run"] = not problems
+    doc["contacts"] = "nothing: estimate opens no connection, resolves no name, starts no process and writes no bundle"
+    return doc
+
+
+def _estimate(args, out: TextIO, err: TextIO) -> int:
+    data = _read_plan(args.plan)
+    up = verified_bootstrap()
+    frozen, _ = load_plan_or_lock(up, data)
+    out.write(json.dumps(estimate_document(frozen), indent=2, sort_keys=True) + "\n")
+    return 0
+
+
+def _refuse_an_external_target_this_release_cannot_run(frozen: FrozenPlan) -> None:
+    """``run`` and ``estimate`` share one validator (``plan.v1_scope_problems``): the same words, and nothing starts."""
+    from .plan import v1_scope_problems
+    problems = v1_scope_problems(frozen.plan)
+    if problems:
+        raise PlanError(problems[0]["code"], "; ".join(p["message"] for p in problems) + ". Nothing was started and no evidence directory was made.")
+    if frozen.external:
+        raise PlanError("EXTERNAL_RUN_NOT_ENABLED", "the run path for an external-origin target is not enabled in this build (it is built in slices: the validator and `estimate` first); "
+                        "the fixture app is not started in its place. Nothing was started and no evidence directory was made.")
+
+
 def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text: bool = False, note: Optional[str] = None) -> int:
+    _refuse_an_external_target_this_release_cannot_run(frozen)
     from .orchestrate import RunOptions, new_run_id, run_plan
     target = Path(args.out)
     run_id = new_run_id() if args.run_id is None else args.run_id
@@ -516,7 +573,7 @@ def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Op
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else K.EXIT_USAGE
     try:
-        return {"doctor": _doctor, "freeze": _freeze, "run": _run, "verify": _verify, "demo": _demo, "report": _report, "inspect": _inspect, "anchor": _anchor}[args.command](args, out, err)
+        return {"doctor": _doctor, "freeze": _freeze, "estimate": _estimate, "run": _run, "verify": _verify, "demo": _demo, "report": _report, "inspect": _inspect, "anchor": _anchor}[args.command](args, out, err)
     except PlanError as exc:
         print(f"error: {safe_text(str(exc))}", file=err)
         return K.EXIT_USAGE
