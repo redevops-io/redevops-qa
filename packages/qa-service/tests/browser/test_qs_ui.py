@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from playwright.sync_api import expect
+
 from qa_service.capabilities import Facts
 from qa_service.runs import wait_idle
 
@@ -74,7 +76,7 @@ def no_problems(pg):
 def test_sign_in_failure_is_said_in_words_and_success_lands_on_the_dashboard(ui):
     srv, c, pg = ui()
     pg.goto("/ui/")
-    assert pg.page.get_by_role("heading", name="Sign in").is_visible()
+    expect(pg.page.get_by_role("heading", name="Sign in")).to_be_visible()
     pg.page.get_by_label("User name").fill("alice-admin")
     pg.page.get_by_label("Password").fill("wrong password here")
     pg.page.get_by_role("button", name="Sign in").click()
@@ -86,7 +88,7 @@ def test_sign_in_failure_is_said_in_words_and_success_lands_on_the_dashboard(ui)
     pg.page.get_by_role("button", name="Sign in").click()
     pg.page.get_by_role("heading", name="Dashboard").wait_for()
     assert "alice-admin (admin)" in pg.page.locator("#who").inner_text()
-    assert pg.page.get_by_text("This installation can run lanes.").is_visible()
+    expect(pg.page.get_by_text("This installation can run lanes.")).to_be_visible()
     pg.page.get_by_role("button", name="Sign out").click()
     pg.page.get_by_role("heading", name="Sign in").wait_for()
     no_problems(pg)
@@ -95,12 +97,13 @@ def test_sign_in_failure_is_said_in_words_and_success_lands_on_the_dashboard(ui)
 def test_an_installation_that_cannot_run_lanes_says_so_everywhere_and_never_offers_a_dead_button(ui):
     srv, c, pg = ui(facts=Facts(machine="aarch64", missing_packages=("playwright", "robot")))
     pg.signin("olivia-op")
-    assert pg.page.get_by_text("No lane can run on this installation.").is_visible()
+    expect(pg.page.get_by_text("No lane can run on this installation.")).to_be_visible()
     assert "ARCHITECTURE_UNSUPPORTED" in pg.page.locator("main").inner_text() and "Remedy:" in pg.page.locator("main").inner_text()
     pg.shot("unavailable-dashboard-1440")
     pg.page.get_by_role("link", name="New run").click()
     pg.page.get_by_role("heading", name="New run").wait_for()
-    assert pg.page.get_by_role("button", name="Estimate").is_disabled() and pg.page.get_by_role("button", name="Start run").is_disabled()
+    expect(pg.page.get_by_role("button", name="Estimate")).to_be_disabled()
+    expect(pg.page.get_by_role("button", name="Start run")).to_be_disabled()
     text = pg.page.locator("main").inner_text()
     assert "unavailable because" in text and "linux x86_64 only" in text and "No profile can run against this target here" in text
     no_problems(pg)
@@ -117,10 +120,10 @@ def test_the_whole_workflow_in_the_browser_register_estimate_approve_run_inspect
     pg.page.get_by_role("link", name="New run").click()
     pg.page.get_by_label("Target", exact=True).select_option(label="fixture with approval (fixture-app)")
     pg.page.get_by_label("Test profile", exact=True).select_option("fixture-browser")
-    assert pg.page.get_by_role("button", name="Start run").is_disabled(), "an approval target needs an estimate first"
+    expect(pg.page.get_by_role("button", name="Start run")).to_be_disabled()           # an approval target needs an estimate first
     pg.page.get_by_role("button", name="Estimate").click()
     pg.page.get_by_text("Nothing in the estimate stops a run.").wait_for()
-    assert pg.page.get_by_text("sha256:").first.is_visible()
+    expect(pg.page.get_by_text("sha256:").first).to_be_visible()
     pg.page.get_by_role("button", name="Start run").click()
     pg.page.get_by_text("Waiting for approval.").wait_for()
     run_id = re.search(r"r\d{8}T\d{6}Z-[0-9a-f]{6}", pg.page.url).group(0)
