@@ -94,6 +94,7 @@ class FrozenLane:
     assertions: Tuple[Dict[str, Any], ...]   # contracts-normalised assertion documents, sorted by id
     assertion_digests: Dict[str, str]
     harness_pin: str                         # the rcv1 assertion-set pin the harness executor is given
+    external: bool = False                   # the lane's target is an external origin: no target request log and no reference check exist for it
 
     def rows(self) -> List[Dict[str, str]]:
         return [{"assertion_id": a["assertion_id"], "lane_id": self.lane_id, "digest": self.assertion_digests[a["assertion_id"]]} for a in self.assertions]
@@ -401,7 +402,7 @@ def freeze_plan(up: Upstreams, plan_doc: Any, *, for_verification: bool = False)
         frozen.append(FrozenLane(lane_id=lid, engine=lane["engine"], deadline_s=lane.get("deadline_s", int(K.DEFAULT_LANE_DEADLINE_S)), egress=lane["egress"],
                                  requests=copy.deepcopy(lane["requests"]), probes=dict(lane["probes"]), spec_template=copy.deepcopy(lane["spec"]),
                                  spec_digest=digest_of(lane["spec"]), spec_contract_hash=spec.spec_hash, suite=suite_name, suite_files=suite_hashes,
-                                 assertions=tuple(assertions), assertion_digests=digests, harness_pin=pin))
+                                 assertions=tuple(assertions), assertion_digests=digests, harness_pin=pin, external=is_external(plan_doc)))
     return FrozenPlan(plan=copy.deepcopy(plan_doc), plan_id=plan_doc["plan_id"], lanes=tuple(frozen), pins=pin_summary(up), runner_version=K.RUNNER_VERSION)
 
 

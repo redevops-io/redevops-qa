@@ -11,6 +11,8 @@ def exit_code_for(report: Mapping[str, Any], cancelled: bool = False) -> int:
     outcome = report["verdict"]["outcome"]
     if outcome == "VERIFIED":
         return K.EXIT_VERIFIED
+    if outcome == "CORROBORATED":
+        return K.EXIT_CORROBORATED
     if outcome == "FAILED":
         return K.EXIT_FAILED
     if cancelled or any(l["native"]["status"] not in ("NATIVE_PASS", "NATIVE_FAIL") for l in report["lanes"]) or "evidence_incomplete" in (report.get("extensions") or {}):

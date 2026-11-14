@@ -134,7 +134,36 @@ def record_contradicts_itself(rec: Mapping[str, Any], manifest: Any) -> Optional
     return None
 
 
+def corroborate_external_requests(lane: FrozenLane, files: Mapping[str, bytes]) -> Optional[str]:
+    """What backs "the origin was reached" when the target is external: there is no log of the target's own, so the egress gateway's record is read: every decision names the one origin the lane was allowed,
+    at least one request was relayed to it for each navigation the plan requires, and nothing was relayed anywhere else. (A decision to refuse something is not held against the lane: it is recorded, and counted
+    in the report.) This is the engines' side of the story and nothing more, which is why the run is capped at CORROBORATED."""
+    origin = lane_origin(lane, files)
+    data = files.get(f"lanes/{lane.lane_id}/gateway-log.jsonl")
+    if origin is None or data is None:
+        return "the egress profile or the gateway log of this lane is missing"
+    host, port = origin.split("//", 1)[1].rsplit(":", 1)
+    relayed = 0
+    for line in data.decode("utf-8", "replace").splitlines():
+        try:
+            entry = loads_strict(line.encode("utf-8"))
+            decision = entry["decision"]
+        except (CanonError, KeyError, TypeError):
+            return "the gateway log has a line that cannot be read"
+        if decision.get("verdict") != "ALLOW":
+            continue
+        if decision.get("host") != host or str(decision.get("port")) != port:
+            return "the gateway allowed a connection to something other than the target's origin"
+        if entry.get("outcome") == "relayed":
+            relayed += 1
+    if relayed < max(1, len(lane.requests["required"])):
+        return "the gateway relayed fewer requests to the origin than the plan requires"
+    return None
+
+
 def corroborate_requests(lane: FrozenLane, files: Mapping[str, bytes]) -> Optional[str]:
+    if lane.external:
+        return corroborate_external_requests(lane, files)
     data = files.get(request_log_path(lane.lane_id))
     if data is None:
         return "the target's request log for this lane is missing"

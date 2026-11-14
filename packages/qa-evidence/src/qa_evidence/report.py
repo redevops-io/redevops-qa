@@ -43,14 +43,15 @@ def evidence_set_digest(results: Iterable[Mapping[str, Any]]) -> str:
     return digest_of(sorted(rows, key=lambda row: (row[0], row[1] or "")))
 
 
-def compute_outcome(states: Sequence[str], frozen: int, lane_statuses: Sequence[str] = ()) -> str:
+def compute_outcome(states: Sequence[str], frozen: int, lane_statuses: Sequence[str] = (), ceiling: str = "VERIFIED") -> str:
     """The run-level outcome from per-assertion verdict states and the lanes' native statuses.
 
     Any FAILED fails. Anything not VERIFIED (or nothing frozen) is inconclusive. A lane whose engine did not run to completion (error,
     timeout, unavailable, skipped) also makes the run inconclusive, whatever its assertions say. A lane whose engine reported a failure
     (NATIVE_FAIL) while every assertion is VERIFIED is a disagreement between the engine and the verifier that nothing in the bundle can
     settle: the run is INCONCLUSIVE (reason NATIVE_FAIL_VERIFIED_ASSERTIONS), never VERIFIED. Only when every lane is NATIVE_PASS and every
-    frozen assertion is VERIFIED is the run VERIFIED."""
+    frozen assertion is VERIFIED is the run VERIFIED, unless the run's ceiling is CORROBORATED (a target with no independent restatement): then that same run is CORROBORATED, and nothing
+    here can make it VERIFIED. The cap is in this function, not in prose."""
     if "FAILED" in states:
         return "FAILED"
     if frozen == 0 or any(s != "VERIFIED" for s in states) or len(states) != frozen:
@@ -59,10 +60,10 @@ def compute_outcome(states: Sequence[str], frozen: int, lane_statuses: Sequence[
         return "INCONCLUSIVE"
     if any(s == "NATIVE_FAIL" for s in lane_statuses):
         return "INCONCLUSIVE"
-    return "VERIFIED"
+    return "VERIFIED" if ceiling == "VERIFIED" else "CORROBORATED"
 
 
-def run_reason(outcome: str, states: Sequence[str], frozen: int, lane_statuses: Sequence[str] = ()) -> str:
+def run_reason(outcome: str, states: Sequence[str], frozen: int, lane_statuses: Sequence[str] = (), ceiling: str = "VERIFIED") -> str:
     """The one reason code the run-level verdict must carry."""
     if outcome == "INCONCLUSIVE" and frozen > 0 and len(states) == frozen and all(s == "VERIFIED" for s in states):
         if not all(s in COMPLETING_STATUSES for s in lane_statuses):
@@ -96,7 +97,7 @@ def standard_limitations() -> List[Dict[str, str]]:
 def assemble_report(*, run_id: str, started_at: str, finished_at: str, plan_digest: str, environment: Mapping[str, Any],
                     lanes: Sequence[Mapping[str, Any]], frozen: Sequence[Mapping[str, Any]], results: Sequence[Mapping[str, Any]],
                     verifier: Mapping[str, str], redaction: Optional[Mapping[str, Any]] = None,
-                    extra_limitations: Sequence[Mapping[str, str]] = (), extensions: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+                    extra_limitations: Sequence[Mapping[str, str]] = (), extensions: Optional[Mapping[str, Any]] = None, ceiling: str = "VERIFIED") -> Dict[str, Any]:
     """Build a report whose digests, counts and outcome are computed, not asserted.
 
     ``frozen`` is a list of ``{assertion_id, lane_id, digest}``. ``results`` is a list of ``{assertion_id, native_status, state, reason_code,
@@ -115,7 +116,7 @@ def assemble_report(*, run_id: str, started_at: str, finished_at: str, plan_dige
                         "verdict": {"state": r["state"], "reason_code": r["reason_code"], "provenance": provenance}})
     states = [e["verdict"]["state"] for e in entries]
     statuses = [x["native"]["status"] for x in lanes]
-    outcome = compute_outcome(states, len(frozen), statuses)
+    outcome = compute_outcome(states, len(frozen), statuses, ceiling)
     a_digest = assertion_set_digest(frozen)
     if plan_digest is None:
         raise ValueError("plan_digest is required: the digest of the frozen plan (in this format version, the assertion-set digest)")
@@ -125,12 +126,14 @@ def assemble_report(*, run_id: str, started_at: str, finished_at: str, plan_dige
         "assertion_set": {"digest": a_digest, "assertions": sorted((dict(a) for a in frozen), key=lambda a: a["assertion_id"])},
         "accounting": {"frozen": len(frozen), "verified": states.count("VERIFIED"), "failed": states.count("FAILED"),
                        "inconclusive": states.count("INCONCLUSIVE"), "unaccounted": states.count("UNACCOUNTED"), "results": entries},
-        "verdict": {"outcome": outcome, "reason_code": run_reason(outcome, states, len(frozen), statuses),
+        "verdict": {"outcome": outcome, "reason_code": run_reason(outcome, states, len(frozen), statuses, ceiling),
                     "provenance": {"verifier": dict(verifier), "plan_digest": plan_digest, "assertion_set_digest": a_digest,
                                    "evidence_set_digest": evidence_set_digest(entries)}},
         "redaction": dict(redaction) if redaction is not None else {"applied": False, "rules": [], "notes": []},
         "limitations": standard_limitations() + [dict(x) for x in extra_limitations],
     }
+    if ceiling != "VERIFIED":
+        report["verification_ceiling"] = ceiling            # present only for a capped run, so every report of an uncapped run is byte-identical to what it was
     if extensions:
         report["extensions"] = dict(extensions)
     return report
@@ -246,10 +249,11 @@ def check_report(report: Mapping[str, Any]) -> List[Problem]:
 
     verdict = report["verdict"]
     statuses = [x["native"]["status"] for x in lanes]
-    outcome = compute_outcome(states, len(frozen), statuses)
+    ceiling = report.get("verification_ceiling", "VERIFIED")
+    outcome = compute_outcome(states, len(frozen), statuses, ceiling)
     if verdict["outcome"] != outcome:
         out.append(("VERDICT_OUTCOME_MISMATCH", "/verdict/outcome", f"the outcome is not what the accounting and the lanes give ({outcome})"))
-    if verdict["reason_code"] != run_reason(verdict["outcome"], states, len(frozen), statuses):
+    if verdict["reason_code"] != run_reason(verdict["outcome"], states, len(frozen), statuses, ceiling):
         out.append(("REASON_CODE_STATE_MISMATCH", "/verdict/reason_code",
                     f"the reason code {verdict['reason_code']!r} is not the one for the outcome {verdict['outcome']!r}"))
     if verdict["provenance"]["assertion_set_digest"] != report["assertion_set"]["digest"]:

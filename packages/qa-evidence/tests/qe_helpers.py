@@ -33,7 +33,7 @@ def lanes(browser_native=BROWSER_NATIVE, robot_native=ROBOT_NATIVE, robot_status
 
 
 def inputs(robot_obs=ROBOT_OBS_BAD, robot_state="FAILED", robot_reason="EXPECTED_VALUE_DIFFERS", robot_status="NATIVE_PASS", robot_exit=0,
-           robot_obs_path="lanes/robot/observations.json"):
+           robot_obs_path="lanes/robot/observations.json", ceiling="VERIFIED"):
     """Two lanes. The robot engine's own check passed; the verifier, comparing the recorded observation with the frozen value, did not."""
     frozen = [{"assertion_id": "A-STATUS", "lane_id": "browser", "digest": A1}, {"assertion_id": "A-URL", "lane_id": "browser", "digest": A2},
               {"assertion_id": "A-TOTAL", "lane_id": "robot", "digest": A3}]
@@ -48,7 +48,7 @@ def inputs(robot_obs=ROBOT_OBS_BAD, robot_state="FAILED", robot_reason="EXPECTED
     report = assemble_report(run_id="r0-test", started_at="2026-01-01T00:00:00Z", finished_at="2026-01-01T00:00:09Z",
                              plan_digest=assertion_set_digest(frozen), environment=ENV, lanes=lanes(robot_status=robot_status, robot_exit=robot_exit), frozen=frozen, results=results, verifier=VERIFIER,
                              redaction={"applied": True, "rules": [{"id": "env-values", "description": "environment variable values removed", "count": 3}],
-                                        "notes": ["gateway log carries no query strings"]})
+                                        "notes": ["gateway log carries no query strings"]}, ceiling=ceiling)
     files = {"lanes/browser/native/native.txt": (BROWSER_NATIVE, "native-artifact"), "lanes/browser/observations.json": (BROWSER_OBS, "observation"),
              "lanes/robot/native/output.xml": (ROBOT_NATIVE, "native-artifact"), robot_obs_path: (robot_obs, "observation"),
              "logs/orchestrator.log": (LOG, "log")}

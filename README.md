@@ -3,9 +3,10 @@
 QA runner that executes versioned test specifications against a target, checks
 immutable assertions deterministically, and keeps reproducible evidence.
 
-**Scope first, from the opening screen (audit item P0-4):** today `run` and `demo` **run only against the bundled fixture app**
-(`packages/qa-fixture-app`): `orchestrate.py` hard-wires the target to `fixture-app`, and no external application can be pointed at it yet —
-the external target is audit item P2-1, still design work ([docs/P2_1_EXTERNAL_TARGET_DESIGN.md](docs/P2_1_EXTERNAL_TARGET_DESIGN.md)). Do not describe this as general-purpose QA support until P2-1 ships.
+**Scope first, from the opening screen (audit item P0-4):** `demo` and the bundled plans **run only against the bundled fixture app** (`packages/qa-fixture-app`). `run` also accepts exactly **one kind of external target**
+(P2-1, [docs/P2_1_EXTERNAL_TARGET_DESIGN.md](docs/P2_1_EXTERNAL_TARGET_DESIGN.md)): an Edge Sentinel started in its own read-only fixture mode (`EDGE_SENTINEL_DEMO=1`) on `http://127.0.0.1:<port>`, tested by the
+Playwright lane through the egress gateway. The runner refuses it unless the target's `/health` reports `demo.enabled=true`; it accepts no credential reference, no write, no other host and no other application. Such a run's
+level is capped at CORROBORATED (exit status 8) because nothing independent backs its assertions; it is never VERIFIED. Do not describe this as general-purpose QA support.
 Supported platform: CPython 3.12 (the fixture-app CI also runs 3.11) on Linux x86_64 only — macOS and Windows are not claimed,
 the real-device Android lane has run only by hand on one emulator, and there is no iOS evidence.
 

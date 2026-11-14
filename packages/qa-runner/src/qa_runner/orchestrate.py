@@ -271,6 +271,26 @@ def _log_lines(path: Path, root: Optional[str] = None) -> List[bytes]:
     return data.splitlines() if data else []
 
 
+def check_fixture_mode(origin: str, *, timeout_s: float = 5.0) -> None:
+    """An external target must present itself as fixture mode before any journey runs (design 6.1): one GET /health of the loopback origin, ``demo.enabled`` must be true. A target that does not (a real core,
+    something else, nothing listening) is refused here, so that a run against a real deployment is refused, not discovered afterwards by an incident. The origin is the plan's, already limited to
+    ``http://127.0.0.1:<port>``; nothing a page or a lane said is used."""
+    import urllib.error
+    import urllib.request
+    from .plan import V1_ORIGIN_RE
+    if not V1_ORIGIN_RE.fullmatch(origin):
+        raise EnvironmentFault("TARGET_OUT_OF_SCOPE", "this release runs against a loopback http://127.0.0.1:<port> target only")
+    try:
+        req = urllib.request.Request(origin + "/health", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:          # nosec: loopback only, validated above
+            body = json.loads(resp.read(65536).decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError, UnicodeDecodeError):
+        raise EnvironmentFault("NOT_FIXTURE_MODE", "the target's /health could not be read: nothing is run against a target that does not say it is in fixture mode") from None
+    demo = body.get("demo") if isinstance(body, dict) else None
+    if not (isinstance(demo, dict) and demo.get("enabled") is True):
+        raise EnvironmentFault("NOT_FIXTURE_MODE", "the target's /health does not report demo.enabled=true: this release runs against an Edge Sentinel in fixture mode only (EDGE_SENTINEL_DEMO=1), never against a real core")
+
+
 def run_plan(up: Upstreams, frozen: FrozenPlan, opts: RunOptions = RunOptions()) -> RunSummary:
     run_id = new_run_id() if opts.run_id is None else opts.run_id
     if not K.RUN_ID_RE.fullmatch(run_id):
@@ -280,6 +300,14 @@ def run_plan(up: Upstreams, frozen: FrozenPlan, opts: RunOptions = RunOptions())
     if opts.lane_deadline_s is not None and not 1 <= opts.lane_deadline_s <= 3600:
         raise PlanError("BAD_DEADLINE", "a lane deadline is between 1 and 3600 seconds")
     _evidence_cap(opts)                                   # a bad REDEVOPS_QA_MAX_EVIDENCE_BYTES is refused here (exit 2), before a directory is made or anything starts
+    if frozen.external:
+        from .plan import v1_scope_problems
+        problems = v1_scope_problems(frozen.plan)
+        if problems:
+            raise PlanError(problems[0]["code"], "; ".join(p["message"] for p in problems))
+        if opts.defect != "none":
+            raise PlanError("BAD_DEFECT", "a seeded defect belongs to the fixture app; an external target is run as it is")
+        check_fixture_mode(frozen.plan["target"]["origin"])
     workdir = make_workdir()
     try:
         return _run_in(up, frozen, opts, run_id, workdir)
@@ -288,10 +316,12 @@ def run_plan(up: Upstreams, frozen: FrozenPlan, opts: RunOptions = RunOptions())
 
 
 def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, workdir: str) -> RunSummary:
-    log: List[str] = [f"run {run_id}", f"plan {frozen.plan_id} digest {frozen.plan_digest}", f"target fixture-app defect {opts.defect}"]
+    external = frozen.external
+    log: List[str] = [f"run {run_id}", f"plan {frozen.plan_id} digest {frozen.plan_digest}",
+                      f"target external-origin {frozen.plan['target']['origin']} (fixture mode confirmed; level ceiling CORROBORATED)" if external else f"target fixture-app defect {opts.defect}"]
     started = opts.clock()
     req_path = Path(workdir) / "requests.jsonl"
-    app = FixtureApp(opts.defect, str(req_path), home=workdir)
+    app = None if external else FixtureApp(opts.defect, str(req_path), home=workdir)
     origin: Optional[str] = None
     outcomes: List[LaneOutcome] = []
     reference: Optional[Dict[str, Any]] = None
@@ -299,11 +329,15 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
     not_kept: List[str] = []                                   # bundle paths of what the evidence budget did not let in (verify tolerates exactly these as absent, and only in a lane declared over the cap)
     budget = Budget(_evidence_cap(opts), root=workdir)         # one budget for everything the run keeps of its lanes: over it, the rest is not kept, the run says so, nothing is deleted
     try:
-        try:
-            origin = app.start()
-            log.append("target started on loopback")
-        except EnvironmentFault as exc:
-            log.append(f"target not started: {exc.code}")
+        if external:
+            origin = frozen.plan["target"]["origin"]
+            log.append("target is the registered external origin; the runner starts nothing")
+        else:
+            try:
+                origin = app.start()
+                log.append("target started on loopback")
+            except EnvironmentFault as exc:
+                log.append(f"target not started: {exc.code}")
         for fl in frozen.lanes:
             deadline = float(fl.deadline_s if opts.lane_deadline_s is None else min(opts.lane_deadline_s, fl.deadline_s))
             before = len(_log_lines(req_path, workdir))
@@ -325,7 +359,8 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         if origin is not None and not (opts.cancel is not None and opts.cancel.cancelled) and any(f != "ui-only" for l in frozen.lanes for f in l.probes.values()):
             reference = _reference_check(origin, log, opts.cancel)          # after every lane: the check saves one setting in the (throwaway) target
     finally:
-        app.stop()
+        if app is not None:
+            app.stop()
     request_log = budget.read(req_path, 16 * 1024 * 1024, "logs/target-requests.jsonl") or b""
     not_kept.extend(_bundle_name(None, n) for n in budget.dropped[after_lanes:])          # what was dropped outside a lane (the target's own log)
     cancelled = bool(opts.cancel is not None and opts.cancel.cancelled)
@@ -338,6 +373,9 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
     if reference is not None:
         logs[REFERENCE_CHECK_PATH] = dumps_canonical(reference)
     extensions: Dict[str, Any] = {"target_defect": opts.defect, "target": "fixture-app"}
+    if external:
+        extensions = {"target": "external-origin", "target_origin": frozen.plan["target"]["origin"], "target_declared_by": "operator", "target_fixture_mode_confirmed": "demo.enabled=true",
+                      "verification_ceiling": "CORROBORATED", "platform_claim": "Linux x86_64, CPython 3.12 (fixture-app CI also 3.11)"}
     ui_only = sorted(f"{l.lane_id}:{aid}" for l in frozen.lanes for aid, fact in l.probes.items() if fact == "ui-only")
     if ui_only:
         extensions["no_independent_probe"] = ",".join(ui_only)[:500]           # assertions the plan declares ui-only: what the browser shows, nothing independent behind them

@@ -30,7 +30,7 @@ RUN_ID_RE = re.compile(r"^r[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$")
 DEFECTS = ("none", "discount", "settings")
 PLANS = {k: v[:3] for k, v in caps.PLANS.items()}
 #: the runner's exit status table (packages/qa-runner/README.md)
-EXIT_MEANING = {0: "VERIFIED", 1: "FAILED", 2: "REFUSED", 3: "NOT_COMPLETED", 4: "INCONCLUSIVE", 5: "EVIDENCE_REJECTED", 6: "RUNNER_ERROR", 7: "VERIFIER_UNAVAILABLE"}
+EXIT_MEANING = {0: "VERIFIED", 1: "FAILED", 2: "REFUSED", 3: "NOT_COMPLETED", 4: "INCONCLUSIVE", 5: "EVIDENCE_REJECTED", 6: "RUNNER_ERROR", 7: "VERIFIER_UNAVAILABLE", 8: "CORROBORATED"}
 OUTPUT_LIMIT = 1 << 20
 
 
