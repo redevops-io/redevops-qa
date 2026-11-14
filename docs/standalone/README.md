@@ -11,8 +11,10 @@ Licence: source-available under the family licence (AGPL-3.0-or-later with the C
   ([packages/qa-service](../../packages/qa-service/README.md)), which starts one of the shipped plans, keeps the evidence bundle it writes, and serves its report and verification.
 * **It runs against the fixture app only.** `run` and `demo` start the fixture app that ships with the runner on the container's loopback; no external application can be pointed at
   the product yet (audit item P2-1 is design work, see [P2_1_EXTERNAL_TARGET_DESIGN.md](../P2_1_EXTERNAL_TARGET_DESIGN.md)). The service has no way to name a target or a file.
-* **It has no web interface.** The product never had one. The only HTML it produces is the static report of `redevops-qa report --format html` (no script, a content-security policy), which
-  the service returns as it is. The fixture app is the test target, not a user interface. Nothing in this image is a UI that was added for the occasion.
+* **It has a browser interface** (from 0.6.3), served by the same service at `/ui/`: sign in with a local user, see which profiles can run here (and, for each that cannot, the code, the reason and the remedy), register
+  targets, estimate, start and approve runs, follow their events, open the evidence and its independent verification, browse the history. It is static files with a strict content-security policy (no third-party asset,
+  no inline script), the same API (`/v1`) that scripts and other products use, and no second store. The product's own report is still the static HTML page of `redevops-qa report --format html`
+  (no script), opened as its own document. The fixture app is the test target, not a user interface.
 * **Engines in the image (linux/amd64):** Playwright 1.64.1 with the pinned Chromium (checked against `bundle/browser.lock.json` by the installer and by `doctor`), and Robot Framework 7.5.
   **Not in the image:** Selenium with Chrome, and Appium. They are outside the product's release claim (`bundle/README.md`); the Android lane needs an emulator or a device and the iOS adapter
   reports `UNAVAILABLE`. A container cannot offer them honestly, so it does not.
@@ -102,9 +104,32 @@ The outcomes are the runner's exit-status table ([packages/qa-runner/README.md](
 Verify a downloaded bundle anywhere the command is installed, offline: `redevops-qa verify <unpacked bundle directory>`; for example in a second container with `--network none`.
 A passing verification is internal consistency of the evidence; without an external anchor it does not show the bundle was not rewritten, and it never shows the application under test is correct (the report says so).
 
+## The interface
+
+Open `http://127.0.0.1:8080/` (it redirects to `/ui/`). Sign in as a local user (below). Views: Dashboard (platform banner, every profile with its availability, latest runs), Targets (register and remove; shows the origin,
+the level ceiling and whether fixture mode was confirmed), New run (target, profile, seeded defect for the fixture app; **Estimate** shows what a run would do and every reason it would refuse, and a target that requires
+approval needs an estimate first), Run (state, outcome, level badge with its ceiling, the approval card, events, links), Runs (history with state and outcome filters and paging), Evidence (the files with sha256, the independent
+verification result), Users (admin), About. A profile that cannot run is listed and disabled with `unavailable because ...` and its remedy; nothing is hidden or left as a dead button.
+
+* **Progress.** The service writes one event per state change to `runs/<id>/events.jsonl` and the interface polls `GET /v1/runs/<id>/events?after=<seq>` every few seconds until the run ends (no streaming connection).
+  The runner reports the start and the end of a run, not its steps, in this release.
+* **Targets.** The built-in fixture target runs without approval and can print `VERIFIED`. An administrator may register (a) a fixture-app target that requires approval, and (b) one external target: an Edge Sentinel started
+  with `EDGE_SENTINEL_DEMO=1` on `http://127.0.0.1:<port>` (the service reads its `/health` once and refuses it unless `demo.enabled` is true; any other origin, a hostname, https and credential references are refused).
+  An external target's level ceiling is `CORROBORATED`: no independent restatement backs its assertions, the run ends `CORROBORATED` (exit status 8) and never `VERIFIED`, and the bundle says so. It always requires approval. A run of it reads
+  the target's `/health` first and is refused unless it reports fixture mode; the Playwright lane goes through the egress gateway scoped to that one origin; the journey is read-only (open `/health` and check the URL); no credential reference is accepted.
+* **Approval.** A run on a target that requires approval is created `awaiting_approval` with the digest of the estimate it was made from. A signed-in user with the operator role approves or rejects that digest (a changed digest is a
+  409 `stale_approval`; an approval is single use); the service token never approves. With `QA_REQUIRE_TWO_PERSON=1` the requester cannot approve their own run. The decision records the user, the role, the route (`session` or `basic`) and the time.
+
 ## Authentication
 
-There is no default credential. `redevops-qa-service` exits with status 78 and a message (never the value) unless `QA_SERVICE_TOKEN_FILE` or `QA_SERVICE_TOKEN` holds a token of at least 32 characters from
+**Two kinds of credential.** The *service token* (below) is for machines: it reads, makes estimates, starts runs that need no approval and cancels runs; it never approves a run and never manages users. A *local user* (a name, a role
+and a password kept as a scrypt hash in `users.json`, mode 0600) is for people: roles are `viewer` (every read), `operator` (viewer plus estimates, start, approve, cancel) and `admin` (operator plus targets and users). A browser signs in at
+`POST /v1/session` and gets an `HttpOnly`, `SameSite=Strict` cookie and a CSRF value that every write must send as `X-CSRF-Token` (the `Origin` must also match); scripts may use HTTP Basic with the same user (no cookie, no CSRF).
+Sessions live in memory (a restart signs everyone out): 30 minutes idle, 12 hours absolute, 5 per user; sign-in failures are rate limited. Create the first admin with `QA_BOOTSTRAP_ADMIN_PASSWORD` in `.env` (creates the user `admin` once, while no
+user exists; remove it afterwards) or with `docker compose exec qa redevops-qa-service users add NAME --role admin --password-file FILE`; further users are added in the interface. There is no SSO, no directory, no tenant, no custom
+role and no per-resource grant in this edition.
+
+The service token: there is no default credential. `redevops-qa-service` exits with status 78 and a message (never the value) unless `QA_SERVICE_TOKEN_FILE` or `QA_SERVICE_TOKEN` holds a token of at least 32 characters from
 `A-Z a-z 0-9 . _ ~ + / = -`, with at least 8 distinct characters, that does not look like a placeholder. Generate one with `openssl rand -hex 32`. Everything but `/healthz` and `/readyz` answers 401 without
 `Authorization: Bearer <token>`. The token is read once at start: to rotate it, change the value and recreate the container (`docker compose up -d`) or restart the Deployment. The token is not passed to the lanes. One token, no
 users, no roles: anyone holding it can start runs and read every result. Put TLS in front before you expose the port beyond the host.
@@ -118,7 +143,11 @@ users, no roles: anyone holding it can start runs and read every result. Put TLS
 | `QA_BIND_ADDRESS` | `127.0.0.1` | the host address the port is published on |
 | `QA_PORT` | `8080` | the host port |
 | `QA_RUN_TIMEOUT` | `1800` | `QA_SERVICE_RUN_TIMEOUT` (seconds, 10 to 86400; a run is killed after it) |
+| `QA_BOOTSTRAP_ADMIN_PASSWORD` | none | `QA_SERVICE_BOOTSTRAP_ADMIN_PASSWORD`: the password of the first admin `admin`, used once while no user exists (12 characters or more) |
+| `QA_APPROVAL_SECRET` | none | `QA_SERVICE_APPROVAL_SECRET`: the secret shared with Projects for signed approvals (see docs/standalone/API.md); empty = such approvals are never accepted |
 | `QA_IMAGE` | `ghcr.io/redevops-io/redevops-qa` | the image name |
+
+Also read by the service: `QA_REQUIRE_TWO_PERSON=1` (the requester cannot approve their own run), `QA_SERVICE_BOOTSTRAP_ADMIN_NAME` and `QA_SERVICE_BOOTSTRAP_ADMIN_PASSWORD_FILE`.
 
 The other service variables are set by the image and rarely need changing: `QA_SERVICE_BIND=0.0.0.0` (inside the container), `QA_SERVICE_PORT=8080`, `QA_SERVICE_DATA_DIR=/data`,
 `QA_SERVICE_PLANS_DIR=/opt/redevops-qa/share/plans`, `QA_SERVICE_TOKEN_FILE` (see [packages/qa-service](../../packages/qa-service/README.md)).

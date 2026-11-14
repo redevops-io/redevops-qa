@@ -40,6 +40,8 @@ class Config:
     run_timeout: int
     max_body: int = 4096
     request_timeout: int = 30
+    two_person: bool = False
+    approval_secret: bytes = b""
 
 
 def token_problem(token: str) -> Optional[str]:
@@ -90,6 +92,19 @@ def _int(env: Mapping[str, str], name: str, default: int, low: int, high: int) -
     return value
 
 
+def _approval_secret(env: Mapping[str, str]) -> bytes:
+    """The secret shared with Projects for signed approvals (``AGENTIC_OS_APPROVAL_SECRET`` there): QA_SERVICE_APPROVAL_SECRET_FILE or QA_SERVICE_APPROVAL_SECRET. Optional: without it the approval token is never accepted."""
+    path, value = env.get("QA_SERVICE_APPROVAL_SECRET_FILE"), env.get("QA_SERVICE_APPROVAL_SECRET")
+    if path:
+        try:
+            value = Path(path).read_text(encoding="utf-8").strip("\r\n")
+        except OSError:
+            raise ConfigError("QA_SERVICE_APPROVAL_SECRET_FILE cannot be read") from None
+    if value and len(value) < 16:
+        raise ConfigError("the approval secret is shorter than 16 characters")
+    return value.encode("utf-8") if value else b""
+
+
 def load_config(env: Mapping[str, str]) -> Config:
     token = _read_token(env)
     problem = token_problem(token)
@@ -112,4 +127,4 @@ def load_config(env: Mapping[str, str]) -> Config:
     if plans is not None and not plans.startswith("/"):
         raise ConfigError(f"{ENV_PLANS} must be an absolute path")
     return Config(token=token.encode("ascii"), bind=bind, port=port, data_dir=Path(data), cli=resolved, plans_dir=Path(plans) if plans else None,
-                  run_timeout=_int(env, ENV_TIMEOUT, 1800, 10, 86400))
+                  run_timeout=_int(env, ENV_TIMEOUT, 1800, 10, 86400), two_person=env.get("QA_REQUIRE_TWO_PERSON") == "1", approval_secret=_approval_secret(env))

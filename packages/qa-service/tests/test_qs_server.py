@@ -43,7 +43,7 @@ def test_every_other_path_answers_401_without_a_token_and_with_a_wrong_one(make_
     srv, c = make_server()
     for token in (None, "wrong-" + TOKEN, TOKEN[:-1], ""):
         status, doc, headers = c.json(method, path, body={} if method == "POST" else None, token=token)
-        assert status == 401 and doc["error"] == "unauthorized" and headers["WWW-Authenticate"].startswith("Bearer")
+        assert status == 401 and doc["error"] == "unauthenticated" and headers["WWW-Authenticate"].startswith("Bearer")
 
 
 def test_a_basic_scheme_or_a_token_in_the_query_is_not_accepted(make_server):
@@ -63,7 +63,7 @@ def test_a_basic_scheme_or_a_token_in_the_query_is_not_accepted(make_server):
 def test_info_lists_plans_and_the_target(make_server):
     srv, c = make_server()
     status, doc, headers = c.json("GET", "/v1/info")
-    assert status == 200 and set(doc["plans"]) == {"demo", "browser", "robot", "robot-not-enforced"} and "no external target" in doc["target"]
+    assert status == 200 and set(doc["plans"]) == {"demo", "browser", "robot", "robot-not-enforced"} and "fixture app" in doc["target"] and "CORROBORATED" in doc["target"]
     assert headers["Cache-Control"] == "no-store" and "Server" in headers and "Python" not in headers["Server"]
 
 
@@ -98,7 +98,7 @@ def test_report_verify_and_bundle_download(make_server):
     status, body, headers = c.call("GET", base + "/report?format=html")
     assert status == 200 and headers["Content-Type"].startswith("text/html") and "default-src 'none'" in headers["Content-Security-Policy"] and b"<html>" in body
     assert c.call("GET", base + "/report")[1] == b"report text\n"
-    assert c.json("GET", base + "/report?format=json")[1] == {"ok": True}
+    assert set(c.json("GET", base + "/report?format=json")[1]) == {"summary", "recomputation", "files"}
     assert c.json("GET", base + "/report?format=pdf")[0] == 400
     status, doc, _ = c.json("GET", base + "/verify")
     assert status == 200 and doc["exit_code"] == 0 and doc["result"]["ok"] is True

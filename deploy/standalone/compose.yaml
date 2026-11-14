@@ -12,6 +12,10 @@ services:
     environment:
       QA_SERVICE_TOKEN: "${QA_SERVICE_TOKEN:?set QA_SERVICE_TOKEN in .env, generate one with openssl rand -hex 32}"
       QA_SERVICE_RUN_TIMEOUT: "${QA_RUN_TIMEOUT:-1800}"
+      # the first admin of the interface (user name `admin`), created once while no user exists; empty = none (then create users with `redevops-qa-service users add`). Remove it from .env afterwards.
+      QA_SERVICE_BOOTSTRAP_ADMIN_PASSWORD: "${QA_BOOTSTRAP_ADMIN_PASSWORD:-}"
+      # the secret shared with Projects for signed approvals (AGENTIC_OS_APPROVAL_SECRET there); empty = approvals from another product are never accepted
+      QA_SERVICE_APPROVAL_SECRET: "${QA_APPROVAL_SECRET:-}"
     volumes:
       - qa-data:/data
     # Stated here as well as in the Dockerfile: an image pushed in the OCI format does not carry a HEALTHCHECK, and `docker compose up --wait` needs one.
