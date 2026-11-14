@@ -244,7 +244,9 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     self.principal = self._principal()
                 except ApiError:
-                    return self._json(200, {"principal": None, "user": None, "csrf": None})     # "who am I" before signing in is an answer, not an error
+                    if self.headers.get("Authorization"):
+                        raise                                    # a credential that was presented and is wrong is a 401
+                    return self._json(200, {"principal": None, "user": None, "csrf": None})     # "who am I" before signing in (or with an expired cookie) is an answer, not an error
                 return self._session(self.principal, query)
             self.principal = self._principal()
             self._check_csrf(self.principal)

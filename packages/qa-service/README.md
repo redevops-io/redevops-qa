@@ -4,8 +4,8 @@ A small authenticated HTTP service around the `redevops-qa` command, for running
 
 It adds no test logic. Every run, report and verification is the `redevops-qa` command started as a child process, and the service keeps what that command wrote. It cannot be pointed at an
 external application: the plans it starts are the ones that ship with the runner (`demo`, `browser`, `robot`, `robot-not-enforced`), and they run against the fixture app, exactly as the
-command line does (the external target is audit item P2-1, still design work). There is no web interface; the one HTML page is the static report of `redevops-qa report --format html`,
-served as that command renders it.
+command line does (the external target is audit item P2-1, still design work). The browser interface (`/ui/`, static files in `src/qa_service/ui`: no third-party asset, strict content-security policy, no inline script) uses the same API; the product's own HTML page is the static report of
+`redevops-qa report --format html`, served as that command renders it. The complete route list and JSON shapes are in `docs/standalone/API.md`.
 
 Licence: the family licence of this repository (source-available, not open source; see `LICENSE.md`).
 
