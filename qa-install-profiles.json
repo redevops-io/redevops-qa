@@ -15,7 +15,7 @@
         "v0.2.0"
       ]
     },
-    "note": "The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them."
+    "note": "The repository is public and pre-release. Release git tags (v0.6.2, v0.6.3) exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2, 0.6.3): that is a separate channel and no profile in this file is it. Every profile here is a clone of the repository at the pinned commit, and nothing is published to a language package registry (there is no PyPI package); the Compose and Kubernetes targets stay planned until a named CI job installs from the published image (see targets). The dependency release tags are the pins in pins.toml; the verified profiles do not need them."
   },
   "verifier": {
     "supported": true,
@@ -329,7 +329,7 @@
       },
       "uninstall_note": "The steps leave two directories: the virtual environment (removed by the step above) and the evidence directory, which is yours to keep or delete. The checkout is an ordinary clone; delete it when you no longer need it. Nothing is installed outside these directories.",
       "limitations": [
-        "There is no release tag and no package-registry package: the install is a checkout at the pinned commit.",
+        "A published container image exists as a separate channel (ghcr.io/redevops-io/redevops-qa); nothing here is published to a language package registry (there is no PyPI package), so this profile is a checkout at the pinned commit.",
         "Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.",
         "A native engine pass or fail is not an independent verdict; no verifier is installed.",
         "Robot Framework 7.5 only; only allowlisted libraries run, so this is not a browser profile."
@@ -636,7 +636,7 @@
       },
       "uninstall_note": "The steps leave two directories: the virtual environment (removed by the step above) and the evidence directory, which is yours to keep or delete. The checkout is an ordinary clone; delete it when you no longer need it. Nothing is installed outside these directories.",
       "limitations": [
-        "There is no release tag and no package-registry package: the install is a checkout at the pinned commit.",
+        "A published container image exists as a separate channel (ghcr.io/redevops-io/redevops-qa); nothing here is published to a language package registry (there is no PyPI package), so this profile is a checkout at the pinned commit.",
         "Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.",
         "A native engine pass or fail is not an independent verdict; no verifier is installed.",
         "Chrome and ChromeDriver only; their versions are the host's and only the versions on the CI runner image were exercised."
@@ -928,7 +928,7 @@
       },
       "uninstall_note": "The steps leave two directories: the virtual environment (removed by the step above) and the evidence directory, which is yours to keep or delete. The checkout is an ordinary clone; delete it when you no longer need it. Nothing is installed outside these directories.",
       "limitations": [
-        "There is no release tag and no package-registry package: the install is a checkout at the pinned commit.",
+        "A published container image exists as a separate channel (ghcr.io/redevops-io/redevops-qa); nothing here is published to a language package registry (there is no PyPI package), so this profile is a checkout at the pinned commit.",
         "Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.",
         "A native engine pass or fail is not an independent verdict; no verifier is installed.",
         "Experimental: the device step is manual and has never run in CI; the one recorded emulator run is local (see the capability manifest).",
