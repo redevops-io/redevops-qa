@@ -90,6 +90,10 @@
  "schema": "redevops-qa/plan",
  "schema_version": "1.1",
  "target": {
-  "kind": "fixture-app"
+  "credential_refs": [],
+  "declared_by": "operator",
+  "kind": "external-origin",
+  "mutating": false,
+  "origin": "http://127.0.0.1:8203"
  }
 }

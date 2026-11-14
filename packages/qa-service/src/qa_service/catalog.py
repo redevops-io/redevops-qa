@@ -5,7 +5,6 @@ A client chooses a profile id and a target id. It never supplies a plan, a path,
 template below with the origin of a REGISTERED target."""
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import os
@@ -59,10 +58,10 @@ def digest(doc: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical(doc)).hexdigest()
 
 
-def edge_sentinel_plan(origin: str) -> Dict[str, Any]:
-    """The read-only journey of the ``edge-sentinel-fixture-readonly`` profile: open /health of the registered origin and assert the URL. The spec is the golden plan's own navigate step and URL assertion."""
-    golden = json.loads(Path(__file__).with_name("plans").joinpath("edge-sentinel-fixture-readonly.json").read_text(encoding="utf-8"))
-    plan = copy.deepcopy(golden)
+def edge_sentinel_plan(origin: str, plans_dir: Path) -> Dict[str, Any]:
+    """The read-only journey of the ``edge-sentinel-fixture-readonly`` profile: the plan the runner ships as ``examples/edge-sentinel-fixture-plan.json`` (open /health of the origin, assert the URL),
+    with the origin of a REGISTERED target put in its target. A client never supplies a plan."""
+    plan = json.loads((plans_dir / "edge-sentinel-fixture-plan.json").read_text(encoding="utf-8"))
     plan["target"] = {"kind": "external-origin", "origin": origin, "declared_by": "operator", "credential_refs": [], "mutating": False}
     return plan
 
@@ -125,7 +124,7 @@ class Targets:
                 raise CatalogError(422, "invalid", "an external-origin target always requires approval for a run", field="run_approval")
             if not isinstance(origin, str):
                 raise CatalogError(422, "invalid", "origin is a string", field="origin")
-            doc = estimate.run_cli_estimate(edge_sentinel_plan(origin))          # the SAME validator as `freeze`: its refusal is the answer
+            doc = estimate.run_cli_estimate(edge_sentinel_plan(origin, estimate.cfg.plans_dir))          # the SAME validator as `freeze`: its refusal is the answer
             codes = {p["code"] for p in doc.get("problems", [])}
             if "TARGET_OUT_OF_SCOPE" in codes:
                 raise CatalogError(422, "TARGET_OUT_OF_SCOPE", next(p["message"] for p in doc["problems"] if p["code"] == "TARGET_OUT_OF_SCOPE"), field="origin")
@@ -180,7 +179,7 @@ class Estimator:
     def plan_for(self, target: Dict[str, Any], profile: str) -> Dict[str, Any]:
         p = PROFILES[profile]
         if target["kind"] == "external-origin":
-            return edge_sentinel_plan(target["origin"])
+            return edge_sentinel_plan(target["origin"], self.cfg.plans_dir)
         return json.loads((self.cfg.plans_dir / p["plan_file"]).read_text(encoding="utf-8"))
 
     def run_cli_estimate(self, plan: Dict[str, Any]) -> Dict[str, Any]:

@@ -63,7 +63,7 @@ def test_a_basic_scheme_or_a_token_in_the_query_is_not_accepted(make_server):
 def test_info_lists_plans_and_the_target(make_server):
     srv, c = make_server()
     status, doc, headers = c.json("GET", "/v1/info")
-    assert status == 200 and set(doc["plans"]) == {"demo", "browser", "robot", "robot-not-enforced"} and "fixture app" in doc["target"] and "not enabled" in doc["target"]
+    assert status == 200 and set(doc["plans"]) == {"demo", "browser", "robot", "robot-not-enforced"} and "fixture app" in doc["target"] and "CORROBORATED" in doc["target"]
     assert headers["Cache-Control"] == "no-store" and "Server" in headers and "Python" not in headers["Server"]
 
 

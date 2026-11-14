@@ -26,8 +26,8 @@ One API serves the browser interface (`/ui/`), scripts and other products. JSON,
 | `DELETE /v1/targets/{id}` | admin (human) | | 204; 409 for the built-in target or a target a run used |
 | `GET /v1/profiles?target_id=` | viewer | | `{items: [{id, title, description, engines[], targets[], mutating:false, est_duration_s, available, unavailable: null\|{code, reason, remedy}}]}`; ids: `fixture-demo`, `fixture-browser`, `fixture-robot`, `fixture-robot-not-enforced`, `edge-sentinel-fixture-readonly`. With `target_id`, a profile for another target kind is `unavailable` with `TARGET_KIND_MISMATCH` |
 | `POST /v1/estimates` | operator | `{target_id?, profile}` | 201 `{estimate_id, digest, created, expires (1 h), target_id, profile, plan_id, plan_digest, origin, egress_policy_digest, engines[], lanes[], lane_deadlines{}, limits, credential_refs[] (names), problems[{code,message}], will_refuse, verification_ceiling, contacts, platform}`; runs `redevops-qa estimate` over a plan the service builds: nothing is contacted, no bundle is written |
-| `POST /v1/runs` | operator | `{target_id?, profile?, plan?, defect?, estimate_digest?}` (`plan` is the 0.6.2 name: `demo`, `browser`, `robot`, `robot-not-enforced`; default target: the built-in fixture) | 202 run + `Location`. A target that requires approval: the run is `awaiting_approval` and `estimate_digest` of an unexpired estimate for this target and profile is required (`estimate_required`). 409 `busy`; 422 `plan_unavailable` + `unavailable{code,reason,remedy}` (also `EXTERNAL_RUN_NOT_ENABLED` for every external-origin target in this release); nothing is started |
-| `POST /v1/runs/{id}/approval` | operator, human | `{approved: bool, estimate_digest, rationale?}` | run -> `running` (approved) or `refused`; 409 `stale_approval` (digest differs), 409 `conflict` (not waiting, or already decided), 403 for the service token, a viewer, or the requester when `QA_REQUIRE_TWO_PERSON=1`; 409 `busy` if another run is going |
+| `POST /v1/runs` | operator | `{target_id?, profile?, plan?, defect?, estimate_digest?}` (`plan` is the 0.6.2 name: `demo`, `browser`, `robot`, `robot-not-enforced`; default target: the built-in fixture) | 202 run + `Location`. A target that requires approval: the run is `awaiting_approval` and `estimate_digest` of an unexpired estimate for this target and profile is required (`estimate_required`). 409 `busy`; 422 `plan_unavailable` + `unavailable{code,reason,remedy}`; nothing is started. A run against an external-origin target is made with `redevops-qa run` on a plan the service builds from the shipped example and the registered origin; it ends with outcome and level `CORROBORATED` (exit status 8), never `VERIFIED` |
+| `POST /v1/runs/{id}/approval` | operator, human; OR the service credential with `X-Approval-Token` (below) | `{approved: bool, estimate_digest, rationale?}` | run -> `running` (approved) or `refused`; 409 `stale_approval` (digest differs), 409 `conflict` (not waiting, or already decided), 403 for the service token, a viewer, or the requester when `QA_REQUIRE_TWO_PERSON=1`; 409 `busy` if another run is going |
 | `POST /v1/runs/{id}/cancel` | operator | | run; a waiting run is `cancelled` at once, a running one is killed (process group) and recorded `cancelled`; 409 if ended |
 | `GET /v1/runs?state=&target_id=&profile=&outcome=&limit=&cursor=` | viewer | | newest first |
 | `GET /v1/runs/{id}` | viewer | | run: `{id, plan, defect, target_id, profile, state: awaiting_approval\|running\|finished\|failed_to_start\|timed_out\|interrupted\|cancelled\|refused, created, started, finished, exit_code, outcome (VERIFIED\|FAILED\|REFUSED\|NOT_COMPLETED\|INCONCLUSIVE\|EVIDENCE_REJECTED\|RUNNER_ERROR\|null), level (VERIFIED\|CORROBORATED\|null), level_ceiling, bundle, estimate_digest, approval{required, state: pending\|approved\|rejected\|null, actor_user, actor_role, via, at, rationale}\|null, requested_by{user, via}, progress: null, note}` |
@@ -40,10 +40,37 @@ One API serves the browser interface (`/ui/`), scripts and other products. JSON,
 | `GET /v1/runs/{id}/bundle.tar` | viewer | | the evidence bundle for `redevops-qa verify` elsewhere |
 | `DELETE /v1/runs/{id}` | admin (or the service token) | | 204; 409 while running |
 
+## Approvals made in another product (Projects, Sidekick)
+
+`POST /v1/runs/{id}/approval {approved, estimate_digest, rationale?}` with `Authorization: Bearer <service token>` AND `X-Approval-Token: <token>`. The token is the platform's signed, single-use token
+(`agentic_os.mission.approval.mint_approval_token`; this service verifies it with the standard library, and its format was checked against the real minting function):
+`b64url(payload) + "." + b64url(HMAC-SHA256(secret, payload))`, payload = canonical JSON `{operator, capability, mission_id, node_id, inputs_sha256, marker, exp, nonce}`.
+
+| Must hold | Value |
+|---|---|
+| secret | the same value as `AGENTIC_OS_APPROVAL_SECRET`, given to this service as `QA_SERVICE_APPROVAL_SECRET_FILE` (or `QA_SERVICE_APPROVAL_SECRET`, at least 16 characters); without it no token is ever accepted |
+| `operator` | `redevops-qa` |
+| `capability` | `qa.approve_run` |
+| `mission_id`, `node_id` | null (a token bound to a mission or node is refused) |
+| `inputs` hashed into `inputs_sha256` | exactly `{"run_id": <run id>, "approved": <bool>, "estimate_digest": <the digest in the body>}`, canonical JSON (sorted keys, no whitespace), sha256 hex |
+| `marker` | `{"approved": <same bool>, "by": "projects:<principal>", "via": "projects"}`; `by` must start with `projects:` |
+| `exp` | in the future (mint with `ttl_s` of 120) |
+| `nonce` | never seen before: single use, kept on the data volume until `exp` (a restart cannot replay it) |
+
+Then `marker.by` must be linked to an enabled local user with the operator or admin role (`POST /v1/actor-links`); the decision is recorded with that user as the actor, `via: projects` and `external_actor: projects:<principal>`.
+Refusals: 403 `approval_token_invalid` (any of the above fails), 403 `actor_not_linked` (`actor` names the external actor; nothing was decided), 403 `forbidden` (a signed-in user sent a token), 409 `stale_approval`, 409 `conflict`.
+A service credential without a token cannot decide (403). `X-Acting-User` and `X-Acting-Source` headers are not read.
+
+| Method and path | Role | Request | Response |
+|---|---|---|---|
+| `GET /v1/actor-links` | admin | | `{items: [{external_actor, user_id, created_by}]}` |
+| `POST /v1/actor-links` | any signed-in user (for themself), admin (`user_id` for anyone) | `{external_actor: "projects:<principal>", user_id?}` | 201 link; 409 if linked to someone else (an admin can change it) |
+| `DELETE /v1/actor-links/{external_actor}` | admin | | 204; the next approval by that actor is refused |
+
 ## Records (on the data volume)
 
-`runs/<id>/status.json` (the run above), `runs/<id>/events.jsonl` (append-only, one event per line), `runs/<id>/output.txt`, `runs/<id>/evidence/<id>/` (the bundle), `targets.json`, `users.json` (0600), `estimates/est-*.json`. Readers of `status.json` should ignore keys they do not know.
+`runs/<id>/status.json` (the run above), `runs/<id>/events.jsonl` (append-only, one event per line), `runs/<id>/output.txt`, `runs/<id>/evidence/<id>/` (the bundle), `targets.json`, `users.json` and `actor-links.json` (0600), `approval-nonces.txt` (0600), `estimates/est-*.json`. Readers of `status.json` should ignore keys they do not know.
 
 ## What is not in this API yet
 
-A run of an `external-origin` target (P2-1, AC-6 to AC-9), per-step progress, signed approvals from another product (Projects/Sidekick; the approval route accepts only a signed-in user), and any credential reference for a target.
+Per-step progress, and any credential reference for a target.

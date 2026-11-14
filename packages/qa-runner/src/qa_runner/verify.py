@@ -156,7 +156,7 @@ def _tolerance(files: Mapping[str, bytes], report: Mapping[str, Any], v: "Verifi
         return Tolerance()                  # a not-kept list without the report saying so is an unexpected file (``_check_file_set``), and tolerates nothing
     v.notes.append("the evidence of this run is INCOMPLETE (it hit the evidence cap: " + safe_text(str(report["extensions"]["evidence_incomplete"]), 160) + "): every assertion that depends on a file that was not kept is "
                    "inconclusive, and the run is never verified")
-    if report["verdict"]["outcome"] == "VERIFIED":
+    if report["verdict"]["outcome"] in ("VERIFIED", "CORROBORATED"):
         v.add("EVIDENCE_INCOMPLETE_BUT_VERIFIED", "extensions", "the report says the evidence is incomplete and also that the run is VERIFIED: a run with incomplete evidence is never verified")
     names: frozenset = frozenset()
     count = 0
@@ -307,7 +307,10 @@ def _check_report_fields(frozen: FrozenPlan, files: Mapping[str, bytes], report:
             v.add("REPORT_FIELD_MISMATCH", safe_text(str(r.get("assertion_id")), 64), "the result names another native status than its lane's")
     if report.get("redaction") != REDACTION:
         v.add("REPORT_FIELD_MISMATCH", "redaction", "the redaction note is not the one the runner writes")
-    ids = (K.ROBOT_EGRESS_LIMITATION_ID, K.ROBOT_EGRESS_LAYERS_ID)
+    want_ceiling = "CORROBORATED" if frozen.external else "VERIFIED"
+    if report.get("verification_ceiling", "VERIFIED") != want_ceiling:
+        v.add("CEILING_MISMATCH", "verification_ceiling", "the report's ceiling is not the one the plan's target gives (an external target is capped at CORROBORATED, the fixture app is not): a capped run cannot be relabelled")
+    ids = (K.NO_RESTATEMENT_ID, K.ROBOT_EGRESS_LIMITATION_ID, K.ROBOT_EGRESS_LAYERS_ID)
     have = [(x.get("id"), x.get("text")) for x in report.get("limitations", []) if isinstance(x, dict) and x.get("id") in ids]
     want = [(x["id"], x["text"]) for x in extra_limitations(frozen)]
     if have != want:

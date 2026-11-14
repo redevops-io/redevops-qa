@@ -196,8 +196,15 @@ def test_the_builtin_fixture_target_and_the_profiles_are_listed_with_their_avail
     profiles = {p["id"]: p for p in u["vince-view"].call("GET", "/v1/profiles")[1]["items"]}
     assert profiles["fixture-browser"]["available"] and profiles["fixture-browser"]["unavailable"] is None
     es = profiles["edge-sentinel-fixture-readonly"]
-    assert es["available"] is False and es["unavailable"]["code"] == "EXTERNAL_RUN_NOT_ENABLED" and es["unavailable"]["remedy"], "listed and disabled WITH its reason, never hidden"
+    assert es["available"] is True and es["unavailable"] is None and es["targets"] == ["external-origin"]
     assert u["vince-view"].call("GET", "/v1/profiles?target_id=tgt-000000000000")[1]["items"][-1]["unavailable"]["code"] == "TARGET_KIND_MISMATCH"
+
+
+def test_on_an_installation_that_cannot_run_lanes_the_external_profile_is_listed_unavailable_with_its_reason(make_server):
+    from qa_service.capabilities import Facts
+    srv, c = make_server(facts=Facts(machine="aarch64", missing_packages=("playwright", "robot")))
+    es = {p["id"]: p for p in c.json("GET", "/v1/profiles")[1]["items"]}["edge-sentinel-fixture-readonly"]
+    assert es["available"] is False and es["unavailable"]["code"] == "ARCHITECTURE_UNSUPPORTED" and es["unavailable"]["remedy"], "listed and disabled WITH its reason, never hidden"
 
 
 def test_registering_a_loopback_fixture_mode_target_and_refusing_everything_else(app, es_target):
@@ -225,19 +232,37 @@ def test_an_estimate_is_made_from_the_service_built_plan_and_binds_a_digest(app,
     origin = es_target()
     t = u["alice-admin"].call("POST", "/v1/targets", {"name": "es", "origin": origin})[1]
     status, est2, _ = op.call("POST", "/v1/estimates", {"target_id": t["id"], "profile": "edge-sentinel-fixture-readonly"})
-    assert status == 201 and est2["origin"] == origin and est2["verification_ceiling"] == "CORROBORATED" and est2["will_refuse"] is True
-    assert est2["problems"][-1]["code"] == "EXTERNAL_RUN_NOT_ENABLED", "the estimate says plainly that this release cannot run it"
+    assert status == 201 and est2["origin"] == origin and est2["verification_ceiling"] == "CORROBORATED" and est2["will_refuse"] is False and est2["problems"] == []
     assert op.call("POST", "/v1/estimates", {"target_id": t["id"], "profile": "fixture-browser"})[0] == 422
     assert op.call("POST", "/v1/estimates", {"profile": "nope"})[0] == 422
     assert op.call("POST", "/v1/estimates", {"profile": "fixture-browser", "path": "/etc/passwd"})[0] == 400
 
 
-def test_a_run_of_an_external_target_is_refused_even_with_a_valid_estimate(app, es_target):
+def test_a_run_of_an_external_target_waits_for_a_human_approval_of_its_estimate_and_ends_with_the_corroborated_level(app, es_target):
     srv, c, u = app
-    t = u["alice-admin"].call("POST", "/v1/targets", {"name": "es", "origin": es_target()})[1]
-    est = u["olivia-op"].call("POST", "/v1/estimates", {"target_id": t["id"], "profile": "edge-sentinel-fixture-readonly"})[1]
-    status, doc, _ = u["olivia-op"].call("POST", "/v1/runs", {"target_id": t["id"], "profile": "edge-sentinel-fixture-readonly", "estimate_digest": est["digest"]})
-    assert status == 422 and doc["unavailable"]["code"] == "EXTERNAL_RUN_NOT_ENABLED" and u["olivia-op"].call("GET", "/v1/runs")[1]["items"] == []
+    op, op2 = u["olivia-op"], u["oscar-op2"]
+    origin = es_target()
+    t = u["alice-admin"].call("POST", "/v1/targets", {"name": "es", "origin": origin})[1]
+    est = op.call("POST", "/v1/estimates", {"target_id": t["id"], "profile": "edge-sentinel-fixture-readonly"})[1]
+    status, run, _ = op.call("POST", "/v1/runs", {"target_id": t["id"], "profile": "edge-sentinel-fixture-readonly", "estimate_digest": est["digest"]})
+    assert status == 202 and run["state"] == "awaiting_approval" and run["level_ceiling"] == "CORROBORATED" and run["defect"] == "none"
+    assert op.call("POST", "/v1/runs", {"target_id": t["id"], "profile": "edge-sentinel-fixture-readonly", "defect": "settings", "estimate_digest": est["digest"]})[0] == 422
+    assert c.json("POST", f"/v1/runs/{run['id']}/approval", {"approved": True, "estimate_digest": est["digest"]})[0] == 403
+    assert op2.call("POST", f"/v1/runs/{run['id']}/approval", {"approved": True, "estimate_digest": est["digest"]})[0] == 200
+    assert wait_idle(srv.store, 30)
+    done = op.call("GET", f"/v1/runs/{run['id']}")[1]
+    assert (done["state"], done["exit_code"], done["outcome"], done["level"]) == ("finished", 8, "CORROBORATED", "CORROBORATED"), "an external run never reads VERIFIED"
+    argv = json.loads(next((srv.cfg.data_dir / "runs" / run["id"] / "evidence").glob("*/bundle-manifest.json")).read_text())["argv"]
+    plan = json.loads((srv.cfg.data_dir / "runs" / run["id"] / "plan.json").read_text())
+    assert argv[0] == "run" and argv[1].endswith("plan.json") and plan["target"] == {"kind": "external-origin", "origin": origin, "declared_by": "operator", "credential_refs": [], "mutating": False}
+    ev = op.call("GET", f"/v1/runs/{run['id']}/evidence")[1]
+    assert ev["level"] == "CORROBORATED" and ev["independent_restatement"] is False and "no independent restatement" in ev["restatement_note"]
+
+
+def test_level_is_capped_by_the_target_even_if_the_command_said_verified():
+    from qa_service.runs import level_for
+    assert level_for("VERIFIED", "CORROBORATED") == "CORROBORATED" and level_for("CORROBORATED", "CORROBORATED") == "CORROBORATED" and level_for("VERIFIED", "VERIFIED") == "VERIFIED"
+    assert level_for("FAILED", "CORROBORATED") is None and level_for(None, "VERIFIED") is None
 
 
 # ------------------------------------------------------------------------------------------------ approvals, events, cancel
@@ -398,3 +423,126 @@ def test_the_users_command_adds_and_lists_without_a_running_service(tmp_path, mo
     assert users_command(["list"]) == 0
     out = capsys.readouterr().out
     assert "dana-admin\tadmin\tenabled" in out and "a good long password" not in out
+
+
+# ------------------------------------------------------------------------------------------------ signed approvals from another product
+def mint(secret, *, run_id, approved, estimate_digest, by="projects:local-owner", via="projects", operator="redevops-qa", capability="qa.approve_run", ttl=120, now=None, inputs=None, mission_id=None):
+    """The platform's token (agentic_os.mission.approval.mint_approval_token), reproduced with the standard library: the tests of this service do not import agentic_os."""
+    import base64, hashlib, hmac, secrets as sec
+    canon = lambda o: json.dumps(o, sort_keys=True, separators=(",", ":"), default=str).encode()   # noqa: E731
+    payload = canon({"operator": operator, "capability": capability, "mission_id": mission_id, "node_id": None,
+                     "inputs_sha256": hashlib.sha256(canon(inputs if inputs is not None else {"run_id": run_id, "approved": approved, "estimate_digest": estimate_digest})).hexdigest(),
+                     "marker": {"approved": approved, "by": by, "via": via}, "exp": (time.time() if now is None else now) + ttl, "nonce": sec.token_hex(16)})
+    b = lambda x: base64.urlsafe_b64encode(x).rstrip(b"=").decode()   # noqa: E731
+    return b(payload) + "." + b(hmac.new(secret, payload, hashlib.sha256).digest())
+
+
+SECRET = b"shared-approval-secret-for-tests-0001"
+
+
+@pytest.fixture
+def projects(make_server, tmp_path):
+    srv, c = make_server(QA_SERVICE_APPROVAL_SECRET=SECRET.decode())
+    for name, role in (("alice-admin", "admin"), ("olivia-op", "operator"), ("vince-view", "viewer")):
+        srv.users.add(name, role, "correct horse battery staple")
+    users = {}
+    for name in ("alice-admin", "olivia-op", "vince-view"):
+        s_, d, ck, _ = login(c, name, "correct horse battery staple")
+        users[name] = User(c, ck, d["csrf"])
+    t = users["alice-admin"].call("POST", "/v1/targets", {"name": "approval", "run_approval": "required"})[1]
+    est = users["olivia-op"].call("POST", "/v1/estimates", {"target_id": t["id"], "profile": "fixture-browser"})[1]
+    run = c.json("POST", "/v1/runs", {"target_id": t["id"], "profile": "fixture-browser", "estimate_digest": est["digest"]})[1]
+    assert run["state"] == "awaiting_approval" and run["requested_by"]["user"] == "service"
+    return srv, c, users, run, est["digest"]
+
+
+def approve_with(c, run, digest, token, approved=True):
+    req = urllib.request.Request(c.base + f"/v1/runs/{run['id']}/approval", data=json.dumps({"approved": approved, "estimate_digest": digest}).encode(), method="POST",
+                                 headers={"Authorization": "Bearer " + TOKEN, "X-Approval-Token": token, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        with e:
+            return e.code, json.loads(e.read())
+
+
+def test_a_signed_approval_for_a_linked_actor_is_recorded_as_that_local_user_via_projects(projects):
+    srv, c, u, run, digest = projects
+    op = u["olivia-op"]
+    me = srv.users.get_by_name("olivia-op")["user_id"]
+    assert op.call("POST", "/v1/actor-links", {"external_actor": "projects:local-owner"})[0] == 201
+    status, doc = approve_with(c, run, digest, mint(SECRET, run_id=run["id"], approved=True, estimate_digest=digest))
+    assert status == 200 and doc["state"] == "running"
+    assert doc["approval"]["actor_user"] == "olivia-op" and doc["approval"]["actor_role"] == "operator" and doc["approval"]["via"] == "projects" and doc["approval"]["external_actor"] == "projects:local-owner"
+    assert wait_idle(srv.store, 20)
+    assert [e["type"] for e in op.call("GET", f"/v1/runs/{run['id']}/events")[1]["items"]][2] == "run.approved"
+
+
+@pytest.mark.parametrize("what", ["no_secret_match", "other_run", "other_decision", "other_digest", "expired", "other_operator", "other_capability", "bound_mission", "other_marker", "not_projects", "not_via_projects", "tampered"])
+def test_a_token_that_is_not_exactly_for_this_run_decision_and_estimate_is_refused(projects, what):
+    srv, c, u, run, digest = projects
+    u["olivia-op"].call("POST", "/v1/actor-links", {"external_actor": "projects:local-owner"})
+    kw = dict(run_id=run["id"], approved=True, estimate_digest=digest)
+    token = {"no_secret_match": lambda: mint(b"another-secret-of-sufficient-length", **kw), "other_run": lambda: mint(SECRET, **{**kw, "run_id": "r20260101T000000Z-abcdef"}),
+             "other_decision": lambda: mint(SECRET, **{**kw, "approved": False}), "other_digest": lambda: mint(SECRET, **{**kw, "estimate_digest": "sha256:" + "0" * 64}),
+             "expired": lambda: mint(SECRET, **kw, now=time.time() - 1000), "other_operator": lambda: mint(SECRET, **kw, operator="edge-sentinel"),
+             "other_capability": lambda: mint(SECRET, **kw, capability="sentinel.decide"), "bound_mission": lambda: mint(SECRET, **kw, mission_id="m1"),
+             "other_marker": lambda: mint(SECRET, **kw, via="runtime"), "not_projects": lambda: mint(SECRET, **kw, by="admin"), "not_via_projects": lambda: mint(SECRET, **kw, via="session"),
+             "tampered": lambda: mint(SECRET, **kw)[:-4] + "AAAA"}[what]()
+    status, doc = approve_with(c, run, digest, token)
+    assert status == 403 and doc["error"] == "approval_token_invalid", (what, doc)
+    assert u["olivia-op"].call("GET", f"/v1/runs/{run['id']}")[1]["state"] == "awaiting_approval"
+
+
+def test_a_token_works_once_and_a_restart_does_not_forget_it(projects):
+    srv, c, u, run, digest = projects
+    u["olivia-op"].call("POST", "/v1/actor-links", {"external_actor": "projects:local-owner"})
+    token = mint(SECRET, run_id=run["id"], approved=True, estimate_digest=digest)
+    assert approve_with(c, run, digest, token)[0] == 200
+    assert wait_idle(srv.store, 20)
+    from qa_service.approvals import NonceStore
+    assert NonceStore(srv.cfg.data_dir / "approval-nonces.txt").consume("x", time.time() + 5, time.time()) is True
+    status, doc = approve_with(c, run, digest, token)
+    assert status in (403, 409), "the replay of a token is refused (the run is no longer waiting, and the nonce is spent)"
+    fresh = NonceStore(srv.cfg.data_dir / "approval-nonces.txt")
+    nonce = json.loads(__import__("base64").urlsafe_b64decode(token.split(".")[0] + "==="))["nonce"]
+    assert fresh.consume(nonce, time.time() + 100, time.time()) is False, "the nonce was written to the data volume"
+
+
+def test_an_actor_that_is_not_linked_or_linked_to_a_viewer_cannot_decide_and_the_run_keeps_waiting(projects):
+    srv, c, u, run, digest = projects
+    status, doc = approve_with(c, run, digest, mint(SECRET, run_id=run["id"], approved=True, estimate_digest=digest))
+    assert status == 403 and doc["error"] == "actor_not_linked" and doc["actor"] == "projects:local-owner"
+    assert u["vince-view"].call("POST", "/v1/actor-links", {"external_actor": "projects:local-owner"})[0] == 201
+    status, doc = approve_with(c, run, digest, mint(SECRET, run_id=run["id"], approved=True, estimate_digest=digest))
+    assert status == 403 and doc["error"] == "actor_not_linked", "the linked user's ROLE decides, not anything Projects asserts"
+    assert u["olivia-op"].call("GET", f"/v1/runs/{run['id']}")[1]["state"] == "awaiting_approval"
+
+
+def test_removing_a_link_removes_the_ability_at_once_and_only_an_admin_manages_links(projects):
+    srv, c, u, run, digest = projects
+    assert u["olivia-op"].call("POST", "/v1/actor-links", {"external_actor": "projects:local-owner"})[0] == 201
+    assert u["olivia-op"].call("GET", "/v1/actor-links")[0] == 403
+    assert u["olivia-op"].call("POST", "/v1/actor-links", {"external_actor": "projects:other", "user_id": srv.users.get_by_name("vince-view")["user_id"]})[0] == 403
+    assert u["vince-view"].call("POST", "/v1/actor-links", {"external_actor": "projects:local-owner"})[0] == 409
+    assert u["olivia-op"].call("POST", "/v1/actor-links", {"external_actor": "admin"})[0] == 422
+    assert [x["external_actor"] for x in u["alice-admin"].call("GET", "/v1/actor-links")[1]["items"]] == ["projects:local-owner"]
+    assert u["alice-admin"].call("DELETE", "/v1/actor-links/projects%3Alocal-owner")[0] == 204
+    status, doc = approve_with(c, run, digest, mint(SECRET, run_id=run["id"], approved=True, estimate_digest=digest))
+    assert status == 403 and doc["error"] == "actor_not_linked"
+
+
+def test_the_token_is_for_the_service_credential_only_and_without_a_secret_it_is_never_accepted(make_server):
+    srv, c = make_server()                                                  # no approval secret configured
+    srv.users.add("olivia-op", "operator", "correct horse battery staple")
+    s_, d, ck, _ = login(c, "olivia-op", "correct horse battery staple")
+    u = User(c, ck, d["csrf"])
+    t = srv.store.targets.register({"name": "needs approval", "run_approval": "required"}, user="x", estimate=srv.store.estimator)
+    est = u.call("POST", "/v1/estimates", {"target_id": t["id"], "profile": "fixture-browser"})[1]
+    run = u.call("POST", "/v1/runs", {"target_id": t["id"], "profile": "fixture-browser", "estimate_digest": est["digest"]})[1]
+    u.call("POST", "/v1/actor-links", {"external_actor": "projects:local-owner"})
+    status, doc = approve_with(c, run, est["digest"], mint(SECRET, run_id=run["id"], approved=True, estimate_digest=est["digest"]))
+    assert status == 403 and doc["error"] == "approval_token_invalid"
+    status, doc, _ = u.call("POST", f"/v1/runs/{run['id']}/approval", {"approved": True, "estimate_digest": est["digest"]}, headers={"X-Approval-Token": "x"})
+    assert status == 403 and doc["error"] == "forbidden", "a user decides in their own name, not with a token"

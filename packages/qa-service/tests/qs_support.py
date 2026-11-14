@@ -19,7 +19,7 @@ cmd = a[0]
 if cmd in ("run", "demo"):
     out = a[a.index("--out") + 1]
     run_id = a[a.index("--run-id") + 1]
-    defect = a[a.index("--defect") + 1]
+    defect = a[a.index("--defect") + 1] if "--defect" in a else "none"
     control = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "control.json")))
     time.sleep(control.get("sleep", 0))
     os.makedirs(os.path.join(out, run_id))
@@ -28,7 +28,8 @@ if cmd in ("run", "demo"):
     os.makedirs(os.path.join(out, run_id, "logs"), exist_ok=True)
     open(os.path.join(out, run_id, "logs", "x.txt"), "w").write("x\n")
     print("run %%s: VERIFIED (ALL_ASSERTIONS_VERIFIED)" %% run_id)
-    sys.exit(control["exit"] if "exit" in control else (1 if defect != "none" else 0))
+    external = a[1].endswith("plan.json") and json.load(open(a[1]))["target"]["kind"] == "external-origin" if cmd == "run" else False
+    sys.exit(control["exit"] if "exit" in control else (8 if external else (1 if defect != "none" else 0)))
 if cmd == "estimate":
     plan = json.load(open(a[1]))
     t = plan["target"]
@@ -72,7 +73,9 @@ def make_env(tmp_path: Path, **extra):
     cli.chmod(cli.stat().st_mode | stat.S_IXUSR)
     plans = tmp_path / "plans"
     plans.mkdir(exist_ok=True)
-    for name in ("golden-plan.json", "robot-plan.json", "robot-plan-not-enforced.json"):
+    (plans / "edge-sentinel-fixture-plan.json").write_text(json.dumps({"plan_id": "edge-sentinel-fixture-readonly", "target": {"kind": "external-origin", "origin": "http://127.0.0.1:8203"},
+                                                                        "lanes": [{"lane_id": "browser", "engine": "playwright-chromium", "deadline_s": 60}]}))
+    for name in ("demo-plan.json", "golden-plan.json", "robot-plan.json", "robot-plan-not-enforced.json"):
         (plans / name).write_text(json.dumps({"plan_id": name[:-5], "target": {"kind": "fixture-app"}, "lanes": [{"lane_id": "browser", "engine": "playwright-chromium", "deadline_s": 60}]}))
     env = {"QA_SERVICE_TOKEN": TOKEN, "QA_SERVICE_BIND": "127.0.0.1", "QA_SERVICE_PORT": "0", "QA_SERVICE_DATA_DIR": str(tmp_path / "data"), "QA_SERVICE_CLI": str(cli),
            "QA_SERVICE_PLANS_DIR": str(plans), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}

@@ -115,8 +115,8 @@ verification result), Users (admin), About. A profile that cannot run is listed 
   The runner reports the start and the end of a run, not its steps, in this release.
 * **Targets.** The built-in fixture target runs without approval and can print `VERIFIED`. An administrator may register (a) a fixture-app target that requires approval, and (b) one external target: an Edge Sentinel started
   with `EDGE_SENTINEL_DEMO=1` on `http://127.0.0.1:<port>` (the service reads its `/health` once and refuses it unless `demo.enabled` is true; any other origin, a hostname, https and credential references are refused).
-  An external target's level ceiling is `CORROBORATED` (no independent restatement backs its assertions) and it always requires approval. **A run against an external target is not enabled in this release**: its profile is listed
-  `unavailable` (`EXTERNAL_RUN_NOT_ENABLED`) because the gateway criteria and the `CORROBORATED` level in the bundle (P2-1, AC-6 to AC-9) are not built; register and estimate work, and the estimate says so.
+  An external target's level ceiling is `CORROBORATED`: no independent restatement backs its assertions, the run ends `CORROBORATED` (exit status 8) and never `VERIFIED`, and the bundle says so. It always requires approval. A run of it reads
+  the target's `/health` first and is refused unless it reports fixture mode; the Playwright lane goes through the egress gateway scoped to that one origin; the journey is read-only (open `/health` and check the URL); no credential reference is accepted.
 * **Approval.** A run on a target that requires approval is created `awaiting_approval` with the digest of the estimate it was made from. A signed-in user with the operator role approves or rejects that digest (a changed digest is a
   409 `stale_approval`; an approval is single use); the service token never approves. With `QA_REQUIRE_TWO_PERSON=1` the requester cannot approve their own run. The decision records the user, the role, the route (`session` or `basic`) and the time.
 
@@ -144,6 +144,7 @@ users, no roles: anyone holding it can start runs and read every result. Put TLS
 | `QA_PORT` | `8080` | the host port |
 | `QA_RUN_TIMEOUT` | `1800` | `QA_SERVICE_RUN_TIMEOUT` (seconds, 10 to 86400; a run is killed after it) |
 | `QA_BOOTSTRAP_ADMIN_PASSWORD` | none | `QA_SERVICE_BOOTSTRAP_ADMIN_PASSWORD`: the password of the first admin `admin`, used once while no user exists (12 characters or more) |
+| `QA_APPROVAL_SECRET` | none | `QA_SERVICE_APPROVAL_SECRET`: the secret shared with Projects for signed approvals (see docs/standalone/API.md); empty = such approvals are never accepted |
 | `QA_IMAGE` | `ghcr.io/redevops-io/redevops-qa` | the image name |
 
 Also read by the service: `QA_REQUIRE_TWO_PERSON=1` (the requester cannot approve their own run), `QA_SERVICE_BOOTSTRAP_ADMIN_NAME` and `QA_SERVICE_BOOTSTRAP_ADMIN_PASSWORD_FILE`.

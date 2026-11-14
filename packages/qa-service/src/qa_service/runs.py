@@ -35,11 +35,9 @@ DEFECTS = ("none", "discount", "settings")
 #: legacy plan name -> (command, plan file, packages): what the four shipped plans are (kept: ``POST /v1/runs {"plan": "browser"}`` still works)
 PLANS = {k: v[:3] for k, v in caps.PLANS.items()}
 #: the runner's exit status table (packages/qa-runner/README.md)
-EXIT_MEANING = {0: "VERIFIED", 1: "FAILED", 2: "REFUSED", 3: "NOT_COMPLETED", 4: "INCONCLUSIVE", 5: "EVIDENCE_REJECTED", 6: "RUNNER_ERROR", 7: "VERIFIER_UNAVAILABLE"}
+EXIT_MEANING = {0: "VERIFIED", 1: "FAILED", 2: "REFUSED", 3: "NOT_COMPLETED", 4: "INCONCLUSIVE", 5: "EVIDENCE_REJECTED", 6: "RUNNER_ERROR", 7: "VERIFIER_UNAVAILABLE", 8: "CORROBORATED"}
 TERMINAL = ("finished", "failed_to_start", "timed_out", "interrupted", "cancelled", "refused")
 OUTPUT_LIMIT = 1 << 20
-EXTERNAL_RUN_NOT_ENABLED = {"code": "EXTERNAL_RUN_NOT_ENABLED", "reason": "the run path for an external target is not built in this release (P2-1 acceptance criteria AC-6 to AC-9: the gateway criteria and the CORROBORATED level in the bundle)",
-                            "remedy": "register the target and read its estimate now; running it waits on those criteria"}
 
 
 class Busy(Exception):
@@ -64,8 +62,8 @@ def new_run_id() -> str:
 
 def level_for(outcome: Optional[str], ceiling: str) -> Optional[str]:
     """The verification level a finished run may print: the runner's own outcome, capped by the target's ceiling (an external target never reaches VERIFIED)."""
-    if outcome == "VERIFIED":
-        return "VERIFIED" if ceiling == "VERIFIED" else "CORROBORATED"
+    if outcome in ("VERIFIED", "CORROBORATED"):
+        return "VERIFIED" if (outcome == "VERIFIED" and ceiling == "VERIFIED") else "CORROBORATED"          # the runner already caps an external run; the cap is applied here too
     return None
 
 
@@ -168,7 +166,7 @@ class RunStore:
     # ------------------------------------------------------------------ availability
     def profile_unavailable(self, profile: str, target: Dict[str, Any]) -> Optional[Dict[str, str]]:
         if target["kind"] == "external-origin":
-            return dict(EXTERNAL_RUN_NOT_ENABLED)
+            return caps.unavailable("browser", self.facts, self.cfg.plans_dir)          # the Playwright lane, its pinned browser and the platform; the runner checks fixture mode itself
         legacy = catalog.PROFILES[profile]["plan"]
         return caps.unavailable(legacy, self.facts, self.cfg.plans_dir)
 
@@ -186,8 +184,7 @@ class RunStore:
             kinds = p["targets"]
             entry = {"id": pid, "title": p["title"], "description": p["description"], "engines": p["engines"], "targets": kinds, "mutating": False, "est_duration_s": p["est_duration_s"]}
             if "external-origin" in kinds:
-                probe_target = target if target and target["kind"] == "external-origin" else {"kind": "external-origin"}
-                why = self.profile_unavailable(pid, probe_target)
+                why = caps.unavailable("browser", self.facts, self.cfg.plans_dir)
             else:
                 why = caps.unavailable(p["plan"], self.facts, self.cfg.plans_dir)
             entry["available"] = why is None
@@ -248,7 +245,7 @@ class RunStore:
             self._launch(run_id, profile, defect)
         return record
 
-    def approve(self, run_id: str, approved: bool, estimate_digest: str, *, user: str, role: str, via: str, rationale: str = "", two_person: bool = False) -> Dict[str, Any]:
+    def approve(self, run_id: str, approved: bool, estimate_digest: str, *, user: str, role: str, via: str, rationale: str = "", two_person: bool = False, external_actor: Optional[str] = None) -> Dict[str, Any]:
         rec = self.get(run_id)
         if rec["state"] != "awaiting_approval":
             raise Refused("conflict", "the run is not waiting for approval", status=409)
@@ -257,6 +254,8 @@ class RunStore:
         if estimate_digest != rec["estimate_digest"]:
             raise Refused("stale_approval", "the digest is not the estimate this run was created from: the approval is void", status=409)
         stamp = {"state": "approved" if approved else "rejected", "actor_user": user, "actor_role": role, "via": via, "at": _now(), "rationale": str(rationale)[:300] or None}
+        if external_actor:
+            stamp["external_actor"] = external_actor
         with self._lock:
             if approved and self._active is not None:
                 raise Busy(self._active)
@@ -303,6 +302,13 @@ class RunStore:
             argv.append(str(self.cfg.plans_dir / plan_file))
         return argv + ["--out", str(d / "evidence"), "--run-id", run_id, "--defect", defect]
 
+    def _external_argv(self, run_id: str, origin: str) -> List[str]:
+        """The command of a run against a registered external target: the plan is built here from the shipped example and the REGISTERED origin, written into the run's directory and given to ``run``."""
+        d = self.root / run_id
+        plan = catalog.edge_sentinel_plan(origin, self.cfg.plans_dir)
+        (d / "plan.json").write_text(json.dumps(plan, sort_keys=True), encoding="utf-8")
+        return [self.cfg.cli, "run", str(d / "plan.json"), "--out", str(d / "evidence"), "--run-id", run_id]
+
     def child_env(self, home: Path) -> Dict[str, str]:
         """The environment of the command: no variable of the service (the token is one) is passed on."""
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
@@ -319,7 +325,9 @@ class RunStore:
             home = d / "home"
             home.mkdir()
             with open(d / "output.txt", "wb") as out:
-                proc = subprocess.Popen(self._argv(run_id, profile, defect), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, cwd=str(d), env=self.child_env(home), start_new_session=True)
+                target = self.targets.get(record["target_id"]) or {}
+                argv = self._external_argv(run_id, target["origin"]) if target.get("kind") == "external-origin" else self._argv(run_id, profile, defect)
+                proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, cwd=str(d), env=self.child_env(home), start_new_session=True)
                 self._procs[run_id] = proc
                 try:
                     exit_code = proc.wait(timeout=self.cfg.run_timeout)

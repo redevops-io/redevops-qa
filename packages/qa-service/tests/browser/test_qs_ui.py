@@ -160,11 +160,11 @@ def test_roles_are_visible_in_the_interface_a_viewer_cannot_start_or_register(ui
     assert "operator role" in pg.page.get_by_role("alert").inner_text()
 
 
-def test_the_external_edge_sentinel_profile_is_listed_unavailable_with_its_reason(ui):
-    srv, c, pg = ui()
+def test_the_external_edge_sentinel_profile_is_listed_unavailable_with_its_reason_where_lanes_cannot_run(ui):
+    srv, c, pg = ui(facts=Facts(machine="aarch64", missing_packages=("playwright", "robot")))
     pg.signin("olivia-op")
-    assert "EXTERNAL_RUN_NOT_ENABLED" in pg.page.locator("main").inner_text()
-    assert "Edge Sentinel fixture mode (read-only)" in pg.page.locator("main").inner_text()
+    text = pg.page.locator("main").inner_text()
+    assert "Edge Sentinel fixture mode (read-only)" in text and "ARCHITECTURE_UNSUPPORTED" in text
 
 
 @pytest.mark.parametrize("width,height", [(1440, 900), (390, 844)])

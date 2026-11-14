@@ -21,6 +21,12 @@
     "limitations"
   ],
   "properties": {
+    "verification_ceiling": {
+      "enum": [
+        "CORROBORATED"
+      ],
+      "description": "present only for a run against a target with no independent restatement of what its assertions expect: the run may print CORROBORATED and never VERIFIED"
+    },
     "schema": {
       "const": "qa-evidence/run-report"
     },
@@ -358,7 +364,8 @@
           "enum": [
             "VERIFIED",
             "FAILED",
-            "INCONCLUSIVE"
+            "INCONCLUSIVE",
+            "CORROBORATED"
           ]
         },
         "reason_code": {

@@ -49,16 +49,14 @@ ORCH = (ROOT / "packages" / "qa-runner" / "src" / "qa_runner" / "orchestrate.py"
 FIRST_SCREEN = README.split("## What runs in CI", 1)[0]
 
 
-def test_the_first_screen_admits_the_fixture_only_scope_while_the_code_hard_wires_it():
-    """Audit item P0-4, testable form: while `run` still hard-wires `target fixture-app`, the opening screen must
-    say the runner runs only against the bundled fixture app, and it must list the unsupported platforms there.
-    When P2-1 removes the hard-wiring the condition lifts; the sentence may then move, but it may not be dropped
-    while the code still refuses an external target."""
-    hard_wired = "target fixture-app" in ORCH or '"target": "fixture-app"' in ORCH
-    if hard_wired:
-        assert "run only against the bundled fixture app" in FIRST_SCREEN, \
-            "orchestrate.py hard-wires the fixture app: the README first screen must say so"
-    assert "linux x86_64" in FIRST_SCREEN.lower() and "macos and windows are not claimed" in FIRST_SCREEN.lower()
+def test_the_first_screen_states_the_scope_exactly_the_fixture_app_and_one_kind_of_external_target_capped_at_corroborated():
+    """Audit item P0-4, testable form. The opening screen says what `run` reaches: the bundled fixture app, and one kind of external target (a loopback Edge Sentinel in fixture mode) whose runs
+    are capped below VERIFIED. It may not drop the cap, the fixture-mode requirement or the platform claim, and it may not describe the product as general-purpose."""
+    low = FIRST_SCREEN.lower()
+    assert "run only against the bundled fixture app" in FIRST_SCREEN and "one kind of external target" in FIRST_SCREEN
+    assert "edge_sentinel_demo=1" in low and "demo.enabled=true" in low and "corroborated" in low and "never verified" in low
+    assert "do not describe this as general-purpose qa support" in low
+    assert "linux x86_64" in low and "macos and windows are not claimed" in low
 
 
 # ------------------------------------------------------------------------------------------------------------------ the demo page cites a run on main

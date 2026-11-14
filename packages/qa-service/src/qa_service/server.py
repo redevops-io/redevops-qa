@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
 from . import __version__, catalog
+from .approvals import ActorLinks, EXTERNAL_ACTOR_PREFIX, NonceStore, verify_approval
 from .config import Config
 from .runs import DEFECTS, EXIT_MEANING, PLANS, Busy, Refused, RunStore
 from .sessions import Sessions
@@ -68,6 +69,8 @@ class QAServer(ThreadingHTTPServer):
         self.store = store or RunStore(cfg)
         self.users = UserStore(cfg.data_dir)
         self.sessions = Sessions()
+        self.nonces = NonceStore(cfg.data_dir / "approval-nonces.txt")
+        self.links = ActorLinks(cfg.data_dir)
         self.failures: Dict[str, List[float]] = {}
         self.failures_lock = threading.Lock()
         self.static = {p.name: p for p in UI_DIR.iterdir() if p.is_file()} if UI_DIR.is_dir() else {}
@@ -279,6 +282,8 @@ class Handler(BaseHTTPRequestHandler):
             (r"/v1/session", self._session, ("GET", "HEAD", "DELETE")),
             (r"/v1/users", self._users, ("GET", "HEAD", "POST")),
             (r"/v1/users/(usr-[0-9a-f]{8})", self._user, ("PATCH",)),
+            (r"/v1/actor-links", self._actor_links, ("GET", "HEAD", "POST")),
+            (r"/v1/actor-links/([A-Za-z0-9:._@%-]{1,160})", self._actor_link, ("DELETE",)),
             (r"/v1/targets", self._targets, ("GET", "HEAD", "POST")),
             (r"/v1/targets/(tgt-[0-9a-f]{12})", self._target, ("GET", "HEAD", "DELETE")),
             (r"/v1/profiles", self._profiles, ("GET", "HEAD")),
@@ -387,7 +392,7 @@ class Handler(BaseHTTPRequestHandler):
         plans = store.availability()
         self._json(200, {"service": "redevops-qa-service", "version": __version__, "machine": platform.machine(), "defects": list(DEFECTS), "capabilities": store.facts.as_dict(),
                          "plans": {k: dict(plans[k], command=PLANS[k][0]) for k in sorted(PLANS)}, "profiles": store.profiles(), "levels": {"fixture_ceiling": "VERIFIED", "external_ceiling": "CORROBORATED"},
-                         "run_timeout_seconds": self.server.cfg.run_timeout, "target": "the bundled fixture app, or an operator-registered loopback Edge Sentinel fixture target (its runs are not enabled in this release)",
+                         "run_timeout_seconds": self.server.cfg.run_timeout, "target": "the bundled fixture app, or an operator-registered loopback Edge Sentinel fixture target (level capped at CORROBORATED)",
                          "auth": {"users": self.server.users.count() > 0, "roles": list(ROLES)}})
 
     def _targets(self, p: Principal, q: Dict[str, str]) -> None:
@@ -482,13 +487,59 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, self.server.store.output(run_id), "text/plain; charset=utf-8")
 
     def _approval(self, p: Principal, q: Dict[str, str], run_id: str) -> None:
-        self.need_human(p, "operator")
         d = self._body()
         if set(d) - {"approved", "estimate_digest", "rationale"} or not isinstance(d.get("approved"), bool) or not isinstance(d.get("estimate_digest"), str):
             raise ApiError(422, "invalid", "approved (boolean) and estimate_digest (string) are required; rationale is optional", field="approved")
-        rec = self.server.store.approve(run_id, d["approved"], d["estimate_digest"], user=p.name, role=p.role, via=p.via, rationale=d.get("rationale", ""),
-                                        two_person=bool(self.server.cfg.two_person))
+        cfg, store = self.server.cfg, self.server.store
+        token = self.headers.get("X-Approval-Token")
+        if token is not None:
+            # a person's click in another product: the service credential carries it, the signed single-use token proves it, and a LINKED local user (operator or admin) is who decided
+            if p.kind != "service":
+                raise ApiError(403, "forbidden", "X-Approval-Token goes with the service credential; a signed-in user decides in their own name")
+            marker = verify_approval(cfg.approval_secret, token, run_id=run_id, approved=d["approved"], estimate_digest=d["estimate_digest"], nonces=self.server.nonces)
+            if marker is None:
+                raise ApiError(403, "approval_token_invalid", "the approval token is not valid for this run, decision and estimate (missing secret, signature, expiry, binding or a token already used)")
+            link = self.server.links.get(marker["by"])
+            user = self.server.users.get(link["user_id"]) if link else None
+            if user is None or user["disabled"] or RANK[user["role"]] < RANK["operator"]:
+                raise ApiError(403, "actor_not_linked", f"{marker['by']} is not linked to an enabled local user with the operator role: link it in the interface (Users) or decide in the product", actor=marker["by"])
+            rec = store.approve(run_id, d["approved"], d["estimate_digest"], user=user["name"], role=user["role"], via="projects", rationale=d.get("rationale", ""),
+                                two_person=bool(cfg.two_person), external_actor=marker["by"])
+            return self._json(200, rec)
+        self.need_human(p, "operator")
+        rec = store.approve(run_id, d["approved"], d["estimate_digest"], user=p.name, role=p.role, via=p.via, rationale=d.get("rationale", ""), two_person=bool(cfg.two_person))
         self._json(200, rec)
+
+    def _actor_links(self, p: Principal, q: Dict[str, str]) -> None:
+        links = self.server.links
+        if self.command == "POST":
+            self.need_human(p, "viewer")
+            d = self._body()
+            if set(d) - {"external_actor", "user_id"} or not isinstance(d.get("external_actor"), str):
+                raise ApiError(422, "invalid", "external_actor (projects:<principal>) is required; user_id is for an admin linking someone else", field="external_actor")
+            actor = d["external_actor"]
+            if not actor.startswith(EXTERNAL_ACTOR_PREFIX) or not re.fullmatch(r"[A-Za-z0-9:._@-]{9,120}", actor):
+                raise ApiError(422, "invalid", "external_actor looks like projects:<principal>", field="external_actor")
+            target_id = d.get("user_id") or p.user_id
+            if target_id != p.user_id:
+                self.need_human(p, "admin")
+            user = self.server.users.get(target_id)
+            if user is None or user["disabled"]:
+                raise ApiError(404, "not_found", "no such enabled user")
+            existing = links.get(actor)
+            if existing and existing["user_id"] != target_id and not p.at_least("admin"):
+                raise ApiError(409, "conflict", "that external actor is linked to someone else; an admin can change it")
+            links.put(actor, target_id, p.name)
+            return self._json(201, {"external_actor": actor, "user_id": target_id, "created_by": p.name})
+        self.need_human(p, "admin")
+        self._json(200, {"items": links.list(), "next_cursor": None})
+
+    def _actor_link(self, p: Principal, q: Dict[str, str], actor: str) -> None:
+        self.need_human(p, "admin")
+        from urllib.parse import unquote
+        if not self.server.links.delete(unquote(actor)):
+            raise ApiError(404, "not_found", "no such link")
+        self._send(204)
 
     def _cancel(self, p: Principal, q: Dict[str, str], run_id: str) -> None:
         self.need(p, "operator")

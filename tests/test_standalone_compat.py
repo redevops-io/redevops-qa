@@ -66,8 +66,8 @@ def test_the_service_reads_the_runners_exit_status_table_and_the_shipped_plans()
     from qa_service.runs import EXIT_MEANING, PLANS
     readme = (ROOT / "packages" / "qa-runner" / "README.md").read_text(encoding="utf-8")
     table = dict((int(code), meaning) for code, meaning in re.findall(r"^\| (\d) \| (.*?) \|$", readme.split("| Exit | Meaning |", 1)[1], re.M))
-    assert sorted(table) == sorted(EXIT_MEANING) == list(range(8))
-    assert "`VERIFIED`" in table[0] and "FAILED" in table[1] and "refused" in table[2] and "did not run to completion" in table[3] and "inconclusive" in table[4] and "rejected" in table[5] and "internal error" in table[6]
+    assert sorted(table) == sorted(EXIT_MEANING) == list(range(9))
+    assert "`VERIFIED`" in table[0] and "FAILED" in table[1] and "refused" in table[2] and "did not run to completion" in table[3] and "inconclusive" in table[4] and "rejected" in table[5] and "internal error" in table[6] and "CORROBORATED" in table[8]
     for _, plan_file, _ in PLANS.values():
         assert plan_file is None or (ROOT / "packages" / "qa-runner" / "examples" / plan_file).is_file()
 
