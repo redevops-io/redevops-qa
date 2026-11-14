@@ -16,7 +16,6 @@ import http.cookies
 import json
 import re
 import sys
-import tarfile
 import threading
 import time
 import uuid
@@ -609,17 +608,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _tar(self, p: Principal, q: Dict[str, str], run_id: str) -> None:
         rec, bundle = self._bundle(run_id)
-        self.send_response(200)
-        self.send_header("Content-Type", "application/x-tar")
-        self.send_header("Content-Disposition", f'attachment; filename="{bundle.name}.tar"')
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.close_connection = True
-        with tarfile.open(fileobj=self.wfile, mode="w|") as tar:
-            tar.add(str(bundle), arcname=bundle.name)
-        self._log(200)
+        # the archive of a bundle has ONE form: the canonical form the bundle format defines and `verify` itself accepts. It is made by the command, never re-tarred here:
+        # an archive written by another tool (a Python tarfile, a system tar) carries extended headers and directory members that the verifier refuses as findings.
+        code, data = self.server.store.command(["pack", str(bundle)])
+        if code != 0 or not data:
+            raise ApiError(502, "pack_failed", f"the pack command exited {code} ({EXIT_MEANING.get(code, 'FAILED TO START')}); the archive is not served")
+        self._send(200, data, "application/x-tar", {"Content-Disposition": f'attachment; filename="{bundle.name}.tar"'})
 
 
 def RUN_PATH(suffix: str) -> str:

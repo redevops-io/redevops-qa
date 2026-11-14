@@ -29,7 +29,7 @@ before it is answered, and the token is never logged or passed to the command th
 | `GET /v1/runs/<id>/output` | what the command printed |
 | `GET /v1/runs/<id>/report?format=text\|json\|html` | `redevops-qa report` of the evidence bundle (it re-verifies the bundle first and shows nothing of a bundle that does not verify) |
 | `GET /v1/runs/<id>/verify` | `redevops-qa verify --json` of the evidence bundle |
-| `GET /v1/runs/<id>/bundle.tar` | the evidence bundle, for `redevops-qa verify` on another machine |
+| `GET /v1/runs/<id>/bundle.tar` | the evidence bundle as the canonical archive (exactly what `redevops-qa pack` writes), for `redevops-qa verify` on another machine |
 | `DELETE /v1/runs/<id>` | remove a run that is not going |
 
 A plan is `unavailable` for exactly one of these codes (the first rule that fails, in this order): `ARCHITECTURE_UNSUPPORTED` (the lanes are supported on linux x86_64 only, so the arm64 image offers none),

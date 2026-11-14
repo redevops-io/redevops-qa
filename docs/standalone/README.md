@@ -7,7 +7,7 @@ Licence: source-available under the family licence (AGPL-3.0-or-later with the C
 
 ## What it is, and what it is not
 
-* **It is** the product as it exists: `doctor`, `freeze`, `run`, `demo`, `verify`, `report`, `inspect` and `anchor` of the `redevops-qa` command, plus `redevops-qa-service`
+* **It is** the product as it exists: `doctor`, `freeze`, `run`, `demo`, `verify`, `report`, `inspect`, `pack` and `anchor` of the `redevops-qa` command, plus `redevops-qa-service`
   ([packages/qa-service](../../packages/qa-service/README.md)), which starts one of the shipped plans, keeps the evidence bundle it writes, and serves its report and verification.
 * **It runs against the fixture app only.** `run` and `demo` start the fixture app that ships with the runner on the container's loopback; no external application can be pointed at
   the product yet (audit item P2-1 is design work, see [P2_1_EXTERNAL_TARGET_DESIGN.md](../P2_1_EXTERNAL_TARGET_DESIGN.md)). The service has no way to name a target or a file.

@@ -68,14 +68,20 @@ echo "== report, bundle, verification in a second container"
 [ "$(code -H "Authorization: Bearer $token" "$base/v1/runs/$last_id/report?format=html")" = 200 ] || fail "html report"
 api "$base/v1/runs/$last_id/report?format=html" -o "$work/report.html"; grep -q "QA evidence bundle" "$work/report.html" || fail "report content"
 api "$base/v1/runs/$last_id/bundle.tar" -o "$work/bundle.tar"
+chmod a+r "$work/bundle.tar"    # the archive is served to be verified on another machine: verify it here exactly as served, in a second container, offline
 vol="$(mktemp -d)"
-tar -xf "$work/bundle.tar" -C "$vol"
+mkdir -p "$vol/$last_id"
+tar -xf "$work/bundle.tar" -C "$vol/$last_id"
 chmod -R a+rX "$vol"            # mktemp makes the directory private to this user; the container runs as uid 10001
 # verify exits like the run did (0 VERIFIED, 1 FAILED) when it accepts the evidence; exit 5 would mean the evidence itself was rejected
 want_exit=0; [ "$last_defect" = none ] || want_exit=1
 status=0; verdict="$(docker run --rm --network none -v "$vol:/ev:ro" "$image:$tag" redevops-qa verify "/ev/$last_id")" || status=$?
-[ "$status" = "$want_exit" ] && echo "$verdict" | grep -q "ACCEPTED" || { echo "$verdict" >&2; fail "offline verify of the downloaded bundle (exit $status, wanted $want_exit with ACCEPTED)"; }
+[ "$status" = "$want_exit" ] && echo "$verdict" | grep -q "ACCEPTED" || { echo "$verdict" >&2; fail "offline verify of the extracted bundle (exit $status, wanted $want_exit with ACCEPTED)"; }
 echo "$verdict" | head -3
+# and the archive in the form it is served: an archive re-written by another tool (extended headers, directory members) is not the canonical form and verify refuses it with exit 5
+status=0; archive_verdict="$(docker run --rm --network none -v "$work/bundle.tar:/ev/bundle.tar:ro" "$image:$tag" redevops-qa verify "/ev/bundle.tar")" || status=$?
+[ "$status" = "$want_exit" ] && echo "$archive_verdict" | grep -q "ACCEPTED" || { echo "$archive_verdict" >&2; fail "offline verify of the downloaded archive as served (exit $status, wanted $want_exit with ACCEPTED): the served archive must be the canonical archive form verify accepts"; }
+echo "$archive_verdict" | head -1
 rm -r "$vol"
 
 echo "== persistence"

@@ -21,11 +21,13 @@ from pathlib import Path
 from typing import List, Optional, TextIO
 
 from qa_adapter_kit.supervisor import CancelToken
+from qa_evidence.build import BuildError as BundleBuildError, read_files
 from qa_evidence.canon import safe_text
 from qa_evidence.constants import ANCHOR_ABSENT_NOTICE
 from qa_evidence.inspector import inspect_source
 from qa_evidence.render import render_html, render_text
 from qa_evidence.sources import SourceError
+from qa_evidence.tarfmt import write_tar
 
 from . import __version__
 from . import constants as K
@@ -98,6 +100,10 @@ def _parser() -> argparse.ArgumentParser:
         if name == "report":
             sp.add_argument("--format", choices=("text", "json", "html"), default="text")
             sp.add_argument("-o", "--output", metavar="FILE", help="write to FILE (never overwritten) instead of standard output")
+
+    sp = sub.add_parser("pack", help="write a bundle (a directory or an archive) back out as the canonical single-file archive, in the exact form `verify` accepts an archive: to standard output, or to FILE with --out")
+    sp.add_argument("bundle", help="a bundle directory or archive")
+    sp.add_argument("--out", metavar="FILE", help="write the archive to FILE with exclusive create (never overwritten); default: standard output, which must be redirectable to a file")
 
     sp = sub.add_parser("anchor", help="the optional signed anchor: print the statement to sign for a bundle, or sign it with an operator-held Ed25519 key through the OpenSSH client")
     asub = sp.add_subparsers(dest="anchor_command", required=True)
@@ -562,6 +568,32 @@ def _inspect(args, out: TextIO, err: TextIO) -> int:
     return 0
 
 
+def _pack(args, out: TextIO, err: TextIO) -> int:
+    """A bundle, in the canonical single-file archive form the bundle format defines (the bytes ``verify`` accepts as an archive): for archiving a run
+    away, and for a service that serves the bundle for verification on another machine. Nothing is normalised on the way: a location that does not read as
+    a bundle (a generic tar made by another tool is not the canonical form and is refused) is refused with nothing written."""
+    try:
+        data = write_tar(read_files(args.bundle))
+    except BundleBuildError as exc:
+        codes = ", ".join(sorted({c for c, _, _ in exc.problems})[:8])
+        raise PlanError("BUNDLE_NOT_CANONICAL", f"cannot read {safe_text(args.bundle, 200)} as a bundle in the canonical form ({codes}): nothing was written") from None
+    except SourceError as exc:
+        raise PlanError("BUNDLE_UNREADABLE", f"cannot open {safe_text(args.bundle, 200)} ({safe_text(str(exc), 200)}): nothing was written") from None
+    if args.out:
+        try:
+            with open(args.out, "xb") as fh:
+                fh.write(data)
+        except OSError as exc:
+            raise PlanError("OUTPUT_UNWRITABLE", f"cannot write {safe_text(args.out)}: {safe_text(exc.strerror or type(exc).__name__)}") from None
+    else:
+        stream = getattr(out, "buffer", None)          # an archive is bytes: never let a text stream encode it
+        if stream is None:
+            raise PlanError("STDOUT_NOT_BINARY", "pack writes bytes: redirect standard output to a file or name --out FILE")
+        stream.write(data)
+        stream.flush()
+    return 0
+
+
 def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Optional[TextIO] = None) -> int:
     out = out or sys.stdout
     err = err or sys.stderr
@@ -570,7 +602,7 @@ def main(argv: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Op
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else K.EXIT_USAGE
     try:
-        return {"doctor": _doctor, "freeze": _freeze, "estimate": _estimate, "run": _run, "verify": _verify, "demo": _demo, "report": _report, "inspect": _inspect, "anchor": _anchor}[args.command](args, out, err)
+        return {"doctor": _doctor, "freeze": _freeze, "estimate": _estimate, "run": _run, "verify": _verify, "demo": _demo, "report": _report, "inspect": _inspect, "pack": _pack, "anchor": _anchor}[args.command](args, out, err)
     except PlanError as exc:
         print(f"error: {safe_text(str(exc))}", file=err)
         return K.EXIT_USAGE
