@@ -36,7 +36,7 @@ PLANS: Dict[str, Tuple[str, Optional[str], Tuple[str, ...]]] = {
     "robot-not-enforced": ("run", "robot-plan-not-enforced.json", ("robot",)),
 }
 #: the runner's exit status table (packages/qa-runner/README.md)
-EXIT_MEANING = {0: "VERIFIED", 1: "FAILED", 2: "REFUSED", 3: "NOT_COMPLETED", 4: "INCONCLUSIVE", 5: "EVIDENCE_REJECTED", 6: "RUNNER_ERROR", 7: "VERIFIER_UNAVAILABLE"}
+EXIT_MEANING = {0: "VERIFIED", 1: "FAILED", 2: "REFUSED", 3: "NOT_COMPLETED", 4: "INCONCLUSIVE", 5: "EVIDENCE_REJECTED", 6: "RUNNER_ERROR", 7: "VERIFIER_UNAVAILABLE", 8: "CORROBORATED"}
 OUTPUT_LIMIT = 1 << 20
 
 

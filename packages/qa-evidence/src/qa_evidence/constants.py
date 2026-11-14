@@ -29,7 +29,9 @@ RESERVED_UNLISTED = frozenset({MANIFEST_NAME, ANCHOR_NAME})
 ROLES = ("report", "native-artifact", "assertion-lock", "observation", "record", "log", "verifier", "documentation", "other")
 LANE_STATUSES = ("NATIVE_PASS", "NATIVE_FAIL", "NATIVE_ERROR", "NATIVE_SKIPPED", "NATIVE_TIMEOUT", "NATIVE_UNAVAILABLE")
 VERDICT_STATES = ("VERIFIED", "FAILED", "INCONCLUSIVE", "UNACCOUNTED")
-OUTCOMES = ("VERIFIED", "FAILED", "INCONCLUSIVE")
+OUTCOMES = ("VERIFIED", "FAILED", "INCONCLUSIVE", "CORROBORATED")
+#: The highest level a run may print. A run against a target that has no independent restatement of what its assertions expect (an external target) is capped at CORROBORATED: nothing here may mint VERIFIED for it.
+CEILINGS = ("VERIFIED", "CORROBORATED")
 #: Only a CI artifact attestation is an anchor type of this format version. Signed bundles are not supported and are not accepted as a type.
 ANCHOR_TYPES = ("ci-artifact-attestation",)
 ASSERTION_LOCK_NAME = "assertion-lock.json"
@@ -45,7 +47,7 @@ REASON_CODES = {
     "INCONCLUSIVE": ("EVIDENCE_MISSING", "EVIDENCE_UNUSABLE", "ASSERTION_INTEGRITY", "VERIFIER_ERROR", "TEST_DOUBLE", "EVIDENCE_INCOMPLETE"),
     "UNACCOUNTED": ("NO_RESULT_RECORDED",),
 }
-RUN_REASONS = {"VERIFIED": ("ALL_ASSERTIONS_VERIFIED",), "FAILED": ("ASSERTION_FAILED",),
+RUN_REASONS = {"VERIFIED": ("ALL_ASSERTIONS_VERIFIED",), "CORROBORATED": ("ALL_ASSERTIONS_CORROBORATED",), "FAILED": ("ASSERTION_FAILED",),
                "INCONCLUSIVE": ("NOT_ALL_ASSERTIONS_VERIFIED", "ENGINE_DID_NOT_COMPLETE", "NATIVE_FAIL_VERIFIED_ASSERTIONS")}
 
 # ---- caps (documented in the README; the verifier refuses anything above them, and refuses a manifest that declares more) -------------

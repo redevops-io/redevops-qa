@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
 """``redevops-qa``: one command for the whole path: ``doctor``, ``freeze``, ``run``, ``verify``, ``report``, ``inspect`` and the one-shot ``demo``.
 
-Exit status of ``run`` and ``demo``: 0 the run is VERIFIED; 1 an assertion FAILED; 2 the plan, the lock or an option was refused before anything ran; 3 a lane did not run
+Exit status of ``run`` and ``demo``: 0 the run is VERIFIED; 8 the run is CORROBORATED (an external-target run, capped: never to be read as VERIFIED); 1 an assertion FAILED; 2 the plan, the lock or an option was refused before anything ran; 3 a lane did not run
 to completion (error, timeout, cancelled, unavailable) or the environment could not provide what the run needs; 4 inconclusive (every lane completed but not every
 assertion is verified, or an engine and the verifier disagree); 6 an internal error of the runner. A crash is never reported as a product failure. ``freeze``: 0 or 2.
 ``report`` and ``inspect``: 0 the bundle verified as internally consistent, 1 it did not, 2 it cannot be opened. They never recompute a verdict.
@@ -249,9 +249,6 @@ def _refuse_an_external_target_this_release_cannot_run(frozen: FrozenPlan) -> No
     problems = v1_scope_problems(frozen.plan)
     if problems:
         raise PlanError(problems[0]["code"], "; ".join(p["message"] for p in problems) + ". Nothing was started and no evidence directory was made.")
-    if frozen.external:
-        raise PlanError("EXTERNAL_RUN_NOT_ENABLED", "the run path for an external-origin target is not enabled in this build (it is built in slices: the validator and `estimate` first); "
-                        "the fixture app is not started in its place. Nothing was started and no evidence directory was made.")
 
 
 def _execute(frozen: FrozenPlan, args, out: TextIO, err: TextIO, *, report_text: bool = False, note: Optional[str] = None) -> int:

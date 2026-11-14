@@ -106,6 +106,12 @@ whole bundle after it was signed (the dropped lane, the weakened assertion, the 
 signature check refuses it with exit 5; the signing keys of those tests are throwaway keys generated into the test's temporary directory. The public CI demo is not signed (no key is held there); its `demo-verify` job
 only checks that `--require-signed-anchor` refuses the unsigned demo bundle with `ANCHOR_SIGNATURE_REQUIRED`, which authenticates nothing.
 
+**External target (P2-1, v1).** A plan whose `target` is `{"kind": "external-origin", "origin": "http://127.0.0.1:<port>", "declared_by": "operator", "credential_refs": [], "mutating": false}` (see `examples/edge-sentinel-fixture-plan.json`) is run
+against an Edge Sentinel started with `EDGE_SENTINEL_DEMO=1`: before any lane the runner reads the target's `/health` and refuses (`NOT_FIXTURE_MODE`, exit status 3, nothing written) unless it reports `demo.enabled=true`; no fixture app is started; the
+Playwright lane goes through the egress gateway whose allow-list is exactly that origin (the origin IS the egress scope); every assertion's probe is `ui-only` (there is no reference check) and the evidence of the target having been reached is the
+gateway's own record; the report carries `verification_ceiling: CORROBORATED`, the run level is `CORROBORATED` (reason `ALL_ASSERTIONS_CORROBORATED`, exit status 8) and the bundle states that nothing independent backs it. `redevops-qa estimate PLAN` prints,
+without contacting anything, what a plan would do and every reason a run would refuse. `verify` refuses a bundle whose ceiling is not the one its plan's target gives (`CEILING_MISMATCH`).
+
 **`run`** freezes the plan (or reads a lock), starts the fixture app on loopback with the defect you name, runs each lane as a supervised child process, stops
 the app, and writes the bundle to `DIR/<run id>` (a directory that must not exist; it is reserved before anything runs and the bundle is renamed into place, so a reader sees no bundle or a whole one). It prints the outcome, what each engine reported, what the independent
 verdicts are, the plan digest (the value to give `verify --plan-digest`) and the manifest digest (the value an external anchor should hold).
@@ -120,6 +126,7 @@ verdicts are, the plan digest (the value to give `verify --plan-digest`) and the
 | 5 | `verify` rejected the evidence (any finding), including the verification a run does of its own bundle |
 | 6 | an internal error of the runner (a crash is never reported as a product failure) |
 | 7 | `verify` only: the verifier itself cannot run here (a pinned dependency or git is missing, or, when a signature was supplied, the OpenSSH client `ssh-keygen`); nothing was verified, which says nothing about the bundle (the JSON is still printed, with `assurance: not-verified`) |
+| 8 | the run is `CORROBORATED`: an external-target run whose every lane passed and whose every assertion is verified by the engines' record, capped because nothing independent backs it (the fixture app is the only target that can print `VERIFIED`) |
 
 ## The plan
 

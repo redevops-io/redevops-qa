@@ -61,6 +61,7 @@ EXIT_ENVIRONMENT = 3       # a lane did not run to completion (error, timeout, c
 EXIT_INCONCLUSIVE = 4      # every lane completed but not every assertion is verified, or the engine and the verifier disagree
 EXIT_REJECTED = 5          # `verify`: the evidence is not accepted (any finding: a changed, inconsistent, missing or forged file, a verdict that does not recompute, an anchor or plan digest that does not match)
 EXIT_VERIFIER_UNAVAILABLE = 7   # `verify`: the verifier itself cannot run here (a pinned dependency or git is missing); nothing was verified, which says nothing about the bundle
+EXIT_CORROBORATED = 8      # `run` and `verify`: an external-target run whose every assertion is verified, capped at CORROBORATED (no independent restatement backs it; never read this as VERIFIED)
 EXIT_INTERNAL = 6          # a crash of the runner itself (never reported as a product failure)
 
 #: what the in-process harness executor may be asked to do on behalf of a plan (anything else is denied by the action policy)
@@ -75,3 +76,13 @@ MAX_CHILD_JSON_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_EVIDENCE_BYTES = 128 * 1024 * 1024      # what a run keeps of its lanes' output in total (half the cap of a bundle); REDEVOPS_QA_MAX_EVIDENCE_BYTES or RunOptions.max_evidence_bytes overrides it
 MAX_LOG_TAIL_BYTES = 64 * 1024
 DEFAULT_LANE_DEADLINE_S = 120.0
+
+
+#: what a run against an external target says about itself, in these words and no others (verify requires exactly this text from the plan)
+NO_RESTATEMENT_ID = "no-independent-restatement"
+
+
+def no_restatement_text(origin: str) -> str:
+    return ("This run's target is an external origin (" + origin + "). Nothing in this bundle restates, independently of the engines, what its assertions expect: the target's own request log and a reference check "
+            "exist only for the bundled fixture app. The assertions are corroborated by the browser engine's own record, the harness run record and the egress gateway's decisions, so the run level is capped at "
+            "CORROBORATED and is never VERIFIED. The platform claim is Linux x86_64 with CPython 3.12 (3.11 for the fixture-app CI); no other host is claimed.")

@@ -287,10 +287,11 @@ CASES += [
     ("a failing lane has a non-zero exit code", "report.py", "        if code == 0:\n", "        if False:\n", [rv("test_m7_native_status_counts_and_exit_code_must_agree")]),
     ("a failing lane reports a failure", "report.py", 'if counts is not None and not (counts["failed"] or counts["errored"]):', "if False:", [rv("test_m7_native_status_counts_and_exit_code_must_agree")]),
     ("a reason code belongs to its state", "report.py", 'if v["reason_code"] not in REASON_CODES[v["state"]]:', "if False:", [rv("test_m7_a_reason_code_must_belong_to_the_state")]),
-    ("the run reason belongs to the outcome", "report.py", 'if verdict["reason_code"] != run_reason(verdict["outcome"], states, len(frozen), statuses):', "if False:",
+    ("the run reason belongs to the outcome", "report.py", 'if verdict["reason_code"] != run_reason(verdict["outcome"], states, len(frozen), statuses, ceiling):', "if False:",
      [rv("test_m7_the_run_level_reason_code_must_belong_to_the_outcome")]),
     ("the manifest names the verifier the report names", "verify.py", 'if man["tools"].get(verifier["id"]) != verifier["version"]:', "if False:", [rv("test_m7_the_manifest_tools_must_name_the_verifier_the_report_names")]),
     ("redaction rules need redaction", "report.py", 'if not report["redaction"]["applied"] and report["redaction"]["rules"]:', "if False:", [rv("test_m7_redaction_cannot_claim_rules_that_were_not_applied")]),
+    ("a capped run cannot print VERIFIED", "report.py", '    return "VERIFIED" if ceiling == "VERIFIED" else "CORROBORATED"', '    return "VERIFIED"', [t("test_qe_ceiling.py", "test_the_cap_is_in_the_outcome_function"), t("test_qe_ceiling.py", "test_a_report_that_drops_or_ignores_the_ceiling_is_refused")]),
     # R1
     ("a NATIVE_FAIL lane is not a verified run", "report.py", '    if any(s == "NATIVE_FAIL" for s in lane_statuses):\n        return "INCONCLUSIVE"\n', '    if False:\n        return "INCONCLUSIVE"\n',
      [t("test_qe_r1.py", "test_the_rule_in_the_outcome_functions"), t("test_qe_r1.py", "test_a_native_fail_lane_with_verified_assertions_builds_as_inconclusive_with_the_named_reason")]),

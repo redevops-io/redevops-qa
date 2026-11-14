@@ -1,13 +1,13 @@
 # P2-1 — pointing the engine at an external target: technical design
 
-**Status: design finalized — the four owner decisions are recorded in §6. Nothing here is implemented, no Projects
-QA tab is implied, and §6.2 gates it.**
+**Status: design finalized — the four owner decisions are recorded in §6. Slices 1 to 4 are implemented (see the status note below); no Projects
+QA tab is implied, and §6.2 gates it until the acceptance criteria pass in CI.**
 
-> Implementation status (slice 1 of §7): the `external-origin` validator, `redevops-qa estimate` and the platform guard (AC-1 to AC-5 and AC-10 to AC-12) exist and are tested in
-> `packages/qa-runner/tests/test_p21_external_target_acceptance.py`. A run of an external target is still refused (AC-6 to AC-9 are not built); `run` and `demo` drive the fixture app only.
-Written as the prerequisite the UI/QA external-reuse plan assumes exists: until this ships, `run` and `demo`
-drive the bundled fixture app and nothing else, and that must stay the stated claim. Licence: source-available
-under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source.
+> Implementation status: all four slices of §7 exist. The `external-origin` validator, `redevops-qa estimate` and the platform guard (AC-1 to AC-5, AC-10 to AC-12) are tested in
+> `packages/qa-runner/tests/test_p21_external_target_acceptance.py`; the gateway criteria (AC-6 to AC-8) in `packages/qa-egress/tests/test_eg_p21_acceptance.py`; the run path, the `CORROBORATED` ceiling in the bundle
+> (report field `verification_ceiling`, outcome `CORROBORATED`, exit status 8, the statement that nothing independent backs the run) and the refusal of a target that is not in fixture mode, in a real browser, in
+> `packages/qa-runner/tests/browser/test_qr_external_target_run.py`. What v1 supports is exactly section 6.1: a loopback `http://127.0.0.1:<port>` Edge Sentinel in fixture mode, the Playwright lane, no credential
+> reference (the reference grammar is validated and recorded; resolving one in the gateway is not built), no write.
 
 Everything marked *verified* below was read out of this repository at `main@7111021`, not assumed.
 

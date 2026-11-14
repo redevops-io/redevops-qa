@@ -83,6 +83,8 @@ def extra_limitations(frozen: FrozenPlan) -> List[Dict[str, str]]:
     open_lanes = [l.lane_id for l in robot if l.egress == "not-enforced"]
     fenced = [l.lane_id for l in robot if l.egress == "origin-only"]
     out: List[Dict[str, str]] = []
+    if frozen.external:
+        out.append({"id": K.NO_RESTATEMENT_ID, "text": K.no_restatement_text(frozen.plan["target"]["origin"])})
     if open_lanes:
         out.append({"id": K.ROBOT_EGRESS_LIMITATION_ID, "text": K.robot_egress_limitation_text(open_lanes)})
     if fenced:
@@ -139,7 +141,7 @@ def build_run_bundle(up: Upstreams, inputs: RunInputs) -> BuiltBundle:
     report = assemble_report(run_id=inputs.run_id, started_at=inputs.started_at, finished_at=inputs.finished_at, plan_digest=frozen.plan_digest,
                              environment=dict(inputs.environment), lanes=lanes_report, frozen=frozen.rows, results=results,
                              verifier={"id": K.VERIFIER_NAME, "version": K.RUNNER_VERSION}, redaction=dict(REDACTION), extra_limitations=extra_limitations(frozen),
-                             extensions=dict(inputs.extensions) or None)
+                             extensions=dict(inputs.extensions) or None, ceiling="CORROBORATED" if frozen.external else "VERIFIED")
     pins = frozen.pins
     tools = {"redevops-qa-runner": K.RUNNER_VERSION, "qa-evidence": EVIDENCE_VERSION, "agent-harness": pins["harness"], "runtime-contracts": pins["contracts"]}
     return build_bundle(report=report, files=files, tools=tools, producer={"name": "redevops-qa", "version": K.RUNNER_VERSION})

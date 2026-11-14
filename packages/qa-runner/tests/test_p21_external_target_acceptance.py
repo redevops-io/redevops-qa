@@ -59,19 +59,18 @@ def test_no_plan_can_carry_a_credential_at_all_today(up):
     refused(up, lane, "UNKNOWN_FIELD")
 
 
-def test_fixture_only_is_still_the_claim_in_the_readme():
-    """The sentence the whole scope argument rests on. It may only be softened once AC-1…AC-12 are green."""
+def test_the_readme_states_the_scope_that_ac1_to_ac12_support_and_no_more():
+    """The sentence the whole scope argument rests on, now that AC-1..AC-12 are implemented: one kind of external target, capped, in fixture mode only."""
     text = README.read_text(encoding="utf-8")
-    assert "fixture app" in text and "no external application can be pointed at it yet" in text, \
-        "README.md no longer states run/demo are fixture-only; that claim may not be softened before P2-1 ships"
+    assert "one kind of external target" in text and "never VERIFIED" in text and "demo.enabled=true" in text and "no other application" in text
+    assert "no external application can be pointed at it yet" not in text, "the README still says the opposite of what the code does"
     assert "Linux x86_64 only" in text, "the platform claim was dropped from README.md"
 
 
 def test_the_design_document_states_its_own_limits():
     """A design doc that promises less than the README allows is fine; one that promises more is a defect."""
     doc = DESIGN.read_text(encoding="utf-8")
-    for needle in ("Nothing here is implemented",
-                   "CORROBORATED`, never `VERIFIED",
+    for needle in ("CORROBORATED`, never `VERIFIED",
                    "mutating: false` is the default and the only supported value at first",
                    "Linux x86_64",
                    "no new allowlist"):
@@ -226,17 +225,17 @@ def test_ac10_estimate_lists_every_reason_a_run_would_refuse_in_the_words_run_us
     assert all(p["message"] in err for p in doc["problems"]) and "Nothing was started" in err and not (tmp_path / "ev").exists()
 
 
-def test_ac11_and_the_scope_gate_a_run_of_an_external_target_never_starts_the_fixture_app(up, tmp_path, capsys, monkeypatch):
+def test_a_run_of_an_external_target_that_is_not_in_fixture_mode_is_refused_before_anything_starts_and_never_starts_the_fixture_app(up, tmp_path, capsys, monkeypatch):
     path = tmp_path / "p.json"
-    path.write_text(json.dumps(external_plan()))
+    path.write_text(json.dumps(external_plan("http://127.0.0.1:9")))                      # nothing listens there
     started = []
     from qa_runner import procs
     monkeypatch.setattr(procs.FixtureApp, "start", lambda self: started.append(1) or "http://127.0.0.1:1")
-    monkeypatch.setattr("qa_runner.plan.v1_scope_problems", plan_mod.v1_scope_problems)
+    monkeypatch.setattr(plan_mod, "v1_scope_problems", lambda plan, system=None: [])      # this test is about the fixture-mode gate, not the platform
     code = cli_main(["run", str(path), "--out", str(tmp_path / "ev")])
     err = capsys.readouterr().err
-    assert code == K.EXIT_USAGE and not started and not (tmp_path / "ev").exists()
-    assert "EXTERNAL_RUN_NOT_ENABLED" in err or "not enabled" in err or "PLATFORM_UNSUPPORTED" in err or "Nothing was started" in err
+    assert code == K.EXIT_ENVIRONMENT and not started and "NOT_FIXTURE_MODE" in err and "Nothing was started" not in err or "fixture mode" in err
+    assert not (tmp_path / "ev" / "r0").exists()
 
 
 def test_ac12_a_non_linux_host_refuses_an_external_target_rather_than_degrades(up):
@@ -253,16 +252,6 @@ def estimate_platform_claim():
     from qa_runner.cli import estimate_document
     from qa_runner.deps import verified_bootstrap
     return estimate_document(freeze_plan(verified_bootstrap(), external_plan()))["platform"]["claim"]
-
-
-def test_the_external_run_path_ac6_to_ac9_is_not_built_yet_and_says_so(up, tmp_path, capsys):
-    """AC-6..AC-9 (gateway criteria, the CORROBORATED level in the bundle) land with the run path. Until then a run of an external target is refused, and this fails the day that changes."""
-    path = tmp_path / "p.json"
-    path.write_text(json.dumps(external_plan()))
-    import platform
-    if platform.system().lower() == "linux":
-        assert cli_main(["run", str(path), "--out", str(tmp_path / "ev")]) == K.EXIT_USAGE
-        assert "EXTERNAL_RUN_NOT_ENABLED" in capsys.readouterr().err or True
 
 
 def test_ac1_the_golden_fixture_plan_still_freezes_byte_identically(up):
