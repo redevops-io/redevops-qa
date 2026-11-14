@@ -9,7 +9,7 @@
 #               first-party wheels (pure Python, hash-checked from the same bundle) are installed WITHOUT the browser and Robot wheels: `verify`, `report`, `inspect`,
 #               `freeze`, `doctor` and the HTTP service work; `run` and `demo` cannot start a lane and say so.
 # ---------------------------------------------------------------------------------------------------------------- stage 1: the pinned bundle (runs on the build host)
-FROM --platform=$BUILDPLATFORM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS bundle
+FROM --platform=$BUILDPLATFORM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS bundle
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY . /src
 WORKDIR /src
@@ -20,7 +20,7 @@ RUN python tools/fetch_pins.py > /tmp/fetch_pins.log \
  && cd /out && sha256sum -c ./*.tar.sha256
 
 # ---------------------------------------------------------------------------------------------------------------- stage 2: the runtime image
-FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS runtime
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS runtime
 ARG TARGETARCH
 ARG VERSION=0.0.0-unset
 ARG VCS_REF=unknown
