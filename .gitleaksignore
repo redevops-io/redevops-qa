@@ -10,3 +10,7 @@
 # The flagged "secret" is the fixture order id `api-discount-10000`: seeded data of the bundled fixture app's
 # discount defect. An opaque order number in demo data, not a key of any kind.
 a69621665864e0d4ece96338e3398cfa9d74dea5:packages/qa-fixture-app/tests/test_qfa_defects.py:generic-api-key:17
+#
+# The flagged "secret" is a literal in the P2-1 acceptance test (commit 3e2ad31, since rewritten to be assembled at run time): a credential-shaped string the test feeds to the validator to prove it is
+# REFUSED and never repeated. It is not a credential and nothing answers to it.
+3e2ad31a7b87bd4f9616f9db5ced9ffc3ce9ce19:packages/qa-runner/tests/test_p21_external_target_acceptance.py:generic-api-key:145

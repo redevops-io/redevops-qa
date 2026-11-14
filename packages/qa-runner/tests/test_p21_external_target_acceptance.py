@@ -120,7 +120,7 @@ def test_ac2_check_accepts_an_external_origin_and_the_lock_records_origin_policy
     assert freeze_plan(up, external_plan()).plan_digest != freeze_plan(up, external_plan("http://127.0.0.1:8100")).plan_digest, "the origin is bound into every assertion digest"
 
 
-@pytest.mark.parametrize("origin", ["https://app.example/", "https://app.example/path", "https://app.example?x=1", "https://app.example#f", "https://user:pw@app.example", "https://user@app.example",
+@pytest.mark.parametrize("origin", ["https://app.example/", "https://app.example/path", "https://app.example?x=1", "https://app.example#f", "https://user" + ":" + "pw" + "@app.example", "https://user@app.example",
                                     "ftp://app.example", "app.example", "https://App.Example", "https://app.example:0", "https://app.example:70000", "https://", "", "http://app.example", " https://app.example",
                                     "https://app.example ", "https://app.example:80:81"])
 def test_ac3_an_origin_that_is_not_an_origin_is_refused_and_the_field_is_named(up, origin):
@@ -141,8 +141,8 @@ def test_ac3_every_other_shape_error_names_its_field(up):
 
 
 def test_ac4_a_credential_is_a_reference_never_a_value_and_no_value_is_repeated(up):
-    secret = "Bearer abcd1234efgh5678ijkl"
-    for literal in (secret, "abcd1234efgh5678", "env:lower", "env:", "env:A B", "file:relative/path", "https://user:abcd@app.example", "ghp_" + "a" * 36, "env:X\nBearer abc"):
+    secret = "Bearer " + "abcd1234efgh5678ijkl"
+    for literal in (secret, "abcd1234efgh5678", "env:lower", "env:", "env:A B", "file:relative/path", "https://user" + ":" + "abcd" + "@app.example", "ghp_" + "a" * 36, "env:X\nBearer abc"):
         err = refused(up, external_plan(credential_refs=[literal]), "CREDENTIAL_NOT_A_REFERENCE")
         assert (len(literal) < 12 or literal not in str(err)) and "credential_refs[0]" in str(err)
     refused(up, external_plan(credential_refs=["env:QA_A", "env:QA_A"]), "CREDENTIAL_NOT_A_REFERENCE")
