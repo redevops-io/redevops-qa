@@ -14,3 +14,5 @@ a69621665864e0d4ece96338e3398cfa9d74dea5:packages/qa-fixture-app/tests/test_qfa_
 # The flagged "secret" is a literal in the P2-1 acceptance test (commit 3e2ad31, since rewritten to be assembled at run time): a credential-shaped string the test feeds to the validator to prove it is
 # REFUSED and never repeated. It is not a credential and nothing answers to it.
 3e2ad31a7b87bd4f9616f9db5ced9ffc3ce9ce19:packages/qa-runner/tests/test_p21_external_target_acceptance.py:generic-api-key:145
+# The same literal in the first revision that assembled the other strings at run time (commit 376f6da): this one tuple still held a 16-character token-shaped word whole. Same test, same reason; assembled too in the next revision.
+376f6dad837b716d665aed8d96ed400980144801:packages/qa-runner/tests/test_p21_external_target_acceptance.py:generic-api-key:145
