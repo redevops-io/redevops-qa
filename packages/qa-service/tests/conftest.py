@@ -20,6 +20,8 @@ from qs_support import Client, make_env        # noqa: E402
 def make_server(tmp_path, monkeypatch):
     servers = []
 
+    monkeypatch.setattr("qa_service.users.SCRYPT", {"n": 2 ** 10, "r": 8, "p": 1, "dklen": 32})        # the algorithm of the product at a test-sized cost
+
     def make(control=None, facts=None, **extra):
         env = make_env(tmp_path, **extra)
         if control is not None:

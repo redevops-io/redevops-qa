@@ -40,6 +40,7 @@ class Config:
     run_timeout: int
     max_body: int = 4096
     request_timeout: int = 30
+    two_person: bool = False
 
 
 def token_problem(token: str) -> Optional[str]:
@@ -112,4 +113,4 @@ def load_config(env: Mapping[str, str]) -> Config:
     if plans is not None and not plans.startswith("/"):
         raise ConfigError(f"{ENV_PLANS} must be an absolute path")
     return Config(token=token.encode("ascii"), bind=bind, port=port, data_dir=Path(data), cli=resolved, plans_dir=Path(plans) if plans else None,
-                  run_timeout=_int(env, ENV_TIMEOUT, 1800, 10, 86400))
+                  run_timeout=_int(env, ENV_TIMEOUT, 1800, 10, 86400), two_person=env.get("QA_REQUIRE_TWO_PERSON") == "1")

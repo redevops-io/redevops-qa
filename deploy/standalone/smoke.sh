@@ -24,7 +24,8 @@ dc() { docker compose -p "$project" -f "$work/compose.yaml" --env-file "$work/.e
 
 echo "== compose refuses to start without a token and without a tag"
 if QA_IMAGE="$image" dc config >/dev/null 2>&1; then fail "compose accepted an empty .env"; fi
-{ echo "QA_IMAGE=$image"; echo "QA_IMAGE_TAG=$tag"; echo "QA_PORT=$port"; echo "QA_SERVICE_TOKEN="; } > "$work/.env"
+admin_pw="$(openssl rand -hex 16)"
+{ echo "QA_IMAGE=$image"; echo "QA_IMAGE_TAG=$tag"; echo "QA_PORT=$port"; echo "QA_SERVICE_TOKEN="; echo "QA_BOOTSTRAP_ADMIN_PASSWORD=$admin_pw"; } > "$work/.env"
 if dc config >/dev/null 2>&1; then fail "compose accepted an empty token"; fi
 sed -i.bak "s/^QA_SERVICE_TOKEN=.*/QA_SERVICE_TOKEN=$token/" "$work/.env"; rm -f "$work/.env.bak"
 
@@ -57,6 +58,11 @@ for spec in $runs; do
   echo "ok: $spec -> $outcome"
   last_id="$id"; last_defect="$defect"
 done
+
+if [ "${QA_SMOKE_UI:-}" = 1 ]; then
+  echo "== the interface: a fresh user's workflow in a real browser against this deployment"
+  QA_E2E_PROFILE="${QA_E2E_PROFILE:-fixture-browser}" python3 "$here/e2e_ui.py" "$base" "$admin_pw" || fail "the browser workflow (deploy/standalone/e2e_ui.py)"
+fi
 
 echo "== report, bundle, verification in a second container"
 [ "$(code -H "Authorization: Bearer $token" "$base/v1/runs/$last_id/report?format=html")" = 200 ] || fail "html report"

@@ -25,11 +25,33 @@ if cmd in ("run", "demo"):
     os.makedirs(os.path.join(out, run_id))
     with open(os.path.join(out, run_id, "bundle-manifest.json"), "w") as fh:
         json.dump({"run": run_id, "defect": defect, "argv": a, "env": sorted(os.environ)}, fh)
+    os.makedirs(os.path.join(out, run_id, "logs"), exist_ok=True)
+    open(os.path.join(out, run_id, "logs", "x.txt"), "w").write("x\n")
     print("run %%s: VERIFIED (ALL_ASSERTIONS_VERIFIED)" %% run_id)
     sys.exit(control["exit"] if "exit" in control else (1 if defect != "none" else 0))
+if cmd == "estimate":
+    plan = json.load(open(a[1]))
+    t = plan["target"]
+    problems = []
+    if t["kind"] == "external-origin":
+        o = t["origin"]
+        if "/" in o.split("://", 1)[1] or "@" in o:
+            sys.stderr.write("error: target.origin must be an origin: scheme, host and port only\n")
+            sys.exit(2)
+        if not o.startswith("http://127.0.0.1:"):
+            problems.append({"code": "TARGET_OUT_OF_SCOPE", "message": "this release runs against one external target: a loopback Edge Sentinel fixture target at http://127.0.0.1:<port>"})
+    print(json.dumps({"schema": "redevops-qa/estimate", "plan_id": plan["plan_id"], "plan_digest": "sha256:" + "ab" * 32, "target": {"kind": t["kind"], "origin": t.get("origin")},
+                      "lanes": [{"lane_id": l["lane_id"], "engine": l["engine"], "deadline_s": l.get("deadline_s", 120)} for l in plan["lanes"]], "engines": ["playwright-chromium"],
+                      "limits": {"mutating": False}, "credential_refs": [], "verification_ceiling": "CORROBORATED" if t["kind"] == "external-origin" else "VERIFIED",
+                      "contacts": "nothing", "platform": {"system": "linux"}, "egress_policy_digest": None if problems or t["kind"] != "external-origin" else "sha256:" + "cd" * 32,
+                      "problems": problems, "would_run": not problems}))
+    sys.exit(0)
 if cmd == "report":
     fmt = a[a.index("--format") + 1]
-    body = {"text": "report text\n", "json": "{\"ok\": true}\n", "html": "<html><body>report</body></html>\n"}[fmt]
+    rep = {"summary": {"lanes": [{"lane_id": "browser"}], "accounting": {"verified": 1}, "assertions": [], "plan_digest": "sha256:" + "ab" * 32},
+           "recomputation": {"accepted": True, "agreeing_assertions": 1, "findings": [], "assurance": "internal-consistency-only", "anchor": {"recomputed_manifest_digest": "sha256:" + "ef" * 32}},
+           "files": [{"path": "bundle-manifest.json", "role": "manifest", "size": 10, "digest": "sha256:" + "01" * 32}, {"path": "logs/x.txt", "role": "log", "size": 3, "digest": "sha256:" + "02" * 32}]}
+    body = {"text": "report text\n", "json": json.dumps(rep) + "\n", "html": "<html><body>report</body></html>\n"}[fmt]
     sys.stdout.write(body)
     sys.exit(0)
 if cmd == "verify":
@@ -51,7 +73,7 @@ def make_env(tmp_path: Path, **extra):
     plans = tmp_path / "plans"
     plans.mkdir(exist_ok=True)
     for name in ("golden-plan.json", "robot-plan.json", "robot-plan-not-enforced.json"):
-        (plans / name).write_text("{}")
+        (plans / name).write_text(json.dumps({"plan_id": name[:-5], "target": {"kind": "fixture-app"}, "lanes": [{"lane_id": "browser", "engine": "playwright-chromium", "deadline_s": 60}]}))
     env = {"QA_SERVICE_TOKEN": TOKEN, "QA_SERVICE_BIND": "127.0.0.1", "QA_SERVICE_PORT": "0", "QA_SERVICE_DATA_DIR": str(tmp_path / "data"), "QA_SERVICE_CLI": str(cli),
            "QA_SERVICE_PLANS_DIR": str(plans), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
     env.update(extra)
