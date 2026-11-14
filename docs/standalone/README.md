@@ -18,7 +18,7 @@ Licence: source-available under the family licence (AGPL-3.0-or-later with the C
   reports `UNAVAILABLE`. A container cannot offer them honestly, so it does not.
 * **linux/arm64:** the product's bundle is for CPython 3.12 on Linux x86_64 only and its browser pin names x86_64 archives only, so the arm64 image carries the repository's own packages
   (installed from the same hash-checked bundle) **without** the browser and Robot wheels. `verify`, `report`, `inspect`, `freeze` and the service work (an arm64 host can verify evidence made on amd64);
-  `run` and `demo` cannot start a lane, and `/v1/info` says so (`available: false` with the reason). `doctor` reports failures there because the image is not a bundle installation.
+  `run` and `demo` cannot start a lane: `/v1/info` lists every plan as `available: false` with `unavailable.code` `ARCHITECTURE_UNSUPPORTED` and the reason, and starting one is refused with 422. `doctor` reports failures there because the image is not a bundle installation.
 
 ## Published release
 
@@ -170,7 +170,7 @@ gh attestation verify oci://ghcr.io/redevops-io/redevops-qa@sha256:<index digest
 | the container exits with status 78 | no usable token: read its log line; generate one with `openssl rand -hex 32`. |
 | 401 on every call | the `Authorization: Bearer` header is missing or the token differs from the one the container started with. |
 | 409 `busy` | a run is going; wait for it (`GET /v1/runs`). |
-| 422 `plan_unavailable` | the image has no lane for that plan (the arm64 image); `/v1/info` says which. |
+| 422 `plan_unavailable` | the plan cannot run here; the response and `/v1/info` carry `unavailable.code` (`ARCHITECTURE_UNSUPPORTED`, `LANE_ENGINE_MISSING`, `BROWSER_UNAVAILABLE`, `ROBOT_EGRESS_LAYERS_UNAVAILABLE`, `PLAN_FILE_MISSING`), the reason and a remedy. Nothing was started. |
 | the run ends `NOT_COMPLETED` and the output says `ROBOT_EGRESS_UNAVAILABLE` | the host cannot provide the Robot lane's kernel layers (see Requirements); use `browser` or `robot-not-enforced`. |
 | `Permission denied` on `/data` with a bind mount | give the directory to user 10001 (`chown 10001:10001`), or use the named volume. |
 | the browser lane does not start | run `docker compose exec qa redevops-qa doctor`; each check names its remedy. |

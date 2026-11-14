@@ -10,6 +10,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from qa_service.config import load_config      # noqa: E402
+from qa_service.capabilities import Facts      # noqa: E402
+from qa_service.runs import RunStore            # noqa: E402
 from qa_service.server import QAServer         # noqa: E402
 from qs_support import Client, make_env        # noqa: E402
 
@@ -18,14 +20,12 @@ from qs_support import Client, make_env        # noqa: E402
 def make_server(tmp_path, monkeypatch):
     servers = []
 
-    monkeypatch.setattr("qa_service.runs.available_modules", lambda names: [])        # the real lanes are not started here, so their packages are not needed
-
-    def make(control=None, **extra):
+    def make(control=None, facts=None, **extra):
         env = make_env(tmp_path, **extra)
         if control is not None:
             (tmp_path / "bin" / "control.json").write_text(json.dumps(control))
         cfg = load_config(env)
-        srv = QAServer(cfg)
+        srv = QAServer(cfg, RunStore(cfg, facts=facts if facts is not None else Facts()))      # the real lanes are not started here: all-capable facts unless a test says otherwise
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         servers.append(srv)
         return srv, Client(srv.server_address[1])

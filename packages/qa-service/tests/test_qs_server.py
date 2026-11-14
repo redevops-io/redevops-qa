@@ -140,13 +140,57 @@ def test_run_ids_cannot_escape_the_data_directory(make_server):
         srv.store.get("../x")
 
 
-def test_a_lane_that_is_not_installed_refuses_the_plan_with_a_reason(make_server, monkeypatch):
+@pytest.mark.parametrize("facts,plans,code", [
+    (dict(machine="aarch64"), ["demo", "browser", "robot", "robot-not-enforced"], "ARCHITECTURE_UNSUPPORTED"),
+    (dict(system="darwin"), ["demo", "browser"], "ARCHITECTURE_UNSUPPORTED"),
+    (dict(missing_packages=("playwright", "robot")), ["demo", "browser", "robot", "robot-not-enforced"], "LANE_ENGINE_MISSING"),
+    (dict(browser={"status": "FAIL", "message": "the browser is not the pinned build"}), ["demo", "browser"], "BROWSER_UNAVAILABLE"),
+    (dict(robot_layers={"ok": False, "reason": "landlock-network-rules-unavailable", "message": "this host reports 0"}), ["demo", "robot"], "ROBOT_EGRESS_LAYERS_UNAVAILABLE"),
+])
+def test_a_plan_that_cannot_run_here_is_unavailable_with_a_code_a_reason_and_a_remedy_in_info_and_refused_at_start(make_server, facts, plans, code):
+    from qa_service.capabilities import Facts
+    srv, c = make_server(facts=Facts(**facts))
+    info = c.json("GET", "/v1/info")[1]
+    for plan in plans:
+        entry = info["plans"][plan]
+        assert entry["available"] is False and entry["unavailable"]["code"] == code and entry["unavailable"]["reason"] and entry["unavailable"]["remedy"], entry
+        status, doc, _ = c.json("POST", "/v1/runs", {"plan": plan})
+        assert status == 422 and doc["error"] == "plan_unavailable" and doc["unavailable"]["code"] == code and doc["message"] == doc["unavailable"]["reason"]
+    assert c.json("GET", "/v1/runs")[1]["runs"] == [], "a refused run leaves no record and starts nothing"
+    assert info["capabilities"]["machine"] == facts.get("machine", "x86_64")
+
+
+def test_only_the_plans_that_need_a_missing_capability_are_unavailable(make_server):
+    from qa_service.capabilities import Facts
+    srv, c = make_server(facts=Facts(robot_layers={"ok": False, "reason": "landlock-network-rules-unavailable", "message": "ABI 0"}))
+    plans = c.json("GET", "/v1/info")[1]["plans"]
+    assert {k: v["available"] for k, v in plans.items()} == {"demo": False, "robot": False, "browser": True, "robot-not-enforced": True}
+    assert plans["browser"]["unavailable"] is None
+    rec = c.json("POST", "/v1/runs", {"plan": "robot-not-enforced"})
+    assert rec[0] == 202
+    assert wait_idle(srv.store, 20)
+
+
+def test_a_missing_plan_file_is_unavailable_not_a_crash(make_server, tmp_path):
     srv, c = make_server()
-    monkeypatch.setattr("qa_service.runs.available_modules", lambda names: [n for n in names if n == "playwright"])
-    status, doc, _ = c.json("POST", "/v1/runs", {"plan": "browser"})
-    assert status == 422 and doc["error"] == "plan_unavailable" and "playwright" in doc["message"]
-    assert c.json("GET", "/v1/info")[1]["plans"]["demo"]["available"] is False
-    assert c.json("GET", "/v1/info")[1]["plans"]["robot"]["available"] is True
+    (tmp_path / "plans" / "golden-plan.json").unlink()
+    assert c.json("GET", "/v1/info")[1]["plans"]["browser"]["unavailable"]["code"] == "PLAN_FILE_MISSING"
+    assert c.json("POST", "/v1/runs", {"plan": "browser"})[1]["unavailable"]["code"] == "PLAN_FILE_MISSING"
+
+
+def test_the_facts_are_collected_from_the_machine_and_the_runners_own_probe_decides_the_layers(monkeypatch):
+    from qa_service import capabilities as caps
+    monkeypatch.setattr(caps.platform, "machine", lambda: "AMD64")
+    monkeypatch.setattr(caps.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(caps, "_have", lambda name: True)
+    ok = caps.collect(lambda: {"browser": {"status": "OK", "message": ""}, "robot_layers": {"ok": True}})
+    assert (ok.system, ok.machine, ok.missing_packages) == ("linux", "x86_64", ()) and caps.unavailable("demo", ok, None) is None
+    nolayers = caps.collect(lambda: {"robot_layers": {"ok": False, "reason": "x", "message": "y"}})
+    assert caps.unavailable("demo", nolayers, None)["code"] == "ROBOT_EGRESS_LAYERS_UNAVAILABLE"
+    unmeasured = caps.collect(lambda: {})
+    assert caps.unavailable("robot", unmeasured, None)["code"] == "ROBOT_EGRESS_LAYERS_UNAVAILABLE" and "not-measured" in caps.unavailable("robot", unmeasured, None)["reason"]
+    monkeypatch.setattr(caps.platform, "machine", lambda: "arm64")
+    assert caps.collect(lambda: {"robot_layers": {"ok": True}}).machine == "arm64"
 
 
 def test_a_run_that_exceeds_the_timeout_is_killed_and_said_so(make_server, tmp_path):
@@ -193,3 +237,42 @@ def test_a_slow_client_does_not_hold_the_server(make_server):
     s.sendall(b"GET /healthz HTTP/1.1\r\nHost: x\r\n")            # never finished
     assert c.json("GET", "/healthz", token=None)[0] == 200
     s.close()
+
+
+def test_the_probe_code_reports_the_runners_own_checks_as_json(tmp_path):
+    """PROBE_CODE is what the image runs; here against a stand-in `qa_runner` so the shape of what it prints is pinned without a browser or a kernel."""
+    import subprocess, sys, textwrap
+    from qa_service import capabilities as caps
+    pkg = tmp_path / "qa_runner"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "doctor.py").write_text(textwrap.dedent("""
+        class _C:
+            status = "OK"
+            detail = "pinned"
+        def check_browser_pin():
+            return _C()
+    """))
+    (pkg / "netfence.py").write_text("def probe():\n    return {'ok': False, 'reason': 'landlock-network-rules-unavailable', 'message': 'ABI 0'}\n")
+    done = subprocess.run([sys.executable, "-c", caps.PROBE_CODE], capture_output=True, text=True, cwd=str(tmp_path), env={"PYTHONPATH": str(tmp_path), "PATH": "/usr/bin:/bin"}, timeout=30)
+    assert json.loads(done.stdout) == {"browser": {"status": "OK", "message": "pinned"}, "robot_layers": {"ok": False, "reason": "landlock-network-rules-unavailable", "message": "ABI 0"}}
+
+
+def test_the_probe_does_not_receive_the_services_environment(monkeypatch, tmp_path):
+    import subprocess
+    from qa_service import capabilities as caps
+    seen = {}
+    monkeypatch.setattr(caps, "_have", lambda name: True)
+    monkeypatch.setenv("QA_SERVICE_TOKEN", "must-not-travel-" + "x" * 30)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw")
+
+    class Done:
+        stdout = "{}"
+
+    def fake_run(argv, **kw):
+        seen.update(kw["env"])
+        return Done()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    caps.run_probe()
+    assert "QA_SERVICE_TOKEN" not in seen and seen["PLAYWRIGHT_BROWSERS_PATH"] == "/opt/pw"

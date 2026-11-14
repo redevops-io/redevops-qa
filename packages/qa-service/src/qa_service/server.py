@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
 from .config import Config
-from .runs import DEFECTS, EXIT_MEANING, PLANS, Busy, Refused, RunStore, plan_availability
+from .runs import DEFECTS, EXIT_MEANING, PLANS, Busy, Refused, RunStore
 
 RUN_PATH = re.compile(r"^/v1/runs/(r[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6})(?:/(output|report|verify|bundle\.tar))?$")
 HTML_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -180,7 +180,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             record = self.server.store.start(plan, defect)
         except Refused as exc:
-            return self._error(422 if exc.code == "plan_unavailable" else 400, exc.code, str(exc))
+            if exc.unavailable is not None:
+                return self._json(422, {"error": exc.code, "message": str(exc), "unavailable": exc.unavailable})
+            return self._error(400, exc.code, str(exc))
         except Busy as exc:
             return self._error(409, "busy", f"run {exc.args[0]} is still going; one run at a time")
         self._json(202, record, {"Location": "/v1/runs/" + record["id"]})
@@ -226,8 +228,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _info(self) -> None:
         import platform
-        plans = plan_availability(self.server.cfg)
+        plans = self.server.store.availability()
         self._json(200, {"service": "redevops-qa-service", "version": __version__, "machine": platform.machine(), "defects": list(DEFECTS),
+                         "capabilities": self.server.store.facts.as_dict(),
                          "plans": {k: dict(plans[k], command=PLANS[k][0]) for k in sorted(PLANS)}, "run_timeout_seconds": self.server.cfg.run_timeout,
                          "target": "the fixture app that ships with the runner (no external target)"})
 

@@ -73,7 +73,7 @@ RUN printf '%s\n' '#!/bin/sh' "exec /opt/redevops-qa/venv/bin/python -I -m qa_se
  && /opt/redevops-qa/venv/bin/python -I -c "import qa_service"
 
 # Bind on all interfaces INSIDE the container (the published port is what Compose and the manifests restrict); the service still refuses to start without a token.
-ENV PATH=/opt/redevops-qa/bin:/usr/local/bin:/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
+ENV PATH=/opt/redevops-qa/bin:/usr/local/bin:/usr/bin:/bin HOME=/tmp TMPDIR=/tmp PLAYWRIGHT_BROWSERS_PATH=/opt/redevops-qa/browsers \
     QA_SERVICE_BIND=0.0.0.0 QA_SERVICE_PORT=8080 QA_SERVICE_DATA_DIR=/data QA_SERVICE_PLANS_DIR=/opt/redevops-qa/share/plans
 USER 10001:10001
 WORKDIR /data
