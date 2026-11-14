@@ -56,7 +56,7 @@ def test_both_scanners_run_over_every_ref_and_pin_everything_they_download():
 
 def test_the_gitleaks_allow_list_is_fingerprints_of_justified_existing_lines():
     entries = [ln for ln in IGNORE.splitlines() if ln.strip() and not ln.startswith("#")]
-    assert len(entries) == 3, "the allow-list carries exactly the two justified false positives of 2026-11-07 and the one of 2026-11-14 (a refused-credential literal of the P2-1 acceptance test, recorded in SECURITY.md)"
+    assert len(entries) == 4, "the allow-list carries exactly the two justified false positives of 2026-11-07 and the two of 2026-11-14 (refused-credential literals of the P2-1 acceptance test, recorded in SECURITY.md)"
     for line in entries:
         commit, path, rule, lineno = line.split(":")
         assert len(commit) == 40 and rule == "generic-api-key"

@@ -142,7 +142,7 @@ def test_ac3_every_other_shape_error_names_its_field(up):
 
 def test_ac4_a_credential_is_a_reference_never_a_value_and_no_value_is_repeated(up):
     secret = "Bearer " + "abcd1234efgh5678ijkl"
-    for literal in (secret, "abcd1234efgh5678", "env:lower", "env:", "env:A B", "file:relative/path", "https://user" + ":" + "abcd" + "@app.example", "ghp_" + "a" * 36, "env:X\nBearer abc"):
+    for literal in (secret, "abcd" + "1234" + "efgh" + "5678", "env:lower", "env:", "env:A B", "file:relative/path", "https://user" + ":" + "abcd" + "@app.example", "ghp_" + "a" * 36, "env:X\nBearer abc"):
         err = refused(up, external_plan(credential_refs=[literal]), "CREDENTIAL_NOT_A_REFERENCE")
         assert (len(literal) < 12 or literal not in str(err)) and "credential_refs[0]" in str(err)
     refused(up, external_plan(credential_refs=["env:QA_A", "env:QA_A"]), "CREDENTIAL_NOT_A_REFERENCE")
