@@ -83,7 +83,7 @@ def extra_limitations(frozen: FrozenPlan) -> List[Dict[str, str]]:
     open_lanes = [l.lane_id for l in robot if l.egress == "not-enforced"]
     fenced = [l.lane_id for l in robot if l.egress == "origin-only"]
     out: List[Dict[str, str]] = []
-    if frozen.external:
+    if getattr(frozen, "external", False):
         out.append({"id": K.NO_RESTATEMENT_ID, "text": K.no_restatement_text(frozen.plan["target"]["origin"])})
     if open_lanes:
         out.append({"id": K.ROBOT_EGRESS_LIMITATION_ID, "text": K.robot_egress_limitation_text(open_lanes)})
