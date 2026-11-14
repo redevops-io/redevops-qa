@@ -56,7 +56,7 @@ def test_both_scanners_run_over_every_ref_and_pin_everything_they_download():
 
 def test_the_gitleaks_allow_list_is_fingerprints_of_justified_existing_lines():
     entries = [ln for ln in IGNORE.splitlines() if ln.strip() and not ln.startswith("#")]
-    assert len(entries) == 2, "the allow-list carries exactly the two justified false positives of 2026-11-07"
+    assert len(entries) == 3, "the allow-list carries exactly the two justified false positives of 2026-11-07 and the one of 2026-11-14 (a refused-credential literal of the P2-1 acceptance test, recorded in SECURITY.md)"
     for line in entries:
         commit, path, rule, lineno = line.split(":")
         assert len(commit) == 40 and rule == "generic-api-key"
@@ -65,7 +65,7 @@ def test_the_gitleaks_allow_list_is_fingerprints_of_justified_existing_lines():
         body = source.read_text(encoding="utf-8").splitlines()
         assert 0 < int(lineno) <= len(body), f"{path}:{lineno} is past the end of the file"
     # the two judged lines are the ones documented in SECURITY.md and the ignore-file comments
-    assert "generate_private_key" in IGNORE and "api-discount-10000" in IGNORE
+    assert "generate_private_key" in IGNORE and "api-discount-10000" in IGNORE and "test_p21_external_target_acceptance.py" in IGNORE
 
 
 # ---- the trufflehog result gate (tools/check_trufflehog_baseline.py) -------------------------------------------

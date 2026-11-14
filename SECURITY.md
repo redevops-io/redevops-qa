@@ -35,6 +35,8 @@ RFC 6761 and RFC 2606 reserve) in `tests/test_bundle_browser.py`, `packages/qa-r
 that the `PhraseAccessToken` detector reads as a token; each is allow-listed with its reason. An earlier record here
 (2026-11-07) stated a clean trufflehog run; that figure could not be reproduced on a fresh clone of the same commit and
 is superseded by this one — the correction is part of the record, not a change to what is scanned.
+Added 2026-11-14: one more entry in each list for the P2-1 acceptance test (`packages/qa-runner/tests/test_p21_external_target_acceptance.py`, commit 3e2ad31): a credential-shaped literal and a
+userinfo-shaped example URL that the test feeds to the target validator to prove they are refused; the current text assembles them at run time, and only that one earlier revision is flagged.
 The public history is not rewritten (owner decision D3, 2026-11-07): the scanning record and the allow-lists are the
 disclosure. A clean scan is not proof that no secret ever existed — the regex audit of 2026-11-05 and these tools agree
 on "no live credential", and new findings are handled through the private report channel above.
