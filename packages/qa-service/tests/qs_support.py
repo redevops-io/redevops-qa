@@ -58,6 +58,12 @@ if cmd == "report":
 if cmd == "verify":
     print(json.dumps({"ok": True, "assurance": "internally-consistent"}))
     sys.exit(0)
+if cmd == "pack":
+    control = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "control.json")))
+    if control.get("pack_fail"):
+        sys.exit(5)
+    sys.stdout.buffer.write(b"CANONICAL-ARCHIVE-BYTES")
+    sys.exit(0)
 sys.exit(2)
 '''
 

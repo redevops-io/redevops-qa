@@ -37,7 +37,7 @@ One API serves the browser interface (`/ui/`), scripts and other products. JSON,
 | `GET /v1/runs/{id}/evidence/files/{index}` | viewer | | one listed file (`index` into `files`, never a path), `application/octet-stream`, `Content-Disposition: attachment`, at most 16 MiB |
 | `GET /v1/runs/{id}/verify` | viewer | | `{exit_code, meaning, result (the `redevops-qa verify --json` document), independent}`: re-verification in a separate process |
 | `GET /v1/runs/{id}/report?format=text\|json\|html` | viewer | | the report; HTML has its own CSP (`default-src 'none'`, no script) |
-| `GET /v1/runs/{id}/bundle.tar` | viewer | | the evidence bundle for `redevops-qa verify` elsewhere |
+| `GET /v1/runs/{id}/bundle.tar` | viewer | | the evidence bundle as the canonical archive (what `redevops-qa pack` writes), for `redevops-qa verify` elsewhere |
 | `DELETE /v1/runs/{id}` | admin (or the service token) | | 204; 409 while running |
 
 ## Approvals made in another product (Projects, Sidekick)

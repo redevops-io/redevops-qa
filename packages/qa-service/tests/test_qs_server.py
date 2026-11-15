@@ -104,9 +104,17 @@ def test_report_verify_and_bundle_download(make_server):
     assert status == 200 and doc["exit_code"] == 0 and doc["result"]["ok"] is True
     status, body, headers = c.call("GET", base + "/bundle.tar")
     assert status == 200 and headers["Content-Type"] == "application/x-tar"
-    import io, tarfile
-    names = tarfile.open(fileobj=io.BytesIO(body)).getnames()
-    assert f"{rec['id']}/bundle-manifest.json" in names
+    assert headers["Content-Disposition"] == f'attachment; filename="{rec["id"]}.tar"'
+    # the service does not build the archive itself: it is exactly what the command's canonical `pack` produced
+    assert body == b"CANONICAL-ARCHIVE-BYTES"
+
+
+def test_the_bundle_archive_is_not_served_when_the_command_refuses_to_pack_it(make_server):
+    srv, c = make_server(control={"pack_fail": True})
+    rec = c.json("POST", "/v1/runs", {})[1]
+    finish(srv)
+    status, doc, _ = c.json("GET", "/v1/runs/" + rec["id"] + "/bundle.tar")
+    assert status == 502 and doc["error"] == "pack_failed"
 
 
 def test_one_run_at_a_time(make_server):
