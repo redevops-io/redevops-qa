@@ -7,7 +7,7 @@
     "published_packages": false,
     "install_from": "source-checkout",
     "licence_wording": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source",
-    "note": "The repository is public and pre-release: no release tag exists and nothing is published to a package registry. Every install path is a checkout of this repository at a named commit, so a package-registry install command does not exist."
+    "note": "The repository is public and pre-release. Release git tags v0.6.2 and v0.6.3 exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2 and 0.6.3, linux/amd64 and linux/arm64); nothing is published to a language package registry (there is no PyPI package), and every install profile in this manifest is a checkout of this repository at a named commit, so a package-registry install command does not exist."
   },
   "test_levels": {
     "none": {
@@ -104,7 +104,7 @@
           "browser"
         ],
         "published_to_registry": false,
-        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. The browser comes from a separate `python -m playwright install --with-deps chromium` step, and the adapter imports the pinned agent-harness QA module named in pins.toml."
+        "note": "Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package). The browser comes from a separate `python -m playwright install --with-deps chromium` step, and the adapter imports the pinned agent-harness QA module named in pins.toml."
       },
       "dependencies": [
         {
@@ -241,7 +241,7 @@
           "browser"
         ],
         "published_to_registry": false,
-        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. Chrome and ChromeDriver are the host's; the adapter is given their paths and never downloads a browser or a driver."
+        "note": "Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package). Chrome and ChromeDriver are the host's; the adapter is given their paths and never downloads a browser or a driver."
       },
       "dependencies": [
         {
@@ -411,7 +411,7 @@
           "robot"
         ],
         "published_to_registry": false,
-        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry."
+        "note": "Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package)."
       },
       "dependencies": [
         {
@@ -558,7 +558,7 @@
           "android"
         ],
         "published_to_registry": false,
-        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. The Appium server, the UiAutomator2 driver, the Android SDK and the emulator or device belong to the worker's operator: nothing here installs, downloads or bundles them."
+        "note": "Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package). The Appium server, the UiAutomator2 driver, the Android SDK and the emulator or device belong to the worker's operator: nothing here installs, downloads or bundles them."
       },
       "dependencies": [
         {
@@ -760,7 +760,7 @@
         ],
         "extras": [],
         "published_to_registry": false,
-        "note": "Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. Installing the package gives an interface that reports unavailable; it does not install or drive any iOS tooling."
+        "note": "Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package). Installing the package gives an interface that reports unavailable; it does not install or drive any iOS tooling."
       },
       "dependencies": [
         {

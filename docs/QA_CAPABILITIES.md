@@ -2,7 +2,7 @@
 
 # ReDevOps QA: engine capability matrix
 
-This page is generated from [`qa-capabilities.json`](../qa-capabilities.json), which is checked in CI against its schema, the repository's pins, the adapters' own manifests and the CI history. Every claim below points to evidence in this repository or to a named CI job. Licence: source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source. The repository is public and pre-release: no release tag exists and nothing is published to a package registry. Every install path is a checkout of this repository at a named commit, so a package-registry install command does not exist.
+This page is generated from [`qa-capabilities.json`](../qa-capabilities.json), which is checked in CI against its schema, the repository's pins, the adapters' own manifests and the CI history. Every claim below points to evidence in this repository or to a named CI job. Licence: source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source. The repository is public and pre-release. Release git tags v0.6.2 and v0.6.3 exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2 and 0.6.3, linux/amd64 and linux/arm64); nothing is published to a language package registry (there is no PyPI package), and every install profile in this manifest is a checkout of this repository at a named commit, so a package-registry install command does not exist.
 
 ## What the test levels mean
 
@@ -102,7 +102,7 @@ Limitations:
 * Test level: `engine-backed-ci`. Scope: interactive mode, Chromium only, on a GitHub-hosted Linux x86_64 runner.
 * A real Chromium session is driven through the adapter in a CI job that fails rather than skips; only Chromium on Linux x86_64 has been exercised.
 * Execution modes: interactive.
-* Install: source-checkout-pip of `packages/qa-playwright` with extras `browser`. Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. The browser comes from a separate `python -m playwright install --with-deps chromium` step, and the adapter imports the pinned agent-harness QA module named in pins.toml.
+* Install: source-checkout-pip of `packages/qa-playwright` with extras `browser`. Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package). The browser comes from a separate `python -m playwright install --with-deps chromium` step, and the adapter imports the pinned agent-harness QA module named in pins.toml.
 * Documentation: [packages/qa-playwright/README.md](../packages/qa-playwright/README.md). Example: `playwright-browser-lane` ([packages/qa-playwright/tests/browser/test_pw_browser_loop.py](../packages/qa-playwright/tests/browser/test_pw_browser_loop.py)).
 
 Verified on:
@@ -144,7 +144,7 @@ Licences: the adapter is source-available under the family licence (AGPL-3.0-or-
 * Test level: `engine-backed-ci`. Scope: interactive and suite modes, Chrome only, on a GitHub-hosted Linux x86_64 runner.
 * Both modes ran against real Chrome and ChromeDriver in CI; the scope is one browser on one runner image.
 * Execution modes: interactive, suite.
-* Install: source-checkout-pip of `packages/qa-adapter-kit`, `packages/qa-selenium` with extras `browser`. Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. Chrome and ChromeDriver are the host's; the adapter is given their paths and never downloads a browser or a driver.
+* Install: source-checkout-pip of `packages/qa-adapter-kit`, `packages/qa-selenium` with extras `browser`. Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package). Chrome and ChromeDriver are the host's; the adapter is given their paths and never downloads a browser or a driver.
 * Documentation: [packages/qa-selenium/README.md](../packages/qa-selenium/README.md). Example: `selenium-browser-lane` ([packages/qa-selenium/tests/browser/test_sel_browser.py](../packages/qa-selenium/tests/browser/test_sel_browser.py)).
 
 Verified on:
@@ -187,7 +187,7 @@ Licences: the adapter is source-available under the family licence (AGPL-3.0-or-
 * Test level: `engine-backed-ci`. Scope: suite mode, Robot Framework 7.5 only, on a GitHub-hosted Linux x86_64 runner.
 * Real Robot Framework 7.5 suites ran through the adapter in a CI job that fails rather than skips; nothing else about the engine is claimed.
 * Execution modes: suite.
-* Install: source-checkout-pip of `packages/qa-adapter-kit`, `packages/qa-robot` with extras `robot`. Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry.
+* Install: source-checkout-pip of `packages/qa-adapter-kit`, `packages/qa-robot` with extras `robot`. Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package).
 * Documentation: [packages/qa-robot/README.md](../packages/qa-robot/README.md). Example: `robotframework-real-lane` ([packages/qa-robot/tests/real/test_rb_real.py](../packages/qa-robot/tests/real/test_rb_real.py)).
 
 Verified on:
@@ -227,7 +227,7 @@ Licences: the adapter is source-available under the family licence (AGPL-3.0-or-
 * Test level: `device-backed-local`. Scope: interactive mode on one Android 17 arm64 emulator on an Apple-silicon Mac, observed locally; CI shows only the server without a device.
 * One emulator session passed three times in a row by hand; the manual device workflow has never run in CI, and CI proves only server start-up and client wiring without a device.
 * Execution modes: interactive.
-* Install: source-checkout-pip of `packages/qa-adapter-kit`, `packages/qa-selenium`, `packages/qa-appium` with extras `android`. Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. The Appium server, the UiAutomator2 driver, the Android SDK and the emulator or device belong to the worker's operator: nothing here installs, downloads or bundles them.
+* Install: source-checkout-pip of `packages/qa-adapter-kit`, `packages/qa-selenium`, `packages/qa-appium` with extras `android`. Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package). The Appium server, the UiAutomator2 driver, the Android SDK and the emulator or device belong to the worker's operator: nothing here installs, downloads or bundles them.
 * Documentation: [packages/qa-appium/README.md](../packages/qa-appium/README.md). Example: `appium-android-device-lane` ([packages/qa-appium/tests/real/test_ap_android_device.py](../packages/qa-appium/tests/real/test_ap_android_device.py)).
 
 Verified on:
@@ -275,7 +275,7 @@ Licences: the adapter is source-available under the family licence (AGPL-3.0-or-
 * Test level: `none`. Scope: no test drives iOS; the adapter is an interface that reports UNAVAILABLE for every action unless an operator supplies a driver for their own licensed worker.
 * No iOS session has ever been run. The adapter reports UNAVAILABLE; it is not a pass and not a skip.
 * Execution modes: interactive.
-* Install: source-checkout-pip of `packages/qa-adapter-kit`, `packages/qa-selenium`, `packages/qa-appium`. Installed with pip from a checkout of this public repository at a named commit; there is no release tag and nothing is published to a package registry. Installing the package gives an interface that reports unavailable; it does not install or drive any iOS tooling.
+* Install: source-checkout-pip of `packages/qa-adapter-kit`, `packages/qa-selenium`, `packages/qa-appium`. Installed with pip from a checkout of this public repository at a named commit; nothing is published to a package registry (there is no PyPI package). Installing the package gives an interface that reports unavailable; it does not install or drive any iOS tooling.
 * Documentation: [packages/qa-appium/README.md](../packages/qa-appium/README.md). No example exists.
 
 Verified on:

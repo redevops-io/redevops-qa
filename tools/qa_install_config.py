@@ -200,7 +200,7 @@ def generate(selection: Any, capabilities: Dict[str, Any], profiles: Dict[str, A
         _warn(warnings, "SOURCE_IS_A_BUNDLE_ARCHIVE", "no bundle is published: build the archive from a checkout of the repository with tools/build_bundle.py or take the archive of a workflow run, and compare its "
                                                          "sha256 with a value you obtained from somewhere its producer does not control; the digest file next to it is only as good as where you got it")
     else:
-        _warn(warnings, "SOURCE_IS_A_CHECKOUT", "there is no release tag and no package-registry package: the install is a clone of the repository at the pinned commit")
+        _warn(warnings, "SOURCE_IS_A_CHECKOUT", "the install is a clone of the repository at the pinned commit: a published container image exists as a separate channel this profile never installs from, and there is no language-package-registry package")
     if status != "verified" and bundle:
         _warn(warnings, "EXPERIMENTAL_PROFILE", f"this profile on this host is {status}: CI runs its steps from the bundle a job of the same workflow builds, and no run on the main branch is recorded for it yet")
     elif status != "verified":

@@ -2,7 +2,7 @@
 
 # ReDevOps QA: install profiles
 
-This page is generated from [`qa-install-profiles.json`](../qa-install-profiles.json), the data the installer configurator is built from. Every profile but `local-python-qa` installs from a clone of https://github.com/redevops-io/redevops-qa at the pinned commit `55c746e35412a92a287ebbbc239a69de0fbebf10`; The repository is public and pre-release: it has no release tag and nothing is published to a package registry, so every profile is a clone of the repository at the pinned commit. The dependency release tags are the pins in pins.toml; the verified profiles do not need them. The profile `local-python-qa` installs from a bundle archive instead (see its section).
+This page is generated from [`qa-install-profiles.json`](../qa-install-profiles.json), the data the installer configurator is built from. Every profile but `local-python-qa` installs from a clone of https://github.com/redevops-io/redevops-qa at the pinned commit `55c746e35412a92a287ebbbc239a69de0fbebf10`; The repository is public and pre-release. Release git tags (v0.6.2, v0.6.3) exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2, 0.6.3): that is a separate channel and no profile in this file is it. Every profile here is a clone of the repository at the pinned commit, and nothing is published to a language package registry (there is no PyPI package); the Compose and Kubernetes targets stay planned until a named CI job installs from the published image (see targets). The dependency release tags are the pins in pins.toml; the verified profiles do not need them. The profile `local-python-qa` installs from a bundle archive instead (see its section).
 
 A profile is **verified** only when a CI job runs that exact profile, step by step, on the host named; **experimental** means the steps are written and partly or not at all run for that host; **planned** means nothing is offered yet and the reason is given.
 
@@ -111,7 +111,7 @@ Uninstall: The steps leave two directories: the virtual environment (removed by 
 
 Limitations:
 
-* There is no release tag and no package-registry package: the install is a checkout at the pinned commit.
+* A published container image exists as a separate channel (ghcr.io/redevops-io/redevops-qa); nothing here is published to a language package registry (there is no PyPI package), so this profile is a checkout at the pinned commit.
 * Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.
 * A native engine pass or fail is not an independent verdict; no verifier is installed.
 * Robot Framework 7.5 only; only allowlisted libraries run, so this is not a browser profile.
@@ -202,7 +202,7 @@ Uninstall: The steps leave two directories: the virtual environment (removed by 
 
 Limitations:
 
-* There is no release tag and no package-registry package: the install is a checkout at the pinned commit.
+* A published container image exists as a separate channel (ghcr.io/redevops-io/redevops-qa); nothing here is published to a language package registry (there is no PyPI package), so this profile is a checkout at the pinned commit.
 * Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.
 * A native engine pass or fail is not an independent verdict; no verifier is installed.
 * Chrome and ChromeDriver only; their versions are the host's and only the versions on the CI runner image were exercised.
@@ -291,7 +291,7 @@ Uninstall: The steps leave two directories: the virtual environment (removed by 
 
 Limitations:
 
-* There is no release tag and no package-registry package: the install is a checkout at the pinned commit.
+* A published container image exists as a separate channel (ghcr.io/redevops-io/redevops-qa); nothing here is published to a language package registry (there is no PyPI package), so this profile is a checkout at the pinned commit.
 * Transitive Python dependencies and the build backend are resolved by pip at install time and are not pinned or hash-checked.
 * A native engine pass or fail is not an independent verdict; no verifier is installed.
 * Experimental: the device step is manual and has never run in CI; the one recorded emulator run is local (see the capability manifest).
