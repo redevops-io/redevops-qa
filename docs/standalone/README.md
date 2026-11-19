@@ -24,13 +24,15 @@ Licence: source-available under the family licence (AGPL-3.0-or-later with the C
 
 ## Published release
 
-`v0.6.2`, built from commit `d86219f5c3053ecb1659ea80975132922bc08ebc` by `.github/workflows/oci-release.yml` (run 43503888890):
+`v0.6.3`, built from commit `9e495bdf31a7606989e099dc0af8a157fd70f91d` by `.github/workflows/oci-release.yml` (run 43554362501):
 
 | Reference | Digest |
 |---|---|
-| `ghcr.io/redevops-io/redevops-qa:0.6.2` and `:0.6.2-d86219f5c305` (the same index) | `sha256:fa99c66bd94e64a871200eb36f4c242fa839bddca4c626f701e8df036d620065` |
-| linux/amd64 image | `sha256:4c65abb941d488e03c0685fcf7cd3f8fce0eb631803d9b365bb9faf37707d998` |
-| linux/arm64 image | `sha256:88f778e2867c7552c131ed82f42ba2f9eb899c57da28db1a7751bdb9237d44fe` |
+| `ghcr.io/redevops-io/redevops-qa:0.6.3` and `:0.6.3-9e495bdf31a7` (the same index) | `sha256:54d8064caef7e9798bff2009c841103a37451ecd4e7fc9f1cbf44c9bf8dff779` |
+| linux/amd64 image | `sha256:56cea38893e1c203d778c0cdbca82aa553a4e4ec6c75a3e4ba7177e9dc92f014` |
+| linux/arm64 image | `sha256:d948de602761b1f79b372104d8965a1a141e795c162387ff26e5602946626779` |
+
+The previous release, `v0.6.2` (commit `d86219f5c3053ecb1659ea80975132922bc08ebc`, index digest `sha256:fa99c66bd94e64a871200eb36f4c242fa839bddca4c626f701e8df036d620065`), stays published as-is; tags are never moved.
 
 The index and both images carry a keyless cosign signature by the identity `https://github.com/redevops-io/redevops-qa/.github/workflows/oci-release.yml@refs/heads/main` (issuer
 `https://token.actions.githubusercontent.com`); the index also carries a GitHub build-provenance attestation, and BuildKit attached an SBOM and a provenance attestation per architecture.
@@ -57,7 +59,7 @@ mkdir redevops-qa && cd redevops-qa
 # copy compose.yaml and .env.example from deploy/standalone/ into this directory, then:
 cp .env.example .env && chmod 600 .env
 openssl rand -hex 32          # put the output after QA_SERVICE_TOKEN= in .env
-# set QA_IMAGE_TAG= in .env to the version you install, for example 0.6.2
+# set QA_IMAGE_TAG= in .env to the version you install, for example 0.6.3
 docker compose up -d --wait
 ```
 

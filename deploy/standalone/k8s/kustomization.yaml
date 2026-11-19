@@ -10,5 +10,5 @@ resources:
 # The version you install. Pin the digest instead of the tag when you can: set `digest: sha256:...` and remove newTag.
 images:
   - name: ghcr.io/redevops-io/redevops-qa
-    newTag: "0.6.2"
+    newTag: "0.6.3"
 # Not listed on purpose (apply them yourself, see docs/standalone/README.md): secret.example.yaml (the token) and ingress.example.yaml (an optional Ingress).
