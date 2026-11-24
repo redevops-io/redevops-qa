@@ -384,7 +384,7 @@ Uninstall: uninstall.sh removes the installation directory (virtual environment,
 
 Limitations:
 
-* CPython 3.12 on Linux x86_64 only. Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.
+* CPython 3.12 on Linux x86_64 or, from 0.6.6, Linux arm64 (one bundle per platform; a bundle refuses the other platform). Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.
 * No bundle is published and no release exists: the archive comes from a build of the repository or from a workflow run, and its digest is only as trustworthy as the place you obtained it from.
 * Chromium is downloaded when the browser step runs and is not shipped in the bundle; the bundle pins the sha256 of the archives and the mode, size and sha256 of every file of the unpacked tree, the step refuses an archive that does not match, and doctor checks the installed tree. Not covered: the operating system libraries of --with-deps, and the availability of the download host.
 * The runner in this release runs plans against the bundled fixture app only; a Robot lane that asks for the kernel layers (`origin-only`) is limited by them and does not start where they are unavailable (`doctor` measures them), and a Robot lane that says `not-enforced` is limited by nothing (see the egress matrix in the runner's README).
