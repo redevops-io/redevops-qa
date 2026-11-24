@@ -23,6 +23,7 @@ ENV_DATA = "QA_SERVICE_DATA_DIR"
 ENV_CLI = "QA_SERVICE_CLI"
 ENV_PLANS = "QA_SERVICE_PLANS_DIR"
 ENV_TIMEOUT = "QA_SERVICE_RUN_TIMEOUT"
+ENV_COOKIE_SECURE = "QA_SERVICE_COOKIE_SECURE"
 
 
 class ConfigError(Exception):
@@ -42,6 +43,7 @@ class Config:
     request_timeout: int = 30
     two_person: bool = False
     approval_secret: bytes = b""
+    cookie_secure: bool = False     # the session cookie carries `Secure`: set where TLS is in front, so a browser never sends it over plain HTTP
 
 
 def token_problem(token: str) -> Optional[str]:
@@ -105,6 +107,15 @@ def _approval_secret(env: Mapping[str, str]) -> bytes:
     return value.encode("utf-8") if value else b""
 
 
+def _cookie_secure(env: Mapping[str, str]) -> bool:
+    """`1` where TLS terminates in front of the service. It is a statement by the operator, not a guess from a request header: with `Secure`, a browser
+    reaching the service over plain HTTP would silently drop the session cookie, so anything but 0 or 1 is refused instead of interpreted."""
+    value = env.get(ENV_COOKIE_SECURE, "0")
+    if value not in ("0", "1"):
+        raise ConfigError(f"{ENV_COOKIE_SECURE} must be 0 or 1 (1 where TLS is in front of the service)")
+    return value == "1"
+
+
 def load_config(env: Mapping[str, str]) -> Config:
     token = _read_token(env)
     problem = token_problem(token)
@@ -127,4 +138,5 @@ def load_config(env: Mapping[str, str]) -> Config:
     if plans is not None and not plans.startswith("/"):
         raise ConfigError(f"{ENV_PLANS} must be an absolute path")
     return Config(token=token.encode("ascii"), bind=bind, port=port, data_dir=Path(data), cli=resolved, plans_dir=Path(plans) if plans else None,
-                  run_timeout=_int(env, ENV_TIMEOUT, 1800, 10, 86400), two_person=env.get("QA_REQUIRE_TWO_PERSON") == "1", approval_secret=_approval_secret(env))
+                  run_timeout=_int(env, ENV_TIMEOUT, 1800, 10, 86400), two_person=env.get("QA_REQUIRE_TWO_PERSON") == "1", approval_secret=_approval_secret(env),
+                  cookie_secure=_cookie_secure(env))

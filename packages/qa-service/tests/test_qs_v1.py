@@ -546,3 +546,39 @@ def test_the_token_is_for_the_service_credential_only_and_without_a_secret_it_is
     assert status == 403 and doc["error"] == "approval_token_invalid"
     status, doc, _ = u.call("POST", f"/v1/runs/{run['id']}/approval", {"approved": True, "estimate_digest": est["digest"]}, headers={"X-Approval-Token": "x"})
     assert status == 403 and doc["error"] == "forbidden", "a user decides in their own name, not with a token"
+
+
+# ───── the session cookie's Secure attribute is the operator's statement that TLS is in front ─────
+
+def _signed_in(make_server, **extra):
+    srv, c = make_server(**extra)
+    srv.users.add("alice-admin", "admin", "correct horse battery staple", created_by="test")
+    status, data, cookie, raw = login(c, "alice-admin", "correct horse battery staple")
+    assert status == 200
+    return c, User(c, cookie, data["csrf"]), raw
+
+
+def test_the_session_cookie_is_secure_where_tls_is_declared_on_sign_in_and_on_sign_out(make_server):
+    c, user, raw = _signed_in(make_server, QA_SERVICE_COOKIE_SECURE="1")
+    assert "; Secure" in raw and "HttpOnly" in raw and "SameSite=Strict" in raw
+    status, _, headers = user.call("DELETE", "/v1/session")
+    assert status == 204 and "; Secure" in headers["Set-Cookie"] and "Max-Age=0" in headers["Set-Cookie"]
+
+
+def test_without_the_setting_the_cookie_is_not_secure_whatever_a_request_header_claims(make_server):
+    c, _, raw = _signed_in(make_server)
+    assert "Secure" not in raw, "over plain HTTP (the default, loopback) a Secure cookie would be dropped by the browser"
+    import http.client
+    conn = http.client.HTTPConnection(c.base.split("//")[1])
+    conn.request("POST", "/v1/session", body=json.dumps({"username": "alice-admin", "password": "correct horse battery staple"}),
+                 headers={"Content-Type": "application/json", "X-Forwarded-Proto": "https"})
+    r = conn.getresponse()
+    r.read()
+    assert r.status == 200 and "Secure" not in r.getheader("Set-Cookie"), "a header any client can send does not decide this"
+    conn.close()
+
+
+def test_the_setting_is_0_or_1_and_anything_else_is_refused(make_server):
+    from qa_service.config import ConfigError
+    with pytest.raises(ConfigError, match="QA_SERVICE_COOKIE_SECURE"):
+        make_server(QA_SERVICE_COOKIE_SECURE="true")

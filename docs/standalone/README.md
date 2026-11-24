@@ -147,7 +147,7 @@ users, no roles: anyone holding it can start runs and read every result. Put TLS
 | `QA_APPROVAL_SECRET` | none | `QA_SERVICE_APPROVAL_SECRET`: the secret shared with Projects for signed approvals (see docs/standalone/API.md); empty = such approvals are never accepted |
 | `QA_IMAGE` | `ghcr.io/redevops-io/redevops-qa` | the image name |
 
-Also read by the service: `QA_REQUIRE_TWO_PERSON=1` (the requester cannot approve their own run), `QA_SERVICE_BOOTSTRAP_ADMIN_NAME` and `QA_SERVICE_BOOTSTRAP_ADMIN_PASSWORD_FILE`.
+Also read by the service: `QA_SERVICE_COOKIE_SECURE=1` (set it where TLS is in front: the session cookie then carries `Secure`, so a browser never sends it over plain HTTP; leave it unset on plain HTTP, where a browser would drop such a cookie), `QA_REQUIRE_TWO_PERSON=1` (the requester cannot approve their own run), `QA_SERVICE_BOOTSTRAP_ADMIN_NAME` and `QA_SERVICE_BOOTSTRAP_ADMIN_PASSWORD_FILE`.
 
 The other service variables are set by the image and rarely need changing: `QA_SERVICE_BIND=0.0.0.0` (inside the container), `QA_SERVICE_PORT=8080`, `QA_SERVICE_DATA_DIR=/data`,
 `QA_SERVICE_PLANS_DIR=/opt/redevops-qa/share/plans`, `QA_SERVICE_TOKEN_FILE` (see [packages/qa-service](../../packages/qa-service/README.md)).
