@@ -189,8 +189,11 @@ class RunStore:
                 why = caps.unavailable(p["plan"], self.facts, self.cfg.plans_dir)
             entry["available"] = why is None
             entry["unavailable"] = why
-            if target is not None and target["kind"] not in kinds:
-                entry["available"], entry["unavailable"] = False, {"code": "TARGET_KIND_MISMATCH", "reason": f"this profile runs against a {' or '.join(kinds)} target, not {target['kind']}", "remedy": "choose a profile for this target"}
+            if "presentation" in p:
+                entry["presentation"] = p["presentation"]
+            mismatch = catalog.profile_mismatch(pid, target) if target is not None else None
+            if mismatch is not None:
+                entry["available"], entry["unavailable"] = False, mismatch
             out.append(entry)
         return out
 
@@ -211,8 +214,8 @@ class RunStore:
         if target["kind"] == "external-origin" and defect != "none":
             raise Refused("invalid", "a seeded defect applies to the fixture target only", status=422, field="defect")
         why = self.profile_unavailable(profile, target)
-        if why is None and target["kind"] not in catalog.PROFILES[profile]["targets"]:
-            why = {"code": "TARGET_KIND_MISMATCH", "reason": f"this profile does not run against a {target['kind']} target", "remedy": "choose a profile for this target"}
+        if why is None:
+            why = catalog.profile_mismatch(profile, target)
         if why is not None:
             raise Refused("plan_unavailable", why["reason"], why, status=422)
         approval_required = target["run_approval"] == "required"
@@ -302,10 +305,10 @@ class RunStore:
             argv.append(str(self.cfg.plans_dir / plan_file))
         return argv + ["--out", str(d / "evidence"), "--run-id", run_id, "--defect", defect]
 
-    def _external_argv(self, run_id: str, origin: str) -> List[str]:
+    def _external_argv(self, run_id: str, origin: str, profile: str = catalog.DEFAULT_EXTERNAL_PROFILE) -> List[str]:
         """The command of a run against a registered external target: the plan is built here from the shipped example and the REGISTERED origin, written into the run's directory and given to ``run``."""
         d = self.root / run_id
-        plan = catalog.edge_sentinel_plan(origin, self.cfg.plans_dir)
+        plan = catalog.edge_sentinel_plan(origin, self.cfg.plans_dir, profile)
         (d / "plan.json").write_text(json.dumps(plan, sort_keys=True), encoding="utf-8")
         return [self.cfg.cli, "run", str(d / "plan.json"), "--out", str(d / "evidence"), "--run-id", run_id]
 
@@ -326,7 +329,7 @@ class RunStore:
             home.mkdir()
             with open(d / "output.txt", "wb") as out:
                 target = self.targets.get(record["target_id"]) or {}
-                argv = self._external_argv(run_id, target["origin"]) if target.get("kind") == "external-origin" else self._argv(run_id, profile, defect)
+                argv = self._external_argv(run_id, target["origin"], profile) if target.get("kind") == "external-origin" else self._argv(run_id, profile, defect)
                 proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, cwd=str(d), env=self.child_env(home), start_new_session=True)
                 self._procs[run_id] = proc
                 try:

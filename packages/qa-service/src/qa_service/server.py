@@ -435,8 +435,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(404, "not_found", "no such target")
         if not isinstance(profile, str) or profile not in catalog.PROFILES:
             raise ApiError(422, "invalid", "profile is one of " + ", ".join(sorted(catalog.PROFILES)), field="profile")
-        if target["kind"] not in catalog.PROFILES[profile]["targets"]:
-            raise ApiError(422, "invalid", f"profile {profile} does not run against a {target['kind']} target", field="profile")
+        mismatch = catalog.profile_mismatch(profile, target)
+        if mismatch is not None:
+            raise ApiError(422, "invalid", f"profile {profile} does not run against this target: {mismatch['reason']}", field="profile")
         est = store.estimator.create(target, profile, store.profile_unavailable(profile, target))
         self._json(201, est)
 

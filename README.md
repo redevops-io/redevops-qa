@@ -7,6 +7,9 @@ immutable assertions deterministically, and keeps reproducible evidence.
 (P2-1, [docs/P2_1_EXTERNAL_TARGET_DESIGN.md](docs/P2_1_EXTERNAL_TARGET_DESIGN.md)): an Edge Sentinel started in its own read-only fixture mode (`EDGE_SENTINEL_DEMO=1`) on `http://127.0.0.1:<port>`, tested by the
 Playwright lane through the egress gateway. The runner refuses it unless the target's `/health` reports `demo.enabled=true`; it accepts no credential reference, no write, no other host and no other application. Such a run's
 level is capped at CORROBORATED (exit status 8) because nothing independent backs its assertions; it is never VERIFIED. Do not describe this as general-purpose QA support.
+Since 0.6.5 the same kind of target has a second journey, for checking that a fix at the edge took effect: an Edge Sentinel that is **not** in fixture mode and has switched on its own read-only
+enforcement page (`SENTINEL_ENFORCEMENT_PROBE=1`; `/health` reports `enforcement_probe.enabled=true`). The plan with id `edge-sentinel-enforcement-readonly` may open `GET /enforcement/<documentation address>`
+of that loopback origin and nothing else (`ENFORCEMENT_PLAN_OUT_OF_SCOPE` otherwise); it writes nothing, takes no credential and has the same CORROBORATED ceiling.
 Supported platform: CPython 3.12 (the fixture-app CI also runs 3.11) on Linux x86_64 only — macOS and Windows are not claimed,
 the real-device Android lane has run only by hand on one emulator, and there is no iOS evidence.
 
