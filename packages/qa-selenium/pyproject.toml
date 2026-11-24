@@ -10,7 +10,7 @@ license = { text = "LicenseRef-AGPL-3.0-or-later-with-Commons-Clause" }
 dependencies = []
 
 [project.optional-dependencies]
-browser = ["selenium==4.52.0"]
+browser = ["selenium==4.53.0"]
 dev = ["pytest>=8"]
 
 [build-system]
