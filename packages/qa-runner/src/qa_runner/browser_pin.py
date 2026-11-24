@@ -44,7 +44,9 @@ from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 LOCK_NAME = "browser.lock.json"
 LOCK_SCHEMA = "redevops-qa/browser-lock"
 LOCK_VERSION = "1.0"
-TARGET_PLATFORM = "linux-x86_64"
+TARGET_PLATFORM = "linux-x86_64"                 # the platform of bundle/browser.lock.json, the first lock there was
+#: every platform a lock can be for. Each has its OWN lock (bundle/browser.lock.json, bundle/browser.lock.linux-arm64.json): the archives, their digests and the tree differ.
+TARGET_PLATFORMS = ("linux-x86_64", "linux-arm64")
 MARKER = "INSTALLATION_COMPLETE"                 # written by Playwright (and by ``stage``) when an install directory is complete; part of the pinned tree
 OPTIONAL_MARKERS = ("DEPENDENCIES_VALIDATED",)     # written by Playwright on first launch; allowed (empty) beside the pinned files
 _HEX = re.compile(r"[0-9a-f]{64}")
@@ -95,6 +97,7 @@ class Lock:
     directories: Dict[str, int]                   # relative path -> permission bits
     files: Dict[str, Tuple[int, int, str]]        # relative path -> (permission bits, size, sha256)
     tree_sha256: str
+    platform: str = TARGET_PLATFORM               # the platform this lock's archives and tree are for
 
     def dirs(self) -> List[str]:
         return [a.dir for a in self.archives]
@@ -141,8 +144,9 @@ def parse_lock(data: bytes) -> Lock:
         raise LockError(f"not JSON ({type(exc).__name__}: {str(exc)[:80]})") from None
     if not isinstance(doc, dict) or doc.get("schema") != LOCK_SCHEMA or doc.get("schema_version") != LOCK_VERSION:
         raise LockError(f"not a {LOCK_SCHEMA} {LOCK_VERSION} document")
-    if doc.get("target") != {"platform": TARGET_PLATFORM}:
-        raise LockError(f"the lock is for {TARGET_PLATFORM} and nothing else")
+    target = doc.get("target")
+    if not (isinstance(target, dict) and set(target) == {"platform"} and target["platform"] in TARGET_PLATFORMS):
+        raise LockError("the lock's target is one of " + ", ".join(TARGET_PLATFORMS) + " and nothing else")
     pw, br = doc.get("playwright"), doc.get("browser")
     if not (isinstance(pw, dict) and isinstance(pw.get("version"), str) and pw["version"] and isinstance(pw.get("browsers_json_sha256"), str) and _HEX.fullmatch(pw["browsers_json_sha256"])):
         raise LockError("playwright needs a version and the sha256 of its browsers.json")
@@ -194,7 +198,16 @@ def parse_lock(data: bytes) -> Lock:
     digest = tree_digest(dirs, files)
     if doc.get("tree_sha256") != digest:
         raise LockError("tree_sha256 is not the digest of the tree entries")
-    return Lock(hashlib.sha256(data).hexdigest(), pw["version"], pw["browsers_json_sha256"], br["revision"], br["browser_version"], tuple(archives), dirs, files, digest)
+    return Lock(hashlib.sha256(data).hexdigest(), pw["version"], pw["browsers_json_sha256"], br["revision"], br["browser_version"], tuple(archives), dirs, files, digest, target["platform"])
+
+
+def host_platform(system: Optional[str] = None, machine: Optional[str] = None) -> str:
+    """This host in the lock's terms: ``linux-x86_64``, ``linux-arm64``, or ``<system>-<machine>`` for a host no lock exists for."""
+    import platform as _platform
+    system = (system or _platform.system()).lower()
+    machine = (machine or _platform.machine()).lower()
+    machine = {"amd64": "x86_64", "aarch64": "arm64"}.get(machine, machine)
+    return f"{system}-{machine}"
 
 
 def load_lock(path: os.PathLike) -> Lock:

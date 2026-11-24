@@ -233,7 +233,7 @@ def estimate_document(frozen: FrozenPlan) -> dict:
     doc["egress_policy_digest"] = None if record is None else record["egress_policy_digest"]
     doc["credential_refs"] = [] if record is None else list(record["credential_refs"])          # names only: a reference is resolved by nobody in this release
     doc["verification_ceiling"] = "VERIFIED" if record is None else record["verification_ceiling"]
-    doc["platform"] = {"system": _platform.system().lower(), "machine": _platform.machine().lower(), "claim": "Linux x86_64, CPython 3.12 (fixture-app CI also 3.11)"}
+    doc["platform"] = {"system": _platform.system().lower(), "machine": _platform.machine().lower(), "claim": "Linux x86_64, CPython 3.12 (fixture-app CI also 3.11); Linux arm64, CPython 3.12"}
     problems = v1_scope_problems(frozen.plan)
     doc["problems"] = problems
     doc["would_run"] = not problems

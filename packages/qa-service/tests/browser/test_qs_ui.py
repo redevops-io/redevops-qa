@@ -95,7 +95,7 @@ def test_sign_in_failure_is_said_in_words_and_success_lands_on_the_dashboard(ui)
 
 
 def test_an_installation_that_cannot_run_lanes_says_so_everywhere_and_never_offers_a_dead_button(ui):
-    srv, c, pg = ui(facts=Facts(machine="aarch64", missing_packages=("playwright", "robot")))
+    srv, c, pg = ui(facts=Facts(machine="riscv64", missing_packages=("playwright", "robot")))
     pg.signin("olivia-op")
     expect(pg.page.get_by_text("No lane can run on this installation.")).to_be_visible()
     assert "ARCHITECTURE_UNSUPPORTED" in pg.page.locator("main").inner_text() and "Remedy:" in pg.page.locator("main").inner_text()
@@ -105,7 +105,7 @@ def test_an_installation_that_cannot_run_lanes_says_so_everywhere_and_never_offe
     expect(pg.page.get_by_role("button", name="Estimate")).to_be_disabled()
     expect(pg.page.get_by_role("button", name="Start run")).to_be_disabled()
     text = pg.page.locator("main").inner_text()
-    assert "unavailable because" in text and "linux x86_64 only" in text and "No profile can run against this target here" in text
+    assert "unavailable because" in text and "linux x86_64 and linux arm64 only" in text and "No profile can run against this target here" in text
     no_problems(pg)
 
 
@@ -164,7 +164,7 @@ def test_roles_are_visible_in_the_interface_a_viewer_cannot_start_or_register(ui
 
 
 def test_the_external_edge_sentinel_profile_is_listed_unavailable_with_its_reason_where_lanes_cannot_run(ui):
-    srv, c, pg = ui(facts=Facts(machine="aarch64", missing_packages=("playwright", "robot")))
+    srv, c, pg = ui(facts=Facts(machine="riscv64", missing_packages=("playwright", "robot")))
     pg.signin("olivia-op")
     text = pg.page.locator("main").inner_text()
     assert "Edge Sentinel fixture mode (read-only)" in text and "ARCHITECTURE_UNSUPPORTED" in text

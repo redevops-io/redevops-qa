@@ -301,3 +301,17 @@ def test_run_and_demo_say_once_that_the_browser_pin_was_not_checked_when_it_was_
     monkeypatch.setattr(doctor, "check_browser_pin", lambda: doctor.Check("browser build", "OK", "matches"))
     reached, code, out, err = reaches_run_plan(monkeypatch, tmp_path, "run", str(plan_file(tmp_path, {K.ENGINE_PLAYWRIGHT})), "--out", str(tmp_path / "e5"))
     assert reached == [1] and "browser pin" not in err + out                                      # a checked browser says nothing extra
+
+
+# ------------------------------------------------------------------------------------------------------------------------ one pin per platform
+def test_a_pin_for_the_other_release_platform_fails_before_anything_is_compared(box, monkeypatch):
+    """Each platform has its own bundle and its own pin: the tree of one can never match the other, and the check says which is which instead of listing hundreds of differences."""
+    mine = bp.parse_lock(box.fake.lock_bytes).platform
+    other = next(p for p in bp.TARGET_PLATFORMS if p != mine)
+    monkeypatch.setattr(bp, "host_platform", lambda *a: other)
+    c = check(box)
+    assert c.status == "FAIL" and f"is for {mine}" in c.detail and f"this host is {other}" in c.detail and other in c.remedy
+    monkeypatch.setattr(bp, "host_platform", lambda *a: mine)
+    assert f"is for {mine}; this host" not in check(box).detail
+    monkeypatch.setattr(bp, "host_platform", lambda *a: "darwin-arm64")              # a host no pin exists for: the platform check warns; this check goes on as before
+    assert "this host is" not in check(box).detail

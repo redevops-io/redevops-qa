@@ -91,13 +91,15 @@ def test_the_python_check_names_the_floor():
     assert doctor.check_python((3, 11)).status == "OK" and doctor.check_python((3, 13)).status == "OK"
 
 
-@pytest.mark.parametrize("system,machine,status", [("Linux", "x86_64", "OK"), ("Linux", "AMD64", "OK"), ("Linux", "aarch64", "WARN"), ("Darwin", "arm64", "WARN"),
-                                                    ("Windows", "AMD64", "WARN")])
-def test_only_linux_x86_64_is_the_supported_platform(system, machine, status):
+@pytest.mark.parametrize("system,machine,status", [("Linux", "x86_64", "OK"), ("Linux", "AMD64", "OK"), ("Linux", "aarch64", "OK"), ("Linux", "arm64", "OK"), ("Darwin", "arm64", "WARN"),
+                                                    ("Windows", "AMD64", "WARN"), ("Linux", "riscv64", "WARN")])
+def test_linux_x86_64_and_linux_arm64_are_the_supported_platforms(system, machine, status):
     c = doctor.check_platform(system, machine)
     assert c.status == status
     if status == "WARN":
-        assert "development evidence" in c.detail
+        assert "development evidence" in c.detail and "Linux x86_64 and Linux arm64 only" in c.detail
+    else:
+        assert ("arm64" in c.detail) == (machine.lower() in ("aarch64", "arm64"))
 
 
 def test_a_missing_playwright_fails_with_the_remedy_and_installs_nothing(monkeypatch):

@@ -404,7 +404,8 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
     if external:
         extensions = {"target": "external-origin", "target_origin": frozen.plan["target"]["origin"], "target_declared_by": "operator",
                       ("target_fixture_mode_confirmed" if target_statement(frozen.plan_id) == "demo.enabled=true" else "target_enforcement_probe_confirmed"): target_statement(frozen.plan_id),
-                      "verification_ceiling": "CORROBORATED", "platform_claim": "Linux x86_64, CPython 3.12 (fixture-app CI also 3.11)"}
+                      "verification_ceiling": "CORROBORATED",
+                      "platform_claim": "Linux arm64, CPython 3.12" if K.claim_arch(env.get("arch")) == "aarch64" else "Linux x86_64, CPython 3.12 (fixture-app CI also 3.11)"}
     ui_only = sorted(f"{l.lane_id}:{aid}" for l in frozen.lanes for aid, fact in l.probes.items() if fact == "ui-only")
     if ui_only:
         extensions["no_independent_probe"] = ",".join(ui_only)[:500]           # assertions the plan declares ui-only: what the browser shows, nothing independent behind them

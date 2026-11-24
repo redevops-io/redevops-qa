@@ -202,7 +202,7 @@ def test_the_builtin_fixture_target_and_the_profiles_are_listed_with_their_avail
 
 def test_on_an_installation_that_cannot_run_lanes_the_external_profile_is_listed_unavailable_with_its_reason(make_server):
     from qa_service.capabilities import Facts
-    srv, c = make_server(facts=Facts(machine="aarch64", missing_packages=("playwright", "robot")))
+    srv, c = make_server(facts=Facts(machine="riscv64", missing_packages=("playwright", "robot")))
     es = {p["id"]: p for p in c.json("GET", "/v1/profiles")[1]["items"]}["edge-sentinel-fixture-readonly"]
     assert es["available"] is False and es["unavailable"]["code"] == "ARCHITECTURE_UNSUPPORTED" and es["unavailable"]["remedy"], "listed and disabled WITH its reason, never hidden"
 

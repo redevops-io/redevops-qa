@@ -94,7 +94,11 @@ def test_ac9_a_run_of_the_fixture_mode_target_ends_corroborated_never_verified_a
         assert [x["id"] for x in r["limitations"]].count(K.NO_RESTATEMENT_ID) == 1 and "never VERIFIED" in next(x["text"] for x in r["limitations"] if x["id"] == K.NO_RESTATEMENT_ID)
         ext = r["extensions"]
         assert ext["target"] == "external-origin" and ext["target_origin"] == es.origin and ext["target_fixture_mode_confirmed"] == "demo.enabled=true" and ext["target_declared_by"] == "operator"
-        assert "Linux x86_64" in ext["platform_claim"]
+        import platform
+        arm = platform.machine().lower() in ("aarch64", "arm64")
+        assert ("Linux arm64" if arm else "Linux x86_64") in ext["platform_claim"] and ("x86_64" in ext["platform_claim"]) != arm, "the claim names the machine the run was made on"
+        claim = next(x["text"] for x in r["limitations"] if x["id"] == K.NO_RESTATEMENT_ID)
+        assert claim == K.no_restatement_text(es.origin, "aarch64" if arm else "x86_64")
         assert "logs/reference-check.json" not in s.bundle.files, "an external target has no reference check"
         assert es.paths.count("/health") >= 2, "the runner's fixture-mode check and the browser's navigation"
         v = verify_files_in(tmp_path, s.bundle.files, plan_digest=frozen.plan_digest)

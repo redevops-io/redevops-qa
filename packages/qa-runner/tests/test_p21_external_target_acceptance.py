@@ -64,7 +64,7 @@ def test_the_readme_states_the_scope_that_ac1_to_ac12_support_and_no_more():
     text = README.read_text(encoding="utf-8")
     assert "one kind of external target" in text and "never VERIFIED" in text and "demo.enabled=true" in text and "no other application" in text
     assert "no external application can be pointed at it yet" not in text, "the README still says the opposite of what the code does"
-    assert "Linux x86_64 only" in text, "the platform claim was dropped from README.md"
+    assert "on Linux x86_64 (the fixture-app CI also runs 3.11) and, since 0.6.6, on Linux arm64" in text and "macOS and Windows are not claimed" in text, "the platform claim was dropped from README.md"
 
 
 def test_the_design_document_states_its_own_limits():

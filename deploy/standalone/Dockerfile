@@ -2,21 +2,23 @@
 #
 #   docker buildx build -f deploy/standalone/Dockerfile --platform linux/amd64,linux/arm64 .
 #
-# linux/amd64 : the pinned bundle (tools/build_bundle.py: hash-locked wheelhouse, the pinned upstream trees) installed with the bundle's own install.sh, and the Chromium of
-#               bundle/browser.lock.json installed with the bundle's own install-browser.sh (sha256 of the archives and of the unpacked tree checked against the pin).
-#               Lanes: Playwright Chromium and Robot Framework. This is the one platform the product's evidence is for.
-# linux/arm64 : the bundle's platform pin (CPython 3.12, Linux x86_64) refuses another platform and the browser pin names x86_64 archives only, so the repository's own
-#               first-party wheels (pure Python, hash-checked from the same bundle) are installed WITHOUT the browser and Robot wheels: `verify`, `report`, `inspect`,
-#               `freeze`, `doctor` and the HTTP service work; `run` and `demo` cannot start a lane and say so.
+# Both platforms are built the same way, each from ITS OWN bundle: the pinned bundle of the platform (tools/build_bundle.py --platform: hash-locked wheelhouse, the pinned upstream
+# trees) installed with the bundle's own install.sh, and the Chromium of the platform's browser lock installed with the bundle's own install-browser.sh (sha256 of the archives and of
+# the unpacked tree checked against the pin). Lanes on both: Playwright Chromium and Robot Framework.
+# linux/amd64 : bundle/third-party.lock.json, bundle/browser.lock.json
+# linux/arm64 : bundle/third-party.lock.linux-arm64.json, bundle/browser.lock.linux-arm64.json (until 0.6.5 this image carried the evidence commands only)
 # ---------------------------------------------------------------------------------------------------------------- stage 1: the pinned bundle (runs on the build host)
 FROM --platform=$BUILDPLATFORM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS bundle
+ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY . /src
 WORKDIR /src
 # fetch_pins.py: the two pinned upstreams at their exact commits over plain HTTPS (no token), verified (HEAD, clean tree, digests).
-# build_bundle.py: refuses a dirty tree; the third-party wheels come from the package index, hash-checked against bundle/third-party.lock.json.
-RUN python tools/fetch_pins.py > /tmp/fetch_pins.log \
- && python tools/build_bundle.py build --out /out \
+# build_bundle.py: refuses a dirty tree; the third-party wheels come from the package index, hash-checked against the third-party lock of the TARGET platform (the build host
+# only downloads them: nothing of the target platform is executed in this stage, so it runs on the build host whatever the target is).
+RUN case "$TARGETARCH" in amd64) platform=linux-x86_64;; arm64) platform=linux-arm64;; *) echo "no bundle exists for $TARGETARCH" >&2; exit 1;; esac \
+ && python tools/fetch_pins.py > /tmp/fetch_pins.log \
+ && python tools/build_bundle.py build --platform "$platform" --out /out \
  && cd /out && sha256sum -c ./*.tar.sha256
 
 # ---------------------------------------------------------------------------------------------------------------- stage 2: the runtime image
@@ -42,26 +44,15 @@ RUN set -eux; \
     # Security updates the pinned base image does not have yet (the base is pinned by digest; this is the one place the image takes newer Debian packages, and the build date decides which).
     apt-get update; apt-get -y --no-install-recommends upgrade; \
     cd /tmp/bundle && sha256sum -c ./*.tar.sha256 && tar xf ./*.tar && cd redevops-qa-bundle-*; \
-    if [ "$TARGETARCH" = "amd64" ]; then \
-        ./install.sh --prefix /opt/redevops-qa; \
-        ./install-browser.sh --prefix /opt/redevops-qa --with-deps; \
-        # `playwright install-deps` also installs a virtual X server for headed runs; the lanes here are headless, so it is removed again (the libraries Chromium loads stay).
-        apt-get -y purge xvfb xserver-common; apt-get -y autoremove --purge; \
-        apt-get clean; rm -rf /var/lib/apt/lists/*; \
-        # The browser pin records four metadata files (deb.deps, rpm.deps) at mode 0600, and the pin check hashes every file as the user that runs the lane: give those four files (only) to the
-        # runtime user, mode unchanged, so the tree check passes without making the rest of the browser tree writable by it.
-        find /opt/redevops-qa/browsers -type f \( -name deb.deps -o -name rpm.deps \) -exec chown 10001:10001 {} +; \
-    else \
-        apt-get clean; rm -rf /var/lib/apt/lists/*; \
-        mkdir -p /opt/redevops-qa/bin; \
-        python3.12 -m venv /opt/redevops-qa/venv; \
-        awk 'BEGIN{keep=0} /^[A-Za-z0-9_.-]+==/{keep=($0 ~ /^redevops-qa-(adapter-kit|bridge|egress|evidence|fixture-app|pinned-upstreams|playwright|robot|runner|third-party-notices)==/)} keep{print}' requirements.lock > /tmp/first-party.lock; \
-        env -i PATH="$PATH" HOME=/tmp PIP_NO_CACHE_DIR=1 /opt/redevops-qa/venv/bin/python -m pip install --no-index --no-deps --only-binary=:all: --find-links wheelhouse --require-hashes -r /tmp/first-party.lock; \
-        printf '%s\n' '#!/bin/sh' 'unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONINSPECT PYTHONBREAKPOINT' \
-            "exec '/opt/redevops-qa/venv/bin/python' -E -s '/opt/redevops-qa/venv/bin/redevops-qa' \"\$@\"" > /opt/redevops-qa/bin/redevops-qa; \
-        chmod 755 /opt/redevops-qa/bin/redevops-qa; \
-    fi; \
-    rm -rf /tmp/bundle /tmp/first-party.lock /root/.cache
+    ./install.sh --prefix /opt/redevops-qa; \
+    ./install-browser.sh --prefix /opt/redevops-qa --with-deps; \
+    # `playwright install-deps` also installs a virtual X server for headed runs; the lanes here are headless, so it is removed again (the libraries Chromium loads stay).
+    apt-get -y purge xvfb xserver-common; apt-get -y autoremove --purge; \
+    apt-get clean; rm -rf /var/lib/apt/lists/*; \
+    # The browser pin records four metadata files (deb.deps, rpm.deps) at mode 0600, and the pin check hashes every file as the user that runs the lane: give those four files (only) to the
+    # runtime user, mode unchanged, so the tree check passes without making the rest of the browser tree writable by it.
+    find /opt/redevops-qa/browsers -type f \( -name deb.deps -o -name rpm.deps \) -exec chown 10001:10001 {} +; \
+    rm -rf /tmp/bundle /root/.cache
 
 # The HTTP service (standard library only, packages/qa-service) runs on the interpreter of the installation, so it sees exactly the lanes that installation has; the plans are the
 # shipped examples of the runner; the licence texts travel with the image.

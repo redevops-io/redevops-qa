@@ -3,8 +3,8 @@
 
 The rules, in the order they are applied (the first that fails is the answer):
 
-1. ``ARCHITECTURE_UNSUPPORTED``: the lanes are supported on linux/x86_64 only (README, ``redevops-qa doctor``); on any other platform no plan that runs a lane is offered, whatever is installed.
-2. ``LANE_ENGINE_MISSING``: a Python package a plan's lane needs (``playwright`` for the browser lane, ``robot`` for the Robot lane) is not installed (the arm64 image carries the evidence commands only).
+1. ``ARCHITECTURE_UNSUPPORTED``: the lanes are supported on linux/x86_64 and linux/arm64 (README, ``redevops-qa doctor``); on any other platform no plan that runs a lane is offered, whatever is installed.
+2. ``LANE_ENGINE_MISSING``: a Python package a plan's lane needs (``playwright`` for the browser lane, ``robot`` for the Robot lane) is not installed.
 3. ``BROWSER_UNAVAILABLE``: the pinned Chromium of a bundle installation is missing or is not the pinned build (``doctor``'s "browser build" check failed).
 4. ``ROBOT_EGRESS_LAYERS_UNAVAILABLE``: the kernel layers that limit a Robot lane's egress (Landlock network rules and seccomp user notification) were measured not to work here; applies to the plans whose
    Robot lane asks for them (``demo``, ``robot``), never to ``robot-not-enforced`` or ``browser``.
@@ -33,11 +33,14 @@ PLANS: Dict[str, Tuple[str, Optional[str], Tuple[str, ...], bool, bool]] = {
     "robot-not-enforced": ("run", "robot-plan-not-enforced.json", ("robot",), False, False),
 }
 
+#: where a lane can run: each platform has its own bundle (wheel lock, browser pin) and the same lanes in CI
+LANE_PLATFORMS = (("linux", "x86_64"), ("linux", "aarch64"))
+
 REMEDIES = {
-    "ARCHITECTURE_UNSUPPORTED": "run the linux/amd64 image on a linux/x86_64 host; this image can still verify, report on and inspect evidence made elsewhere",
-    "LANE_ENGINE_MISSING": "use the linux/amd64 image, which carries Playwright with the pinned Chromium and Robot Framework",
+    "ARCHITECTURE_UNSUPPORTED": "run the image on a linux/x86_64 or linux/arm64 host; this installation can still verify, report on and inspect evidence made elsewhere",
+    "LANE_ENGINE_MISSING": "use the published image (linux/amd64 or linux/arm64), which carries Playwright with the pinned Chromium and Robot Framework",
     "BROWSER_UNAVAILABLE": "reinstall the image; the browser must be the pinned build (`redevops-qa doctor` names the difference)",
-    "ROBOT_EGRESS_LAYERS_UNAVAILABLE": "use a native linux/x86_64 host with Linux 6.7 or later and Landlock enabled, with Docker's default seccomp profile; or use the browser plan, or robot-not-enforced "
+    "ROBOT_EGRESS_LAYERS_UNAVAILABLE": "use a native linux/x86_64 or linux/arm64 host (not an emulated one) with Linux 6.7 or later and Landlock enabled, with Docker's default seccomp profile; or use the browser plan, or robot-not-enforced "
                                        "(no limit on that lane's traffic, and its report says so)",
     "PLAN_FILE_MISSING": "set QA_SERVICE_PLANS_DIR to the directory that holds the shipped plan files",
 }
@@ -91,9 +94,9 @@ def run_probe() -> Dict[str, Any]:
 
 
 def collect(probe: Callable[[], Dict[str, Any]] = run_probe) -> Facts:
-    facts = Facts(system=platform.system().lower(), machine=platform.machine().lower().replace("amd64", "x86_64"))
+    facts = Facts(system=platform.system().lower(), machine=platform.machine().lower().replace("amd64", "x86_64").replace("arm64", "aarch64"))
     facts.missing_packages = tuple(sorted({p for _, (_, _, pk, _, _) in PLANS.items() for p in pk if not _have(p)}))
-    measurable = (facts.system, facts.machine) == ("linux", "x86_64") and not facts.missing_packages
+    measurable = (facts.system, facts.machine) in LANE_PLATFORMS and not facts.missing_packages
     measured = probe() if measurable else {}
     if measured.get("browser"):
         facts.browser = measured["browser"]
@@ -109,8 +112,8 @@ def unavailable(plan: str, facts: Facts, plans_dir: Optional[Any]) -> Optional[D
     def no(code: str, reason: str) -> Dict[str, str]:
         return {"code": code, "reason": reason, "remedy": REMEDIES[code]}
 
-    if (facts.system, facts.machine) != ("linux", "x86_64"):
-        return no("ARCHITECTURE_UNSUPPORTED", f"this host is {facts.system} {facts.machine}; the lanes are supported on linux x86_64 only")
+    if (facts.system, facts.machine) not in LANE_PLATFORMS:
+        return no("ARCHITECTURE_UNSUPPORTED", f"this host is {facts.system} {facts.machine}; the lanes are supported on linux x86_64 and linux arm64 only")
     missing = [p for p in packages if p in facts.missing_packages]
     if missing:
         return no("LANE_ENGINE_MISSING", "the Python package(s) " + ", ".join(missing) + " of this plan's lanes are not installed in this image")

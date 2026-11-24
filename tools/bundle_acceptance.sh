@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
-# The acceptance run of the bundle on a clean Linux x86_64 machine (the CI job runs it on ubuntu-24.04; it can run in an ubuntu:24.04 container too):
+# The acceptance run of the bundle on a clean Linux machine of the bundle's platform, x86_64 or arm64 (the CI jobs run it on ubuntu-24.04 and on ubuntu-24.04-arm; it can run in an
+# ubuntu:24.04 container too):
 #
 #   1. the commands of the bundle's README, taken from the README itself and run unchanged: unpack, install, the browser step, `doctor`, `demo`;
 #   1b. the browser pin, negative cases on the installation of step 1: a browser that is not installed is reported as such; a changed file, a changed mode, an extra file and a missing
@@ -64,7 +65,9 @@ grep "browser build" "$WORK/use.out"
 PY="$HOME/redevops-qa/venv/bin/python"
 "$PY" -I -c 'import json; from qa_runner.golden import robot_plan; print(json.dumps(robot_plan()))' > "$WORK/robot-plan.json"
 B="$HOME/redevops-qa/browsers"; QA="$HOME/redevops-qa/bin/redevops-qa"
-victim="$B/chromium-*/chrome-linux64/ABOUT"; victim="$(ls $victim | head -1)"; exe="$(ls "$B"/chromium-*/chrome-linux64/chrome | head -1)"
+# the directory Chrome for Testing unpacks to is named after the platform: chrome-linux64 on x86_64, chrome-linux-arm64 on arm64
+CD="$(basename "$(ls -d "$B"/chromium-*/chrome-linux*/ | head -1)")"
+victim="$B/chromium-*/$CD/ABOUT"; victim="$(ls $victim | head -1)"; exe="$(ls "$B"/chromium-*/"$CD"/chrome | head -1)"
 cp -p "$victim" "$WORK/victim.orig"
 has() { grep -Eq -- "$1" "$2"; }           # has PATTERN FILE
 tamper_case() { # tamper_case NAME EXPECTED_CODE EXPECTED_PATH_FRAGMENT APPLY_COMMAND REVERT_COMMAND
@@ -84,12 +87,12 @@ tamper_case() { # tamper_case NAME EXPECTED_CODE EXPECTED_PATH_FRAGMENT APPLY_CO
   eval "$5"
   need '"$QA" doctor > "$WORK/restored-doctor.out" 2>&1 && has "^\[ OK \] browser build" "$WORK/restored-doctor.out"' "doctor did not pass again after restoring, for: $name"
 }
-tamper_case "one byte changed (same size)" CHANGED "chrome-linux64/ABOUT" 'python3 -I -c "import sys; f=open(sys.argv[1],\"r+b\"); b=f.read(1); f.seek(0); f.write(bytes([b[0]^1])); f.close()" "$victim"' 'cp -p "$WORK/victim.orig" "$victim"'
-tamper_case "a byte appended (size changed)" SIZE "chrome-linux64/ABOUT" 'printf x >> "$victim"' 'cp -p "$WORK/victim.orig" "$victim"'
-tamper_case "a changed file mode" MODE "chrome-linux64/chrome" 'chmod 0777 "$exe"' 'chmod 0755 "$exe"'
+tamper_case "one byte changed (same size)" CHANGED "$CD/ABOUT" 'python3 -I -c "import sys; f=open(sys.argv[1],\"r+b\"); b=f.read(1); f.seek(0); f.write(bytes([b[0]^1])); f.close()" "$victim"' 'cp -p "$WORK/victim.orig" "$victim"'
+tamper_case "a byte appended (size changed)" SIZE "$CD/ABOUT" 'printf x >> "$victim"' 'cp -p "$WORK/victim.orig" "$victim"'
+tamper_case "a changed file mode" MODE "$CD/chrome" 'chmod 0777 "$exe"' 'chmod 0755 "$exe"'
 extra="$(dirname "$exe")/extra.so"
-tamper_case "an extra file" EXTRA "chrome-linux64/extra.so" 'printf x > "$extra"' 'mv -f "$extra" "$WORK/extra.removed"'
-tamper_case "a missing file" MISSING "chrome-linux64/ABOUT" 'mv -f "$victim" "$WORK/victim.moved"' 'mv -f "$WORK/victim.moved" "$victim"'
+tamper_case "an extra file" EXTRA "$CD/extra.so" 'printf x > "$extra"' 'mv -f "$extra" "$WORK/extra.removed"'
+tamper_case "a missing file" MISSING "$CD/ABOUT" 'mv -f "$victim" "$WORK/victim.moved"' 'mv -f "$WORK/victim.moved" "$victim"'
 need '[ "$(cat "$victim")" = "$(cat "$WORK/victim.orig")" ]' "the tampered file was not restored"
 echo "--- the installation loses its browser pin (browser.lock.json removed from share/redevops-qa): the browser is not checked, so it is not started"
 lock="$HOME/redevops-qa/venv/share/redevops-qa/browser.lock.json"
@@ -161,11 +164,11 @@ echo "--- a bundle for another Python minor (3.11)"; refused 3 "$b"; need 'grep 
 b="$(fresh)"; python3 -I - "$b/BUNDLE.json" <<'PY'
 import json, sys
 p = sys.argv[1]
-d = json.load(open(p)); d["target"]["platform"] = "linux-arm64"
+d = json.load(open(p)); d["target"]["platform"] = "linux-x86_64" if d["target"]["platform"] == "linux-arm64" else "linux-arm64"      # the OTHER release platform
 json.dump(d, open(p, "w"), indent=2, sort_keys=True)
 PY
 resum "$b"
-echo "--- a bundle for another platform (linux-arm64)"; refused 3 "$b"
+echo "--- a bundle for another platform (the other release platform)"; refused 3 "$b"
 b="$(fresh)"; mkdir "$WORK/occupied"; touch "$WORK/occupied/file"
 st=0; ( cd "$b" && ./install.sh --prefix "$WORK/occupied" ) > "$WORK/refusal.out" 2>&1 || st=$?; cat "$WORK/refusal.out"
 need "[ $st -eq 5 ] && [ \"\$(ls \"$WORK/occupied\")\" = file ]" "a prefix that is not empty was not refused untouched"
