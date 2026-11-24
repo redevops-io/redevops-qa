@@ -353,14 +353,17 @@ class Handler(BaseHTTPRequestHandler):
         except ApiError as e:
             return self._error(e)
         s = srv.sessions.create(user["user_id"])
-        cookie = f"{COOKIE}={s['token']}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200" + ("; Secure" if self.headers.get("X-Forwarded-Proto") == "https" and False else "")
+        cookie = f"{COOKIE}={s['token']}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200" + self._secure()
         self._json(200, {"user": UserStore.public(user), "csrf": s["csrf"]}, {"Set-Cookie": cookie})
+
+    def _secure(self) -> str:
+        return "; Secure" if self.server.cfg.cookie_secure else ""
 
     def _session(self, p: Principal, q: Dict[str, str]) -> None:
         if self.command == "DELETE":
             if p.session:
                 self.server.sessions.revoke(p.session)
-            return self._send(204, b"", "text/plain", {"Set-Cookie": f"{COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
+            return self._send(204, b"", "text/plain", {"Set-Cookie": f"{COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0" + self._secure()})
         user = self.server.users.get(p.user_id) if p.user_id else None
         self._json(200, {"principal": {"kind": p.kind, "name": p.name, "role": p.role if p.kind == "user" else "service", "via": p.via}, "user": UserStore.public(user) if user else None, "csrf": p.csrf})
 
