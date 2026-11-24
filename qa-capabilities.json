@@ -7,7 +7,7 @@
     "published_packages": false,
     "install_from": "source-checkout",
     "licence_wording": "source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source",
-    "note": "The repository is public and pre-release. Release git tags v0.6.2 and v0.6.3 exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2 and 0.6.3, linux/amd64 and linux/arm64); nothing is published to a language package registry (there is no PyPI package), and every install profile in this manifest is a checkout of this repository at a named commit, so a package-registry install command does not exist."
+    "note": "The repository is public and pre-release. Release git tags v0.6.2, v0.6.3 and v0.6.4 exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2, 0.6.3 and 0.6.4, linux/amd64 and linux/arm64); nothing is published to a language package registry (there is no PyPI package), and every install profile in this manifest is a checkout of this repository at a named commit, so a package-registry install command does not exist."
   },
   "test_levels": {
     "none": {

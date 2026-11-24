@@ -2,7 +2,7 @@
 
 # ReDevOps QA: engine capability matrix
 
-This page is generated from [`qa-capabilities.json`](../qa-capabilities.json), which is checked in CI against its schema, the repository's pins, the adapters' own manifests and the CI history. Every claim below points to evidence in this repository or to a named CI job. Licence: source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source. The repository is public and pre-release. Release git tags v0.6.2 and v0.6.3 exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2 and 0.6.3, linux/amd64 and linux/arm64); nothing is published to a language package registry (there is no PyPI package), and every install profile in this manifest is a checkout of this repository at a named commit, so a package-registry install command does not exist.
+This page is generated from [`qa-capabilities.json`](../qa-capabilities.json), which is checked in CI against its schema, the repository's pins, the adapters' own manifests and the CI history. Every claim below points to evidence in this repository or to a named CI job. Licence: source-available under the family licence (AGPL-3.0-or-later with the Commons Clause), not open source. The repository is public and pre-release. Release git tags v0.6.2, v0.6.3 and v0.6.4 exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2, 0.6.3 and 0.6.4, linux/amd64 and linux/arm64); nothing is published to a language package registry (there is no PyPI package), and every install profile in this manifest is a checkout of this repository at a named commit, so a package-registry install command does not exist.
 
 ## What the test levels mean
 
