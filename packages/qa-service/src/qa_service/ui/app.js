@@ -136,7 +136,7 @@ async function viewTargets() {
   const t = await api("GET", "/v1/targets");
   const rows = t.items.map((x) => h("tr", {}, h("td", {}, h("strong", {}, x.name), h("div", { class: "small muted mono" }, x.id)), h("td", {}, x.kind), h("td", { class: "mono" }, x.origin || "started by the runner"),
     h("td", {}, levelBadge(null, x.level_ceiling), h("div", { class: "small muted" }, "ceiling " + x.level_ceiling)), h("td", {}, x.run_approval === "required" ? "required" : "none"),
-    h("td", {}, x.last_probe ? (x.last_probe.ok ? badge("fixture mode confirmed", "ok") : badge("not confirmed", "bad")) : "-", x.last_probe ? h("div", { class: "small muted" }, x.last_probe.at) : null),
+    h("td", {}, x.last_probe ? (x.last_probe.ok ? badge(x.presentation === "enforcement-probe" ? "enforcement page confirmed" : "fixture mode confirmed", "ok") : badge("not confirmed", "bad")) : "-", x.last_probe ? h("div", { class: "small muted" }, x.last_probe.at) : null),
     h("td", {}, can("admin") && !x.builtin ? h("button", { type: "button", onclick: async () => { try { await api("DELETE", "/v1/targets/" + x.id); announce("Target removed"); viewTargets(); } catch (e) { main.prepend(errBox(e)); } } }, "Remove") : null)));
   const nodes = [table(["Target", "Kind", "Origin", "Level ceiling", "Run approval", "Last probe", ""], rows, "Registered targets")];
   if (can("admin")) {
@@ -150,7 +150,7 @@ async function viewTargets() {
     } },
       lab("tname", "Name", h("input", { id: "tname", name: "name", required: true, maxlength: "80" })),
       lab("torigin", "Origin (optional)", h("input", { id: "torigin", name: "origin", placeholder: "http://127.0.0.1:8203", autocomplete: "off", "aria-describedby": "originhint" }),
-        h("span", { class: "hint", id: "originhint" }, "Leave empty for a fixture-app target. This release accepts one external target: an Edge Sentinel started with EDGE_SENTINEL_DEMO=1 on http://127.0.0.1:<port>. The service reads its /health once and refuses it unless it reports fixture mode. An external target always needs approval for a run.")),
+        h("span", { class: "hint", id: "originhint" }, "Leave empty for a fixture-app target. This release accepts one kind of external target: an Edge Sentinel on http://127.0.0.1:<port>, started either with EDGE_SENTINEL_DEMO=1 (fixture mode) or with SENTINEL_ENFORCEMENT_PROBE=1 (its read-only enforcement page). The service reads its /health once and refuses it unless it reports one of the two. An external target always needs approval for a run.")),
       h("label", { class: "row" }, h("input", { type: "checkbox", name: "approval" }), "Require approval for runs against a fixture-app target"),
       h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, "Register target")), err);
     nodes.push(h("h2", {}, "Register a target"), form);

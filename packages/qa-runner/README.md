@@ -116,6 +116,13 @@ Playwright lane goes through the egress gateway whose allow-list is exactly that
 gateway's own record; the report carries `verification_ceiling: CORROBORATED`, the run level is `CORROBORATED` (reason `ALL_ASSERTIONS_CORROBORATED`, exit status 8) and the bundle states that nothing independent backs it. `redevops-qa estimate PLAN` prints,
 without contacting anything, what a plan would do and every reason a run would refuse. `verify` refuses a bundle whose ceiling is not the one its plan's target gives (`CEILING_MISMATCH`).
 
+**Enforcement journey (0.6.5).** `examples/edge-sentinel-enforcement-plan.json` (plan id `edge-sentinel-enforcement-readonly`) is the one journey that runs against an Edge Sentinel that is not in fixture mode. The target must have
+switched its read-only enforcement page on (`SENTINEL_ENFORCEMENT_PROBE=1`): before any lane the runner reads `/health` and refuses (`NOT_ENFORCEMENT_PROBE`, exit status 3, nothing written) unless it reports
+`enforcement_probe.enabled=true` and does not report `demo.enabled=true`. A plan with this id is held to that page: every request it names is `GET /enforcement/<address>` for a documentation address (RFC 5737, RFC 3849) and every step is a
+navigation to such a page; anything else is `ENFORCEMENT_PLAN_OUT_OF_SCOPE` in `estimate` and in `run`. The shipped plan opens `/enforcement/203.0.113.7` and asserts that the element with test id `enforcement-state` reads `blocked`. It is the
+re-test of a remediation: it fails while the address is not banned and passes once it is, with the same plan digest. Same ceiling (CORROBORATED), same egress scope (the origin), no credential, no write; the bundle records
+`target_enforcement_probe_confirmed` and never `target_fixture_mode_confirmed`.
+
 **`run`** freezes the plan (or reads a lock), starts the fixture app on loopback with the defect you name, runs each lane as a supervised child process, stops
 the app, and writes the bundle to `DIR/<run id>` (a directory that must not exist; it is reserved before anything runs and the bundle is renamed into place, so a reader sees no bundle or a whole one). It prints the outcome, what each engine reported, what the independent
 verdicts are, the plan digest (the value to give `verify --plan-digest`) and the manifest digest (the value an external anchor should hold).

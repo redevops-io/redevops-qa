@@ -37,8 +37,16 @@ PROFILES: Dict[str, Dict[str, Any]] = {
     "fixture-robot-not-enforced": {"plan": "robot-not-enforced", "title": "Robot lane (egress not enforced)", "description": "Robot Framework with no limit on its traffic; the report says so.",
                                    "engines": ["robot"], "targets": ["fixture-app"], "plan_file": "robot-plan-not-enforced.json", "est_duration_s": 20},
     "edge-sentinel-fixture-readonly": {"plan": None, "title": "Edge Sentinel fixture mode (read-only)", "description": "A read-only journey against a loopback Edge Sentinel started with EDGE_SENTINEL_DEMO=1.",
-                                       "engines": ["playwright"], "targets": ["external-origin"], "plan_file": None, "est_duration_s": 20},
+                                       "engines": ["playwright"], "targets": ["external-origin"], "plan_file": None, "est_duration_s": 20, "presentation": "fixture-mode",
+                                       "template": "edge-sentinel-fixture-plan.json"},
+    "edge-sentinel-enforcement": {"plan": None, "title": "Edge Sentinel enforcement (read-only)", "description": "Reads the enforcement page of a live loopback Edge Sentinel started with "
+                                  "SENTINEL_ENFORCEMENT_PROBE=1 and expects the documentation address 203.0.113.7 to be blocked at the edge.",
+                                  "engines": ["playwright"], "targets": ["external-origin"], "plan_file": None, "est_duration_s": 20, "presentation": "enforcement-probe",
+                                  "template": "edge-sentinel-enforcement-plan.json"},
 }
+#: what an external target said about itself on /health when it was registered -> the one profile that runs against it
+PRESENTATIONS = ("fixture-mode", "enforcement-probe")
+DEFAULT_EXTERNAL_PROFILE = "edge-sentinel-fixture-readonly"
 LEGACY_PLAN_TO_PROFILE = {v["plan"]: k for k, v in PROFILES.items() if v["plan"]}
 
 
@@ -58,10 +66,27 @@ def digest(doc: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical(doc)).hexdigest()
 
 
-def edge_sentinel_plan(origin: str, plans_dir: Path) -> Dict[str, Any]:
-    """The read-only journey of the ``edge-sentinel-fixture-readonly`` profile: the plan the runner ships as ``examples/edge-sentinel-fixture-plan.json`` (open /health of the origin, assert the URL),
-    with the origin of a REGISTERED target put in its target. A client never supplies a plan."""
-    plan = json.loads((plans_dir / "edge-sentinel-fixture-plan.json").read_text(encoding="utf-8"))
+def presentation_of(target: Dict[str, Any]) -> str:
+    """A target registered before 0.6.5 has no ``presentation``: it was accepted in fixture mode, the only kind there was."""
+    return str(target.get("presentation") or "fixture-mode")
+
+
+def profile_mismatch(profile: str, target: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """Why this profile does not run against this target, or None. An external target runs exactly the profile of what it said about itself when it was registered."""
+    p = PROFILES[profile]
+    if target["kind"] not in p["targets"]:
+        return {"code": "TARGET_KIND_MISMATCH", "reason": f"this profile runs against a {' or '.join(p['targets'])} target, not {target['kind']}", "remedy": "choose a profile for this target"}
+    if target["kind"] == "external-origin" and p.get("presentation") != presentation_of(target):
+        return {"code": "TARGET_KIND_MISMATCH", "reason": f"this profile runs against a target registered as {p.get('presentation')}; this target was registered as {presentation_of(target)}",
+                "remedy": "choose the profile for this target, or register the target again after changing how it is started"}
+    return None
+
+
+def edge_sentinel_plan(origin: str, plans_dir: Path, profile: str = DEFAULT_EXTERNAL_PROFILE) -> Dict[str, Any]:
+    """The read-only journey of an external-origin profile: the plan the runner ships for it (``examples/edge-sentinel-fixture-plan.json``: open /health, assert the URL;
+    ``examples/edge-sentinel-enforcement-plan.json``: open the enforcement page of a documentation address, assert it says blocked), with the origin of a REGISTERED target put in its
+    target. A client never supplies a plan."""
+    plan = json.loads((plans_dir / PROFILES[profile]["template"]).read_text(encoding="utf-8"))
     plan["target"] = {"kind": "external-origin", "origin": origin, "declared_by": "operator", "credential_refs": [], "mutating": False}
     return plan
 
@@ -130,9 +155,12 @@ class Targets:
                 raise CatalogError(422, "TARGET_OUT_OF_SCOPE", next(p["message"] for p in doc["problems"] if p["code"] == "TARGET_OUT_OF_SCOPE"), field="origin")
             probe = self.probe_fixture_mode(origin)
             if not probe["ok"]:
-                raise CatalogError(422, "NOT_FIXTURE_MODE", "the target did not present itself as Edge Sentinel fixture mode (/health must report demo.enabled=true): " + probe["detail"], field="origin")
+                raise CatalogError(422, "NOT_FIXTURE_MODE", "the target did not present itself as Edge Sentinel fixture mode (/health must report demo.enabled=true) or as an Edge Sentinel "
+                                   "with its read-only enforcement page on (enforcement_probe.enabled=true): " + probe["detail"], field="origin")
         target = {"id": "tgt-" + secrets.token_hex(6), "name": name.strip(), "kind": kind, "origin": origin, "declared_by": "operator", "declared_at": iso(_now()), "declared_user": user,
                   "egress_profile": "origin-only", "credential_refs": [], "mutating": False, "run_approval": approval, "level_ceiling": ceiling, "builtin": False, "notes": notes, "last_probe": probe}
+        if probe is not None:
+            target["presentation"] = probe["presentation"]
         with self._lock:
             items = self._read()
             if any(t["name"] == target["name"] for t in items):
@@ -143,17 +171,23 @@ class Targets:
 
     @staticmethod
     def probe_fixture_mode(origin: str) -> Dict[str, Any]:
-        """One GET /health of the registered loopback origin (the scope gate has already limited it to http://127.0.0.1:<port>): fixture mode must be reported before anything runs."""
+        """One GET /health of the registered loopback origin (the scope gate has already limited it to http://127.0.0.1:<port>). The target must say what it is before anything runs:
+        fixture mode (``demo.enabled`` true), or a live instance whose read-only enforcement page is on (``enforcement_probe.enabled`` true). Fixture mode wins when both are reported:
+        a fixture core has no edge to read. ``presentation`` is None when it said neither."""
         at = iso(_now())
         try:
             req = urllib.request.Request(origin + "/health", headers={"Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=3) as resp:       # nosec: the origin was validated as http://127.0.0.1:<port>
                 body = json.loads(resp.read(65536).decode("utf-8"))
             demo = body.get("demo") if isinstance(body, dict) else None
-            ok = isinstance(demo, dict) and demo.get("enabled") is True
-            return {"at": at, "ok": ok, "detail": "demo.enabled=true" if ok else "demo.enabled is not true"}
+            probe = body.get("enforcement_probe") if isinstance(body, dict) else None
+            if isinstance(demo, dict) and demo.get("enabled") is True:
+                return {"at": at, "ok": True, "detail": "demo.enabled=true", "presentation": "fixture-mode"}
+            if isinstance(probe, dict) and probe.get("enabled") is True:
+                return {"at": at, "ok": True, "detail": "enforcement_probe.enabled=true", "presentation": "enforcement-probe"}
+            return {"at": at, "ok": False, "detail": "demo.enabled is not true", "presentation": None}
         except Exception as exc:
-            return {"at": at, "ok": False, "detail": f"/health could not be read ({type(exc).__name__})"}
+            return {"at": at, "ok": False, "detail": f"/health could not be read ({type(exc).__name__})", "presentation": None}
 
     def delete(self, target_id: str, *, in_use: bool) -> None:
         if target_id == FIXTURE_TARGET_ID:
@@ -179,7 +213,7 @@ class Estimator:
     def plan_for(self, target: Dict[str, Any], profile: str) -> Dict[str, Any]:
         p = PROFILES[profile]
         if target["kind"] == "external-origin":
-            return edge_sentinel_plan(target["origin"], self.cfg.plans_dir)
+            return edge_sentinel_plan(target["origin"], self.cfg.plans_dir, profile)
         return json.loads((self.cfg.plans_dir / p["plan_file"]).read_text(encoding="utf-8"))
 
     def run_cli_estimate(self, plan: Dict[str, Any]) -> Dict[str, Any]:

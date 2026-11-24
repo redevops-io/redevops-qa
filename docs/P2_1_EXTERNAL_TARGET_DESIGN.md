@@ -169,6 +169,22 @@ boundaries are the part that gets eroded later:
 * write-bearing journeys stay out of v1 even against fixture mode, because the refusal path is a policy decision
   and a QA run that produces 403s is testing the refusal, not the product.
 
+**Addition in 0.6.5: the enforcement journey.** A fixture core refuses every side effect, so nothing that was fixed at the edge can be
+re-tested against it. For that one purpose a second presentation of the same target kind is accepted: a loopback Edge Sentinel that is
+*not* in fixture mode and has itself switched on a read-only page (`SENTINEL_ENFORCEMENT_PROBE=1`, `/health` reports
+`enforcement_probe.enabled=true`). The boundaries above are kept, and one is added:
+
+* the origin rule, the refusal of credentials, the refusal of writes, the Playwright-only lane, the approval before every run and the
+  CORROBORATED ceiling are unchanged;
+* the target opts in, per instance; an instance that did not is refused (`NOT_ENFORCEMENT_PROBE`), and so is a fixture core;
+* a plan with the id `edge-sentinel-enforcement-readonly` may name only `GET /enforcement/<documentation address>` and navigate only
+  there (`ENFORCEMENT_PLAN_OUT_OF_SCOPE`). The page answers for documentation addresses only, so the journey learns nothing about a
+  real address;
+* in the service a target is registered as what its `/health` said (`presentation`: `fixture-mode` or `enforcement-probe`) and runs the
+  profile of that presentation only.
+
+This is not general support for live targets. Decisions 1 to 4 of this document are not affected.
+
 ### 6.2 Gating: what must not be built before v1 is accepted
 
 Projects and Sidekick QA operations are **gated behind acceptance of this execution path**. Concretely: not until

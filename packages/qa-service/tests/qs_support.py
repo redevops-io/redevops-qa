@@ -81,6 +81,8 @@ def make_env(tmp_path: Path, **extra):
     plans.mkdir(exist_ok=True)
     (plans / "edge-sentinel-fixture-plan.json").write_text(json.dumps({"plan_id": "edge-sentinel-fixture-readonly", "target": {"kind": "external-origin", "origin": "http://127.0.0.1:8203"},
                                                                         "lanes": [{"lane_id": "browser", "engine": "playwright-chromium", "deadline_s": 60}]}))
+    (plans / "edge-sentinel-enforcement-plan.json").write_text(json.dumps({"plan_id": "edge-sentinel-enforcement-readonly", "target": {"kind": "external-origin", "origin": "http://127.0.0.1:8203"},
+                                                                            "lanes": [{"lane_id": "browser", "engine": "playwright-chromium", "deadline_s": 60}]}))
     for name in ("demo-plan.json", "golden-plan.json", "robot-plan.json", "robot-plan-not-enforced.json"):
         (plans / name).write_text(json.dumps({"plan_id": name[:-5], "target": {"kind": "fixture-app"}, "lanes": [{"lane_id": "browser", "engine": "playwright-chromium", "deadline_s": 60}]}))
     env = {"QA_SERVICE_TOKEN": TOKEN, "QA_SERVICE_BIND": "127.0.0.1", "QA_SERVICE_PORT": "0", "QA_SERVICE_DATA_DIR": str(tmp_path / "data"), "QA_SERVICE_CLI": str(cli),

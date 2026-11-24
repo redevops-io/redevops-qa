@@ -59,6 +59,10 @@ CREDENTIAL_REF_RE = re.compile(r"^(?:env:[A-Z][A-Z0-9_]{0,63}|file:/[A-Za-z0-9._
 LOOPBACK_HOSTS = ("127.0.0.1", "[::1]", "localhost")
 #: what a run of this release supports as an external target (design section 6.1): a loopback, read-only Edge Sentinel fixture target and nothing else
 V1_ORIGIN_RE = re.compile(r"^http://127\.0\.0\.1:[0-9]{1,5}$")
+#: the second journey this release runs against an external target: a loopback Edge Sentinel that is NOT in fixture mode and has switched on its read-only enforcement page
+#: (SENTINEL_ENFORCEMENT_PROBE=1). A plan with this id may ask for that page of a documentation address (RFC 5737, RFC 3849) and for nothing else.
+ENFORCEMENT_PLAN_ID = "edge-sentinel-enforcement-readonly"
+ENFORCEMENT_PATH_RE = re.compile(r"^/enforcement/(?:192\.0\.2\.[0-9]{1,3}|198\.51\.100\.[0-9]{1,3}|203\.0\.113\.[0-9]{1,3}|2001:db8:[0-9a-f:]{1,30})$")
 MAX_PLAN_BYTES = 1024 * 1024
 
 
@@ -253,7 +257,39 @@ def v1_scope_problems(plan_doc: Mapping[str, Any], *, system: Optional[str] = No
     for lane in plan_doc["lanes"]:
         if lane["engine"] != K.ENGINE_PLAYWRIGHT:
             problems.append({"code": "ENGINE_NOT_SUPPORTED_FOR_TARGET", "message": f"lane {str(lane['lane_id'])[:20]}: an external target is tested by the Playwright Chromium lane only: a Robot lane's assertions need a fact of the reference check, which an external target does not have"})
+    if plan_doc["plan_id"] == ENFORCEMENT_PLAN_ID:
+        problems.extend(enforcement_scope_problems(plan_doc))
     return problems
+
+
+def enforcement_scope_problems(plan_doc: Mapping[str, Any]) -> List[Dict[str, str]]:
+    """The enforcement journey runs against a live Edge Sentinel, so it is held to the one page that instance opened for it: every request the plan names is a GET of
+    ``/enforcement/<documentation address>``, and every step is a navigation to such a page. Anything else is refused before a lane starts."""
+    out: List[Dict[str, str]] = []
+
+    def bad(what: str) -> None:
+        out.append({"code": "ENFORCEMENT_PLAN_OUT_OF_SCOPE", "message": f"{what}: the enforcement journey reads GET /enforcement/<documentation address> of the target and does nothing else"})
+
+    for lane in plan_doc["lanes"]:
+        lid = str(lane.get("lane_id"))[:20]
+        req = lane.get("requests") if isinstance(lane.get("requests"), dict) else {}
+        named = [r for key in ("required", "allowed") for r in (req.get(key) if isinstance(req.get(key), list) else [])]
+        if not named:
+            bad(f"lane {lid} names no request")
+        for r in named:
+            method, _, path = str(r).partition(" ")
+            if method != "GET" or not ENFORCEMENT_PATH_RE.fullmatch(path):
+                bad(f"lane {lid} names the request {str(r)[:60]!r}")
+        spec = lane.get("spec") if isinstance(lane.get("spec"), dict) else {}
+        steps = spec.get("steps") if isinstance(spec.get("steps"), list) else []
+        if not steps:
+            bad(f"lane {lid} has no step")
+        for step in steps:
+            action = step.get("action") if isinstance(step, dict) and isinstance(step.get("action"), dict) else {}
+            value = str(action.get("value") or "")
+            if action.get("kind") != "navigate" or not value.startswith("{origin}") or not ENFORCEMENT_PATH_RE.fullmatch(value[len("{origin}"):]):
+                bad(f"lane {lid} has a step that is not a navigation to the enforcement page")
+    return out
 
 
 def _check_requests(req: Any, lid: str) -> None:

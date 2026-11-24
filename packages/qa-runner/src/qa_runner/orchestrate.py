@@ -291,6 +291,33 @@ def check_fixture_mode(origin: str, *, timeout_s: float = 5.0) -> None:
         raise EnvironmentFault("NOT_FIXTURE_MODE", "the target's /health does not report demo.enabled=true: this release runs against an Edge Sentinel in fixture mode only (EDGE_SENTINEL_DEMO=1), never against a real core")
 
 
+def check_enforcement_probe(origin: str, *, timeout_s: float = 5.0) -> None:
+    """The enforcement journey runs against an Edge Sentinel that is NOT in fixture mode, so the target has to have opened the page itself: one GET /health of the loopback origin,
+    ``enforcement_probe.enabled`` must be true and ``demo.enabled`` must not be (a fixture core has no edge to read). Anything else is refused before a lane starts."""
+    import urllib.error
+    import urllib.request
+    from .plan import V1_ORIGIN_RE
+    if not V1_ORIGIN_RE.fullmatch(origin):
+        raise EnvironmentFault("TARGET_OUT_OF_SCOPE", "this release runs against a loopback http://127.0.0.1:<port> target only")
+    try:
+        req = urllib.request.Request(origin + "/health", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:          # nosec: loopback only, validated above
+            body = json.loads(resp.read(65536).decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError, UnicodeDecodeError):
+        raise EnvironmentFault("NOT_ENFORCEMENT_PROBE", "the target's /health could not be read: nothing is run against a target that has not said its enforcement page is on") from None
+    probe = body.get("enforcement_probe") if isinstance(body, dict) else None
+    demo = body.get("demo") if isinstance(body, dict) else None
+    if not (isinstance(probe, dict) and probe.get("enabled") is True) or (isinstance(demo, dict) and demo.get("enabled") is True):
+        raise EnvironmentFault("NOT_ENFORCEMENT_PROBE", "the target's /health does not report enforcement_probe.enabled=true (and demo.enabled not true): the enforcement journey runs only against an "
+                               "Edge Sentinel that switched its read-only enforcement page on (SENTINEL_ENFORCEMENT_PROBE=1)")
+
+
+def target_statement(plan_id: str) -> str:
+    """What the external target of this plan said about itself on /health before the run (recorded in the bundle)."""
+    from .plan import ENFORCEMENT_PLAN_ID
+    return "enforcement_probe.enabled=true" if plan_id == ENFORCEMENT_PLAN_ID else "demo.enabled=true"
+
+
 def run_plan(up: Upstreams, frozen: FrozenPlan, opts: RunOptions = RunOptions()) -> RunSummary:
     run_id = new_run_id() if opts.run_id is None else opts.run_id
     if not K.RUN_ID_RE.fullmatch(run_id):
@@ -307,7 +334,8 @@ def run_plan(up: Upstreams, frozen: FrozenPlan, opts: RunOptions = RunOptions())
             raise PlanError(problems[0]["code"], "; ".join(p["message"] for p in problems))
         if opts.defect != "none":
             raise PlanError("BAD_DEFECT", "a seeded defect belongs to the fixture app; an external target is run as it is")
-        check_fixture_mode(frozen.plan["target"]["origin"])
+        from .plan import ENFORCEMENT_PLAN_ID
+        (check_enforcement_probe if frozen.plan_id == ENFORCEMENT_PLAN_ID else check_fixture_mode)(frozen.plan["target"]["origin"])
     workdir = make_workdir()
     try:
         return _run_in(up, frozen, opts, run_id, workdir)
@@ -318,7 +346,7 @@ def run_plan(up: Upstreams, frozen: FrozenPlan, opts: RunOptions = RunOptions())
 def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, workdir: str) -> RunSummary:
     external = frozen.external
     log: List[str] = [f"run {run_id}", f"plan {frozen.plan_id} digest {frozen.plan_digest}",
-                      f"target external-origin {frozen.plan['target']['origin']} (fixture mode confirmed; level ceiling CORROBORATED)" if external else f"target fixture-app defect {opts.defect}"]
+                      f"target external-origin {frozen.plan['target']['origin']} ({target_statement(frozen.plan_id)} confirmed; level ceiling CORROBORATED)" if external else f"target fixture-app defect {opts.defect}"]
     started = opts.clock()
     req_path = Path(workdir) / "requests.jsonl"
     app = None if external else FixtureApp(opts.defect, str(req_path), home=workdir)
@@ -374,7 +402,8 @@ def _run_in(up: Upstreams, frozen: FrozenPlan, opts: RunOptions, run_id: str, wo
         logs[REFERENCE_CHECK_PATH] = dumps_canonical(reference)
     extensions: Dict[str, Any] = {"target_defect": opts.defect, "target": "fixture-app"}
     if external:
-        extensions = {"target": "external-origin", "target_origin": frozen.plan["target"]["origin"], "target_declared_by": "operator", "target_fixture_mode_confirmed": "demo.enabled=true",
+        extensions = {"target": "external-origin", "target_origin": frozen.plan["target"]["origin"], "target_declared_by": "operator",
+                      ("target_fixture_mode_confirmed" if target_statement(frozen.plan_id) == "demo.enabled=true" else "target_enforcement_probe_confirmed"): target_statement(frozen.plan_id),
                       "verification_ceiling": "CORROBORATED", "platform_claim": "Linux x86_64, CPython 3.12 (fixture-app CI also 3.11)"}
     ui_only = sorted(f"{l.lane_id}:{aid}" for l in frozen.lanes for aid, fact in l.probes.items() if fact == "ui-only")
     if ui_only:
