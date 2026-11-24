@@ -101,8 +101,8 @@ def check_bundle(root: Path, *, allow_test_target: bool = False) -> List[Finding
     if manifest.get("schema") != "redevops-qa/bundle" or manifest.get("schema_version") != "1.0":
         out.append(Finding("MANIFEST_SCHEMA", "BUNDLE.json", "schema must be redevops-qa/bundle 1.0"))
     target = manifest.get("target") or {}
-    if not allow_test_target and target != {"python": "3.12", "python_tag": "cp312", "platform": "linux-x86_64"}:
-        out.append(Finding("TARGET", "BUNDLE.json", "a release bundle is for CPython 3.12 on linux-x86_64 and nothing else"))
+    if not allow_test_target and target not in RELEASE_TARGETS:
+        out.append(Finding("TARGET", "BUNDLE.json", "a release bundle is for CPython 3.12 on linux-x86_64 or on linux-arm64 and nothing else"))
     if set(target) != {"python", "python_tag", "platform"}:
         out.append(Finding("TARGET", "BUNDLE.json", "target names a python, a python_tag and a platform"))
     if root.name != manifest.get("name"):
@@ -284,6 +284,9 @@ def _check_notices(root: Path, manifest: dict, entries: List[dict], notices_whee
 
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
+#: the targets a release bundle can have: one bundle per platform, each with the locks of that platform
+RELEASE_TARGETS = ({"python": "3.12", "python_tag": "cp312", "platform": "linux-x86_64"}, {"python": "3.12", "python_tag": "cp312", "platform": "linux-arm64"})
+RELEASE_PLATFORMS = tuple(t["platform"] for t in RELEASE_TARGETS)
 
 
 def _tree_digest(tree: dict) -> str:
@@ -302,7 +305,7 @@ def _check_browser_lock(root: Path, manifest: dict, record: dict, allow_test_tar
         archives = lock["archives"]
         tree = lock["tree"]
         pw, br = lock["playwright"], lock["browser"]
-        ok = (lock.get("schema") == "redevops-qa/browser-lock" and lock.get("schema_version") == "1.0" and lock.get("target") == {"platform": "linux-x86_64"} and br.get("name") == "chromium"
+        ok = (lock.get("schema") == "redevops-qa/browser-lock" and lock.get("schema_version") == "1.0" and isinstance(lock.get("target"), dict) and set(lock["target"]) == {"platform"} and lock["target"]["platform"] in RELEASE_PLATFORMS and br.get("name") == "chromium"
               and isinstance(archives, list) and archives and set(tree) == {"directories", "files"} and tree["directories"] and tree["files"]
               and all(isinstance(a, dict) and set(a) == {"name", "dir", "file", "urls", "sha256", "size"} and _HEX64.fullmatch(str(a["sha256"])) and isinstance(a["size"], int) and a["size"] > 0
                       and a["urls"] and all(str(u).startswith("https://") and u.endswith("/" + a["file"]) for u in a["urls"]) for a in archives)
@@ -312,7 +315,10 @@ def _check_browser_lock(root: Path, manifest: dict, record: dict, allow_test_tar
     except (ValueError, KeyError, TypeError, AttributeError):
         ok = False
     if not ok:
-        return [Finding("BROWSER_LOCK", "browser.lock.json", "not a well formed redevops-qa/browser-lock 1.0 for linux-x86_64 (archives with https URLs, a sha256 and a size each; a tree whose digest is tree_sha256)")]
+        return [Finding("BROWSER_LOCK", "browser.lock.json", "not a well formed redevops-qa/browser-lock 1.0 for linux-x86_64 or linux-arm64 (archives with https URLs, a sha256 and a size each; a tree whose digest is tree_sha256)")]
+    bundle_platform = (manifest.get("target") or {}).get("platform")
+    if bundle_platform in RELEASE_PLATFORMS and lock["target"]["platform"] != bundle_platform:
+        out.append(Finding("BROWSER_LOCK", "browser.lock.json", f"the browser lock is for {lock['target']['platform']} but the bundle is for {bundle_platform}"))
     if record.get("lock_sha256") != hashlib.sha256(data).hexdigest() or record.get("lock") != "browser.lock.json":
         out.append(Finding("BROWSER_RECORD", "BUNDLE.json", "the browser record does not name browser.lock.json with its sha256"))
     if record.get("archives") != [{"file": a["file"], "sha256": a["sha256"], "size": a["size"]} for a in archives] or record.get("tree_sha256") != lock["tree_sha256"] \

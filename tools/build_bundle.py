@@ -59,10 +59,25 @@ FIRST_PARTY = ("qa-adapter-kit", "qa-bridge", "qa-checks", "qa-egress", "qa-evid
 PINNED_DIST = "redevops-qa-pinned-upstreams"
 BROWSER_LOCK = "browser.lock.json"      # bundle/browser.lock.json: the pin of the browser archives and of the tree they unpack to
 PINNED_FILES = "pinned-files.json"      # beside pins.toml: the sha256 of every file of the pinned trees as shipped (doctor compares the installed trees with it)
-#: the one target a bundle is built for. A test bundle may name another target; the release bundle never does.
+#: the default target a bundle is built for (``build`` without ``--platform``). A test bundle may name another target; a release bundle names one of TARGETS.
 TARGET = {"python": "3.12", "python_tag": "cp312", "platform": "linux-x86_64"}
+#: every release target. Each platform has its own third-party lock and its own browser lock: the binary wheels (greenlet, the Playwright driver) and the Chromium archives differ.
+TARGETS = {"linux-x86_64": TARGET, "linux-arm64": {"python": "3.12", "python_tag": "cp312", "platform": "linux-arm64"}}
 PIP_PLATFORMS = ("manylinux_2_28_x86_64", "manylinux_2_27_x86_64", "manylinux_2_26_x86_64", "manylinux_2_24_x86_64", "manylinux_2_17_x86_64", "manylinux2014_x86_64",
                  "manylinux_2_12_x86_64", "manylinux2010_x86_64", "manylinux_2_5_x86_64", "manylinux1_x86_64", "linux_x86_64")
+PIP_PLATFORMS_BY_TARGET = {"linux-x86_64": PIP_PLATFORMS,
+                           "linux-arm64": ("manylinux_2_28_aarch64", "manylinux_2_27_aarch64", "manylinux_2_26_aarch64", "manylinux_2_24_aarch64", "manylinux_2_17_aarch64",
+                                           "manylinux2014_aarch64", "linux_aarch64")}
+
+
+def third_party_lock_path(platform: str = "linux-x86_64") -> Path:
+    """``bundle/third-party.lock.json`` for linux-x86_64 (the name it has always had), ``bundle/third-party.lock.<platform>.json`` for any other target."""
+    return BUNDLE_SRC / ("third-party.lock.json" if platform == "linux-x86_64" else f"third-party.lock.{platform}.json")
+
+
+def browser_lock_path(platform: str = "linux-x86_64") -> Path:
+    """``bundle/browser.lock.json`` for linux-x86_64, ``bundle/browser.lock.<platform>.json`` for any other target. Inside a bundle the file is always ``browser.lock.json``."""
+    return BUNDLE_SRC / (BROWSER_LOCK if platform == "linux-x86_64" else f"browser.lock.{platform}.json")
 SCRIPTS = ("install.sh", "install-browser.sh", "uninstall.sh")
 SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache"}          # the same walk as redevops_qa_bridge.pins.tree_digest
 SKIP_SUFFIXES = {".pyc", ".pyo"}
@@ -388,7 +403,8 @@ def build_first_party(root: Path, packages: Sequence[str], epoch: int, work: Pat
 
 
 # ----------------------------------------------------------------------------------------------------------------------- third party
-def read_third_party_lock(path: Path = BUNDLE_SRC / "third-party.lock.json") -> dict:
+def read_third_party_lock(path: Optional[Path] = None) -> dict:
+    path = third_party_lock_path() if path is None else path
     lock = json.loads(path.read_text(encoding="utf-8"))
     if lock.get("schema") != LOCK_SCHEMA:
         raise BuildError(f"{path.name}: schema must be {LOCK_SCHEMA}")
@@ -401,10 +417,10 @@ def read_third_party_lock(path: Path = BUNDLE_SRC / "third-party.lock.json") -> 
 
 
 def pip_platform_args(target: dict) -> List[str]:
-    if target["platform"] != "linux-x86_64":
-        raise BuildError("this builder fetches third-party wheels for linux-x86_64 only")
+    if target["platform"] not in PIP_PLATFORMS_BY_TARGET:
+        raise BuildError("this builder fetches third-party wheels for " + " or ".join(sorted(PIP_PLATFORMS_BY_TARGET)) + " only")
     args = ["--python-version", target["python"], "--implementation", "cp", "--abi", target["python_tag"], "--abi", "abi3", "--abi", "none"]
-    for p in PIP_PLATFORMS:
+    for p in PIP_PLATFORMS_BY_TARGET[target["platform"]]:
         args += ["--platform", p]
     return args
 
@@ -454,8 +470,11 @@ def wheel_licence(path: Path) -> str:
 
 def cmd_lock_third_party(args) -> int:
     """Resolve the direct requirements of the lock for the target and rewrite the lock with the exact files and their digests (network). Review the diff."""
-    path = Path(args.out)
-    lock = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"schema": LOCK_SCHEMA, "version": 1, "target": TARGET, "direct": []}
+    target = TARGETS[args.platform]
+    path = Path(args.out) if args.out else third_party_lock_path(args.platform)
+    lock = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"schema": LOCK_SCHEMA, "version": 1, "target": target, "direct": list(read_third_party_lock()["direct"])}
+    if lock["target"] != target:
+        raise BuildError(f"{path.name} is for {lock['target'].get('platform')}, not {args.platform}")
     with tempfile.TemporaryDirectory(prefix="qa-bundle-lock-") as tmp:
         work = Path(tmp)
         (work / "home").mkdir()
@@ -590,7 +609,11 @@ def cmd_build(args) -> int:
     root = ROOT
     commit, epoch = source_state(root)
     version = runner_version(root)
-    name = f"redevops-qa-bundle-{version}-{TARGET['python_tag']}-{TARGET['platform']}"
+    target = TARGETS[args.platform]
+    browser_lock = browser_lock_path(args.platform).read_bytes()
+    if json.loads(browser_lock.decode("utf-8")).get("target") != {"platform": args.platform}:
+        raise BuildError(f"bundle/{browser_lock_path(args.platform).name} is not the browser lock of {args.platform}")
+    name = f"redevops-qa-bundle-{version}-{target['python_tag']}-{target['platform']}"
     out_dir = Path(args.out).resolve()
     if out_dir.exists() and any(out_dir.iterdir()):
         raise BuildError(f"{out_dir} exists and is not empty")
@@ -608,11 +631,11 @@ def cmd_build(args) -> int:
         wheels_dir.mkdir()
         py = make_build_venv(work, epoch, cache)
         entries = [WheelEntry(p, "first-party", "source-available, AGPL-3.0-or-later with the Commons Clause") for p in build_first_party(root, FIRST_PARTY, epoch, work, py, wheels_dir)]
-        entries.append(WheelEntry(build_pinned_wheel(pins_file, trees, deps, version, epoch, wheels_dir, (BUNDLE_SRC / BROWSER_LOCK).read_bytes()), "pinned-upstreams",
+        entries.append(WheelEntry(build_pinned_wheel(pins_file, trees, deps, version, epoch, wheels_dir, browser_lock), "pinned-upstreams",
                                   "runtime-contracts: AGPL-3.0-or-later with the Commons Clause; agent-harness: AGPL-3.0-or-later"))
-        lock = read_third_party_lock()
-        if lock["target"] != TARGET:
-            raise BuildError("bundle/third-party.lock.json is for another target than this builder's")
+        lock = read_third_party_lock(third_party_lock_path(args.platform))
+        if lock["target"] != target:
+            raise BuildError(f"bundle/{third_party_lock_path(args.platform).name} is for another target than {args.platform}")
         tp_dir = work / "third-party"
         tp_dir.mkdir()
         tp_wheels: Dict[str, Path] = {}
@@ -626,9 +649,9 @@ def cmd_build(args) -> int:
         pins_info = {"set": pins.pin_set, "pins_toml_sha256": sha256_file(pins_file),
                      "contracts": {"version": pins.contracts.version, "tag": pins.contracts.tag, "commit": pins.contracts.commit, "distribution_sha256": pins.contracts.distribution_sha256},
                      "harness": {"version": pins.harness_qa.version, "tag": pins.harness_qa.tag, "commit": pins.harness_qa.commit, "distribution_sha256": pins.harness_qa.distribution_sha256}}
-        bdir = assemble(work / "out", name=name, entries=entries, target=dict(TARGET), epoch=epoch, label=args.label, version=version, commit=commit, pins_info=pins_info,
+        bdir = assemble(work / "out", name=name, entries=entries, target=dict(target), epoch=epoch, label=args.label, version=version, commit=commit, pins_info=pins_info,
                         licences_from={"redevops-qa": root, "runtime-contracts": trees["contracts"][1], "agent-harness": trees["harness_qa"][1]}, build_tools=tools,
-                        readme_template=(BUNDLE_SRC / "README.md").read_text(encoding="utf-8"), notices=notices)
+                        readme_template=(BUNDLE_SRC / "README.md").read_text(encoding="utf-8"), notices=notices, browser_lock=browser_lock)
         shutil.copytree(bdir, out_dir / name)
     tar_path = out_dir / f"{name}.tar"
     write_tar(out_dir / name, tar_path, epoch)
@@ -653,8 +676,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     b.add_argument("--label", default="", help="free text recorded in BUNDLE.json (default: none)")
     b.add_argument("--pinned-root", help="the directory holding the verified pinned trees (default: ./.pinned)")
     b.add_argument("--download-cache", help="a directory that keeps downloaded wheels between builds (every file is hash-checked on each use)")
-    lk = sub.add_parser("lock-third-party", help="re-resolve bundle/third-party.lock.json from its direct requirements (network); review the diff")
-    lk.add_argument("--out", default=str(BUNDLE_SRC / "third-party.lock.json"))
+    b.add_argument("--platform", default="linux-x86_64", choices=sorted(TARGETS), help="the target of the bundle (default: linux-x86_64); each target has its own third-party and browser lock")
+    lk = sub.add_parser("lock-third-party", help="re-resolve the third-party lock of a target from its direct requirements (network); review the diff")
+    lk.add_argument("--platform", default="linux-x86_64", choices=sorted(TARGETS))
+    lk.add_argument("--out", default="", help="default: the lock of --platform (bundle/third-party.lock.json, bundle/third-party.lock.linux-arm64.json)")
     args = p.parse_args(argv)
     try:
         return {"build": cmd_build, "lock-third-party": cmd_lock_third_party}[args.command](args)

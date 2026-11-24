@@ -1,0 +1,58 @@
+{
+  "direct": [
+    "playwright==1.64.1",
+    "robotframework==7.5",
+    "pyyaml==6.0.3"
+  ],
+  "schema": "redevops-qa/bundle-third-party-lock",
+  "target": {
+    "platform": "linux-arm64",
+    "python": "3.12",
+    "python_tag": "cp312"
+  },
+  "version": 1,
+  "wheels": [
+    {
+      "filename": "greenlet-3.5.6-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl",
+      "license": "MIT AND PSF-2.0",
+      "name": "greenlet",
+      "sha256": "e85880b538e59a59f55117b81f208a6660ad5ac328aad9305f812d9b8bc67a0f",
+      "version": "3.5.6"
+    },
+    {
+      "filename": "playwright-1.64.1-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+      "license": "Apache-2.0",
+      "name": "playwright",
+      "sha256": "a29fda44725e11b0b625c4bff6458a1f6dbee97b88c9788d12e18a8344458c2d",
+      "version": "1.64.1"
+    },
+    {
+      "filename": "pyee-14.0.0-py3-none-any.whl",
+      "license": "MIT",
+      "name": "pyee",
+      "sha256": "3ac2d3229a9677f7de2c33d7f52fe25b638a46b19c413fea2edc8c6d0a644e4d",
+      "version": "14.0.0"
+    },
+    {
+      "filename": "pyyaml-6.0.3-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+      "license": "MIT",
+      "name": "pyyaml",
+      "sha256": "9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28",
+      "version": "6.0.3"
+    },
+    {
+      "filename": "robotframework-7.5-py3-none-any.whl",
+      "license": "Apache License 2.0",
+      "name": "robotframework",
+      "sha256": "5a194db36524604fafa1da89adebc837db9a95adf15ffd746e09ce98251e6c68",
+      "version": "7.5"
+    },
+    {
+      "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+      "license": "PSF-2.0",
+      "name": "typing-extensions",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "version": "4.16.0"
+    }
+  ]
+}

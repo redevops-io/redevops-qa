@@ -4,7 +4,10 @@
 
     python tools/make_browser_lock.py --wheel PLAYWRIGHT.whl --dry-run FILE --archives DIR --tree DIR --out FILE
 
-Inputs, all of them produced on a Linux x86_64 machine with the pinned Playwright installed:
+    python tools/make_browser_lock.py --platform linux-arm64 ... --out bundle/browser.lock.linux-arm64.json      (on a Linux arm64 machine)
+
+Inputs, all of them produced on a machine of the lock's platform (Linux x86_64 for ``bundle/browser.lock.json``, Linux arm64 for ``bundle/browser.lock.linux-arm64.json``) with the
+pinned Playwright installed:
 
 * ``--wheel``      the pinned Playwright wheel (its ``browsers.json`` gives the revision and the browser version; its sha256 is recorded);
 * ``--dry-run``    the output of ``python -m playwright install --dry-run chromium`` (the install locations and download URLs Playwright itself prints);
@@ -57,7 +60,7 @@ def parse_dry_run(text: str) -> list:
     return blocks
 
 
-def make_lock(wheel: Path, dry_run_text: str, archives_dir: Path, tree: Path) -> dict:
+def make_lock(wheel: Path, dry_run_text: str, archives_dir: Path, tree: Path, platform: str = bp.TARGET_PLATFORM) -> dict:
     with zipfile.ZipFile(wheel) as zf:
         browsers_json_bytes = zf.read(BROWSERS_JSON)
         meta = next(n for n in zf.namelist() if re.fullmatch(r"[^/]+\.dist-info/METADATA", n))
@@ -83,7 +86,7 @@ def make_lock(wheel: Path, dry_run_text: str, archives_dir: Path, tree: Path) ->
         archives.append({"name": b["name"], "dir": Path(b["location"]).name, "file": fname, "urls": b["urls"], "sha256": data_hash, "size": path.stat().st_size})
     install_dirs = [a["dir"] for a in archives]
     dirs, files = bp.scan_tree(tree, install_dirs)
-    doc = {"schema": bp.LOCK_SCHEMA, "schema_version": bp.LOCK_VERSION, "target": {"platform": bp.TARGET_PLATFORM},
+    doc = {"schema": bp.LOCK_SCHEMA, "schema_version": bp.LOCK_VERSION, "target": {"platform": platform},
            "playwright": {"version": version, "browsers_json_sha256": hashlib.sha256(browsers_json_bytes).hexdigest()},
            "browser": {"name": "chromium", "revision": str(chromium["revision"]), "browser_version": chromium["browserVersion"]},
            "archives": archives,
@@ -113,9 +116,11 @@ def main(argv=None) -> int:
     p.add_argument("--archives", required=True)
     p.add_argument("--tree", required=True)
     p.add_argument("--out", required=True)
+    p.add_argument("--platform", default=bp.host_platform(), choices=bp.TARGET_PLATFORMS,
+                   help="the platform the inputs were produced on (default: this host); every input must come from a machine of that platform")
     args = p.parse_args(argv)
     try:
-        doc = make_lock(Path(args.wheel), Path(args.dry_run).read_text(encoding="utf-8"), Path(args.archives), Path(args.tree))
+        doc = make_lock(Path(args.wheel), Path(args.dry_run).read_text(encoding="utf-8"), Path(args.archives), Path(args.tree), args.platform)
     except (ToolError, bp.LockError, OSError, KeyError, zipfile.BadZipFile) as exc:
         print(f"make_browser_lock: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
