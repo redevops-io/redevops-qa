@@ -105,7 +105,7 @@ def test_an_installation_that_cannot_run_lanes_says_so_everywhere_and_never_offe
     expect(pg.page.get_by_role("button", name="Estimate")).to_be_disabled()
     expect(pg.page.get_by_role("button", name="Start run")).to_be_disabled()
     text = pg.page.locator("main").inner_text()
-    assert "unavailable because" in text and "linux x86_64 only" in text and "No profile can run against this target here" in text
+    assert "unavailable because" in text and "linux x86_64 and linux arm64 only" in text and "No profile can run against this target here" in text
     no_problems(pg)
 
 
