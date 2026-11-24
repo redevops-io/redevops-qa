@@ -421,7 +421,7 @@ CASES = [
      [t(CLI, "test_a_missing_playwright_fails_with_the_remedy_and_installs_nothing")]),
     ("doctor fails on a chromium that does not launch", "doctor.py", '    if done.returncode != 0 or not done.stdout.startswith("chromium "):', "    if False:",
      [t(CLI, "test_a_playwright_without_a_launchable_chromium_fails_with_the_install_command")]),
-    ("doctor warns outside linux x86_64", "doctor.py", "    if (system, machine) == SUPPORTED_PLATFORM:", "    if True:", [t(CLI, "test_only_linux_x86_64_is_the_supported_platform")]),
+    ("doctor warns outside linux x86_64 and linux arm64", "doctor.py", "    if (system, machine) in SUPPORTED_PLATFORMS:", "    if True:", [t(CLI, "test_linux_x86_64_and_linux_arm64_are_the_supported_platforms")]),
     ("doctor fails when the pins do not verify", "doctor.py", "        up = verified_bootstrap()\n    except EnvironmentFault as exc:\n        return Check(\"pinned dependencies\"",
      "        up = bootstrap()\n    except EnvironmentFault as exc:\n        return Check(\"pinned dependencies\"", [t(CLI, "test_pins_that_are_not_the_pinned_trees_fail_and_say_what_to_fetch")]),
     # ---- the optional signed anchor (anchor_sig.py, verify.py, cli.py) -------------------------------------------------------------------
