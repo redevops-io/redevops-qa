@@ -253,7 +253,8 @@ def test_the_acceptance_script_tampers_with_the_installed_browser_and_requires_t
 
 def test_the_builder_puts_the_browser_lock_into_the_pinned_wheel_of_a_release_build():
     source = (ROOT / "tools" / "build_bundle.py").read_text(encoding="utf-8")
-    assert "build_pinned_wheel(pins_file, trees, deps, version, epoch, wheels_dir, (BUNDLE_SRC / BROWSER_LOCK).read_bytes())" in source
+    assert "build_pinned_wheel(pins_file, trees, deps, version, epoch, wheels_dir, browser_lock)" in source
+    assert "browser_lock = browser_lock_path(args.platform).read_bytes()" in source, "the lock that goes into the wheel is the lock of the bundle's own platform"
 
 
 def test_the_bundle_tests_job_runs_the_browser_pin_tests_and_the_install_job_runs_the_real_browser_step():

@@ -85,7 +85,7 @@ def make_lock_doc(archives_dir: Path, *, revision: str = REVISION, version: str 
         path = archives_dir / file
         archives.append({"name": name, "dir": install, "file": file, "urls": [f"https://example.invalid/first/{file}", f"https://example.invalid/second/{file}"],
                          "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "size": path.stat().st_size})
-    return {"schema": bp.LOCK_SCHEMA, "schema_version": bp.LOCK_VERSION, "target": {"platform": bp.TARGET_PLATFORM},
+    return {"schema": bp.LOCK_SCHEMA, "schema_version": bp.LOCK_VERSION, "target": {"platform": bp.host_platform() if bp.host_platform() in bp.TARGET_PLATFORMS else bp.TARGET_PLATFORM},
             "playwright": {"version": pw_version, "browsers_json_sha256": hashlib.sha256(registry).hexdigest()},
             "browser": {"name": "chromium", "revision": revision, "browser_version": version}, "archives": archives,
             "tree": {"directories": {k: format(v, "04o") for k, v in dirs.items()}, "files": {k: [format(v[0], "04o"), v[1], v[2]] for k, v in files.items()}},

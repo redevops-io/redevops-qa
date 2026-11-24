@@ -19,7 +19,7 @@ NOT_KEPT_PATH = "logs/evidence-not-kept.json"        # written only when the evi
 SCHEMA_VERSION = "1.0"
 PLAN_SCHEMA_VERSION = "1.1"        # plan and lock: 1.1 made `requests` and `probes` (every assertion) and, for a Robot lane, `suite_sha256` part of the plan; 1.0 documents are refused by name
 
-#: the engines this release can run (R0 scope: Linux x86_64, Playwright Chromium and Robot Framework; Selenium and Appium are excluded)
+#: the engines this release can run (R0 scope: Linux x86_64 and, since 0.6.6, Linux arm64; Playwright Chromium and Robot Framework; Selenium and Appium are excluded)
 ENGINE_PLAYWRIGHT = "playwright-chromium"
 ENGINE_ROBOT = "robot-framework"
 ENGINES = (ENGINE_PLAYWRIGHT, ENGINE_ROBOT)
@@ -82,7 +82,16 @@ DEFAULT_LANE_DEADLINE_S = 120.0
 NO_RESTATEMENT_ID = "no-independent-restatement"
 
 
-def no_restatement_text(origin: str) -> str:
+#: the machines a run's platform claim can name (``environment.arch`` of the report, as ``platform.machine()`` gives it) -> the words of the claim
+PLATFORM_CLAIMS = {"x86_64": "Linux x86_64 with CPython 3.12 (3.11 for the fixture-app CI)", "aarch64": "Linux arm64 with CPython 3.12"}
+
+
+def claim_arch(arch: object) -> str:
+    """The machine a platform claim is made for: ``aarch64`` for an arm64 Linux host, ``x86_64`` for everything else (the claim there has always been the x86_64 one)."""
+    return "aarch64" if str(arch).lower() in ("aarch64", "arm64") else "x86_64"
+
+
+def no_restatement_text(origin: str, arch: str = "x86_64") -> str:
     return ("This run's target is an external origin (" + origin + "). Nothing in this bundle restates, independently of the engines, what its assertions expect: the target's own request log and a reference check "
             "exist only for the bundled fixture app. The assertions are corroborated by the browser engine's own record, the harness run record and the egress gateway's decisions, so the run level is capped at "
-            "CORROBORATED and is never VERIFIED. The platform claim is Linux x86_64 with CPython 3.12 (3.11 for the fixture-app CI); no other host is claimed.")
+            "CORROBORATED and is never VERIFIED. The platform claim is " + PLATFORM_CLAIMS[claim_arch(arch)] + "; no other host is claimed.")

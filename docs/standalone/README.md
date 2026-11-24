@@ -18,9 +18,13 @@ Licence: source-available under the family licence (AGPL-3.0-or-later with the C
 * **Engines in the image (linux/amd64):** Playwright 1.64.1 with the pinned Chromium (checked against `bundle/browser.lock.json` by the installer and by `doctor`), and Robot Framework 7.5.
   **Not in the image:** Selenium with Chrome, and Appium. They are outside the product's release claim (`bundle/README.md`); the Android lane needs an emulator or a device and the iOS adapter
   reports `UNAVAILABLE`. A container cannot offer them honestly, so it does not.
-* **linux/arm64:** the product's bundle is for CPython 3.12 on Linux x86_64 only and its browser pin names x86_64 archives only, so the arm64 image carries the repository's own packages
-  (installed from the same hash-checked bundle) **without** the browser and Robot wheels. `verify`, `report`, `inspect`, `freeze` and the service work (an arm64 host can verify evidence made on amd64);
-  `run` and `demo` cannot start a lane: `/v1/info` lists every plan as `available: false` with `unavailable.code` `ARCHITECTURE_UNSUPPORTED` and the reason, and starting one is refused with 422. `doctor` reports failures there because the image is not a bundle installation.
+* **linux/arm64, from 0.6.6:** the same as linux/amd64, from the bundle of its own platform: `bundle/third-party.lock.linux-arm64.json` pins the arm64 wheels and
+  `bundle/browser.lock.linux-arm64.json` pins the arm64 archives of the same Chromium. Both lanes run, including the kernel layers of the Robot lane (they need a native arm64 kernel with
+  Landlock network rules; `.github/workflows/arm64.yml` runs them on GitHub's arm64 runners). On Apple Silicon this is the image Docker Desktop runs natively.
+* **linux/arm64, up to 0.6.5:** the image carried the repository's own packages without the browser and Robot wheels. `verify`, `report`, `inspect`, `freeze` and the service work there;
+  `run` and `demo` cannot start a lane: `/v1/info` lists every plan as `available: false` with `unavailable.code` `ARCHITECTURE_UNSUPPORTED`.
+* **An amd64 image on an arm64 host (emulation)** is not a supported way to run a lane at any version: the emulated kernel interface does not provide the layers the Robot lane needs, and
+  `/v1/info` says so (`ROBOT_EGRESS_LAYERS_UNAVAILABLE`). Use the image of the host's own architecture.
 
 ## Published release
 

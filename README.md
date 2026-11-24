@@ -10,7 +10,8 @@ level is capped at CORROBORATED (exit status 8) because nothing independent back
 Since 0.6.5 the same kind of target has a second journey, for checking that a fix at the edge took effect: an Edge Sentinel that is **not** in fixture mode and has switched on its own read-only
 enforcement page (`SENTINEL_ENFORCEMENT_PROBE=1`; `/health` reports `enforcement_probe.enabled=true`). The plan with id `edge-sentinel-enforcement-readonly` may open `GET /enforcement/<documentation address>`
 of that loopback origin and nothing else (`ENFORCEMENT_PLAN_OUT_OF_SCOPE` otherwise); it writes nothing, takes no credential and has the same CORROBORATED ceiling.
-Supported platform: CPython 3.12 (the fixture-app CI also runs 3.11) on Linux x86_64 only — macOS and Windows are not claimed,
+Supported platforms: CPython 3.12 on Linux x86_64 (the fixture-app CI also runs 3.11) and, since 0.6.6, on Linux arm64 — each with its own bundle, wheel lock and browser pin, and the
+same lanes run natively in CI (`.github/workflows/arm64.yml`). Emulation (an amd64 image on an arm64 host) is not a supported way to run a lane. macOS and Windows are not claimed,
 the real-device Android lane has run only by hand on one emulator, and there is no iOS evidence.
 
 **Status: pre-release.** The one release is `v0.6.2` (the standalone container image, see below); no package is published to PyPI, and the bundle and the checkout are built from source. It is built
@@ -31,15 +32,15 @@ verdict. Details per package are in the READMEs below; vulnerability reporting i
 
 ## Install and run
 
-From a pinned bundle (CPython 3.12 on Linux x86_64 only; nothing is published, so you build it from a checkout or take the archive of a workflow run): the steps, the checks the install makes
-and what it does not check are in [bundle/README.md](bundle/README.md); `python tools/build_bundle.py build --out DIR` builds it. The installer profile `local-python-qa`
+From a pinned bundle (CPython 3.12 on Linux x86_64 or Linux arm64, one bundle per platform; nothing is published, so you build it from a checkout or take the archive of a workflow run): the steps, the checks the install makes
+and what it does not check are in [bundle/README.md](bundle/README.md); `python tools/build_bundle.py build --out DIR` builds it (`--platform linux-arm64` for the arm64 bundle). The installer profile `local-python-qa`
 ([docs/QA_INSTALL_PROFILES.md](docs/QA_INSTALL_PROFILES.md)) lists the same steps as data and is run by CI. A real run, with its output, is in [docs/QA_DEMO.md](docs/QA_DEMO.md).
 Chromium is downloaded by the bundle's separate browser step and checked against `bundle/browser.lock.json`: the sha256 of the three archives before they are unpacked, then every file and mode of the unpacked tree (in a bundle installation `doctor` and `run` repeat the tree check; a source checkout has no pin and no check); the operating system libraries and the availability of the download host are outside that check. macOS and Windows are not claimed.
 
 ## Standalone container (single host or Kubernetes)
 
 An image of the command and its small authenticated HTTP service, with a Compose file and Kustomize manifests, is described in [docs/standalone/README.md](docs/standalone/README.md): what runs in it
-(linux/amd64: the Playwright Chromium and Robot Framework lanes; linux/arm64: the evidence commands only), how to install it, authenticate, keep and back up results, and what it does not do.
+(the Playwright Chromium and Robot Framework lanes on linux/amd64 and, from 0.6.6, on linux/arm64; up to 0.6.5 the arm64 image carried the evidence commands only), how to install it, authenticate, keep and back up results, and what it does not do.
 The image is built by `.github/workflows/oci-release.yml` from a release tag. `v0.6.2` is published as `ghcr.io/redevops-io/redevops-qa:0.6.2` (index digest `sha256:fa99c66bd94e64a871200eb36f4c242fa839bddca4c626f701e8df036d620065`, built from commit `d86219f5c3053ecb1659ea80975132922bc08ebc`); its signature, attestation and install check are recorded in the documentation.
 
 ## Developer checkout (from a fresh clone, three commands)

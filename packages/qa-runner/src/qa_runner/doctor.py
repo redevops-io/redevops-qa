@@ -32,6 +32,8 @@ PLAYWRIGHT_PIN = "1.64.1"
 ROBOT_PIN = "7.5"
 MIN_PYTHON = (3, 11)
 SUPPORTED_PLATFORM = ("linux", "x86_64")
+#: the platforms this release's evidence is for: each has its own bundle, with its own wheel lock and browser lock, and the same lanes in CI
+SUPPORTED_PLATFORMS = (("linux", "x86_64"), ("linux", "aarch64"))
 
 
 @dataclass(frozen=True)
@@ -54,11 +56,13 @@ def check_python(version: Tuple[int, int] = tuple(sys.version_info[:2])) -> Chec
 
 def check_platform(system: Optional[str] = None, machine: Optional[str] = None) -> Check:
     system = (system or platform.system()).lower()
-    machine = (machine or platform.machine()).lower().replace("amd64", "x86_64")
+    machine = (machine or platform.machine()).lower().replace("amd64", "x86_64").replace("arm64", "aarch64")
     if (system, machine) == SUPPORTED_PLATFORM:
         return Check("platform", "OK", "linux x86_64 (the platform this release's evidence is for)")
-    return Check("platform", "WARN", f"{system} {machine}: this release claims Linux x86_64 only; a run here is development evidence, not release evidence",
-                 "use a Linux x86_64 host for evidence you intend to rely on")
+    if (system, machine) in SUPPORTED_PLATFORMS:
+        return Check("platform", "OK", "linux arm64 (a platform this release's evidence is for, with its own bundle and browser pin)")
+    return Check("platform", "WARN", f"{system} {machine}: this release claims Linux x86_64 and Linux arm64 only; a run here is development evidence, not release evidence",
+                 "use a Linux x86_64 or Linux arm64 host for evidence you intend to rely on")
 
 
 def check_pins() -> Check:
@@ -314,6 +318,9 @@ def check_browser_pin(prefix: Optional[str] = None, browsers: Optional[Path] = N
         lock = browser_pin.load_lock(lock_path)
     except browser_pin.LockError as exc:
         return Check("browser build", "FAIL", f"{browser_pin.LOCK_NAME} cannot be used: {exc}", "reinstall the bundle into a new directory")
+    if browser_pin.host_platform() in browser_pin.TARGET_PLATFORMS and lock.platform != browser_pin.host_platform():
+        return Check("browser build", "FAIL", f"the browser pin of this installation is for {lock.platform}; this host is {browser_pin.host_platform()}",
+                     f"install the bundle built for {browser_pin.host_platform()} (each platform has its own bundle and its own browser pin)")
     if bundle_install:
         try:
             recorded = json.loads(install_json.read_text(encoding="utf-8")).get("browser_lock_sha256")
@@ -426,7 +433,7 @@ def check_robot_egress(probe: Optional[Callable[[], Dict]] = None, *, needed: bo
     message = str(result.get("message", ""))[:300]
     return Check("robot egress layers", "FAIL", f"the kernel layers that limit a Robot lane's egress cannot be provided here ({reason}: {message}); a plan whose Robot lane asks for them does not start, and "
                  "there is no weaker mode",
-                 "use Linux x86_64 with a kernel that has Landlock network rules (6.7 or later, Landlock enabled) in a container whose seccomp profile allows seccomp user notification and the landlock "
+                 "use Linux x86_64 or arm64 with a kernel that has Landlock network rules (6.7 or later, Landlock enabled) in a container whose seccomp profile allows seccomp user notification and the landlock "
                  "system calls (Docker's default profile does), or run a plan whose Robot lane says \"egress\": \"not-enforced\" (no limit on that lane's traffic; the report says so)")
 
 

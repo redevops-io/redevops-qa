@@ -75,7 +75,7 @@ def _lane_entry(run_id: str, lane: LaneOutcome) -> Dict[str, Any]:
     return {"lane_id": lane.lane_id, "run_id": f"{run_id}.{lane.lane_id}", "engine": {"name": lane.engine_name, "version": lane.engine_version}, "native": native}
 
 
-def extra_limitations(frozen: FrozenPlan) -> List[Dict[str, str]]:
+def extra_limitations(frozen: FrozenPlan, arch: str = "x86_64") -> List[Dict[str, str]]:
     """The limitations a run's report carries beyond the standard ones: what limits the egress of the plan's Robot lanes, per profile. A lane that names ``not-enforced`` gets the statement that egress is not
     enforced for it; a lane that names ``origin-only`` gets the statement of the kernel layers and of what they do not stop. Both are derived from the PLAN (the lanes that name the Robot engine and
     their profile), so ``verify`` can require exactly this text from the same plan."""
@@ -84,7 +84,7 @@ def extra_limitations(frozen: FrozenPlan) -> List[Dict[str, str]]:
     fenced = [l.lane_id for l in robot if l.egress == "origin-only"]
     out: List[Dict[str, str]] = []
     if getattr(frozen, "external", False):
-        out.append({"id": K.NO_RESTATEMENT_ID, "text": K.no_restatement_text(frozen.plan["target"]["origin"])})
+        out.append({"id": K.NO_RESTATEMENT_ID, "text": K.no_restatement_text(frozen.plan["target"]["origin"], arch)})
     if open_lanes:
         out.append({"id": K.ROBOT_EGRESS_LIMITATION_ID, "text": K.robot_egress_limitation_text(open_lanes)})
     if fenced:
@@ -140,7 +140,7 @@ def build_run_bundle(up: Upstreams, inputs: RunInputs) -> BuiltBundle:
                             "evidence": r["evidence"]})
     report = assemble_report(run_id=inputs.run_id, started_at=inputs.started_at, finished_at=inputs.finished_at, plan_digest=frozen.plan_digest,
                              environment=dict(inputs.environment), lanes=lanes_report, frozen=frozen.rows, results=results,
-                             verifier={"id": K.VERIFIER_NAME, "version": K.RUNNER_VERSION}, redaction=dict(REDACTION), extra_limitations=extra_limitations(frozen),
+                             verifier={"id": K.VERIFIER_NAME, "version": K.RUNNER_VERSION}, redaction=dict(REDACTION), extra_limitations=extra_limitations(frozen, K.claim_arch(inputs.environment.get("arch"))),
                              extensions=dict(inputs.extensions) or None, ceiling="CORROBORATED" if frozen.external else "VERIFIED")
     pins = frozen.pins
     tools = {"redevops-qa-runner": K.RUNNER_VERSION, "qa-evidence": EVIDENCE_VERSION, "agent-harness": pins["harness"], "runtime-contracts": pins["contracts"]}

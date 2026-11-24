@@ -139,7 +139,7 @@ CASES = [
      [t(BL, "test_the_builder_carries_the_lock_into_the_bundle_and_records_it"), t(BB, "test_the_bundle_and_the_installation_carry_the_same_lock_and_the_bundle_passes_the_checker")]),
     ("builder: the lock is carried into the pinned wheel (the copy doctor reads)", BBUILD, '        files[f"{data_root}/{BROWSER_LOCK}"] = browser_lock\n', "        pass\n",
      [t(BP, "test_the_wheel_carries_the_browser_lock_under_share_and_the_checker_compares_it_with_the_bundles_copy")]),
-    ("builder: the release build passes the lock to the pinned wheel", BBUILD, "wheels_dir, (BUNDLE_SRC / BROWSER_LOCK).read_bytes()), \"pinned-upstreams\",", "wheels_dir), \"pinned-upstreams\",",
+    ("builder: the release build passes the lock to the pinned wheel", BBUILD, "wheels_dir, browser_lock), \"pinned-upstreams\",", "wheels_dir), \"pinned-upstreams\",",
      [t(BW, "test_the_builder_puts_the_browser_lock_into_the_pinned_wheel_of_a_release_build")]),
     ("acceptance: the tampered browser must make doctor fail and demo refuse", "tools/bundle_acceptance.sh", '  need "[ $st -eq 3 ]" "demo must refuse to start the browser lane with exit status 3 for: $name (got $st)"\n', "",
      [t(BW, "test_the_acceptance_script_tampers_with_the_installed_browser_and_requires_the_refusals")]),

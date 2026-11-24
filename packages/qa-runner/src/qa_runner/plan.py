@@ -247,7 +247,7 @@ def v1_scope_problems(plan_doc: Mapping[str, Any], *, system: Optional[str] = No
     if target["kind"] != "external-origin":
         return problems
     if (system or _platform.system()).lower() != "linux":
-        problems.append({"code": "PLATFORM_UNSUPPORTED", "message": "an external-target run is supported on Linux x86_64 (CPython 3.12 or 3.11) only; this host refuses rather than degrades"})
+        problems.append({"code": "PLATFORM_UNSUPPORTED", "message": "an external-target run is supported on Linux x86_64 (CPython 3.12 or 3.11) and Linux arm64 (CPython 3.12) only; this host refuses rather than degrades"})
     if not V1_ORIGIN_RE.fullmatch(target["origin"]):
         problems.append({"code": "TARGET_OUT_OF_SCOPE", "message": "this release runs against one external target: a loopback, read-only Edge Sentinel fixture target at http://127.0.0.1:<port>; "
                          "a hostname (even one that could resolve to loopback), another address, https and any other application are not supported"})

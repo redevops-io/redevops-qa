@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LicenseRef-AGPL-3.0-or-later-with-Commons-Clause
-# The acceptance run of the bundle on a clean Linux x86_64 machine (the CI job runs it on ubuntu-24.04; it can run in an ubuntu:24.04 container too):
+# The acceptance run of the bundle on a clean Linux machine of the bundle's platform, x86_64 or arm64 (the CI jobs run it on ubuntu-24.04 and on ubuntu-24.04-arm; it can run in an
+# ubuntu:24.04 container too):
 #
 #   1. the commands of the bundle's README, taken from the README itself and run unchanged: unpack, install, the browser step, `doctor`, `demo`;
 #   1b. the browser pin, negative cases on the installation of step 1: a browser that is not installed is reported as such; a changed file, a changed mode, an extra file and a missing
@@ -161,11 +162,11 @@ echo "--- a bundle for another Python minor (3.11)"; refused 3 "$b"; need 'grep 
 b="$(fresh)"; python3 -I - "$b/BUNDLE.json" <<'PY'
 import json, sys
 p = sys.argv[1]
-d = json.load(open(p)); d["target"]["platform"] = "linux-arm64"
+d = json.load(open(p)); d["target"]["platform"] = "linux-x86_64" if d["target"]["platform"] == "linux-arm64" else "linux-arm64"      # the OTHER release platform
 json.dump(d, open(p, "w"), indent=2, sort_keys=True)
 PY
 resum "$b"
-echo "--- a bundle for another platform (linux-arm64)"; refused 3 "$b"
+echo "--- a bundle for another platform (the other release platform)"; refused 3 "$b"
 b="$(fresh)"; mkdir "$WORK/occupied"; touch "$WORK/occupied/file"
 st=0; ( cd "$b" && ./install.sh --prefix "$WORK/occupied" ) > "$WORK/refusal.out" 2>&1 || st=$?; cat "$WORK/refusal.out"
 need "[ $st -eq 5 ] && [ \"\$(ls \"$WORK/occupied\")\" = file ]" "a prefix that is not empty was not refused untouched"

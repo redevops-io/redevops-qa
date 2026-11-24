@@ -64,7 +64,7 @@ def test_a_lock_round_trips_through_its_canonical_rendering(fake):
 
 
 def mut_schema(d): d["schema"] = "something-else"
-def mut_platform(d): d["target"]["platform"] = "linux-arm64"
+def mut_platform(d): d["target"]["platform"] = "macos-arm64"
 def mut_tree_digest(d): d["tree_sha256"] = "0" * 64
 def mut_file_hash(d): d["tree"]["files"]["ffmpeg-1000/ffmpeg-linux"][2] = "0" * 64        # tree_sha256 no longer matches
 def mut_unsafe_path(d): d["tree"]["files"]["chromium-1000/../../etc/x"] = ["0644", 1, "0" * 64]

@@ -149,7 +149,8 @@ def test_run_ids_cannot_escape_the_data_directory(make_server):
 
 
 @pytest.mark.parametrize("facts,plans,code", [
-    (dict(machine="aarch64"), ["demo", "browser", "robot", "robot-not-enforced"], "ARCHITECTURE_UNSUPPORTED"),
+    (dict(machine="riscv64"), ["demo", "browser", "robot", "robot-not-enforced"], "ARCHITECTURE_UNSUPPORTED"),
+    (dict(system="darwin", machine="aarch64"), ["demo", "browser", "robot", "robot-not-enforced"], "ARCHITECTURE_UNSUPPORTED"),
     (dict(system="darwin"), ["demo", "browser"], "ARCHITECTURE_UNSUPPORTED"),
     (dict(missing_packages=("playwright", "robot")), ["demo", "browser", "robot", "robot-not-enforced"], "LANE_ENGINE_MISSING"),
     (dict(browser={"status": "FAIL", "message": "the browser is not the pinned build"}), ["demo", "browser"], "BROWSER_UNAVAILABLE"),
@@ -198,7 +199,12 @@ def test_the_facts_are_collected_from_the_machine_and_the_runners_own_probe_deci
     unmeasured = caps.collect(lambda: {})
     assert caps.unavailable("robot", unmeasured, None)["code"] == "ROBOT_EGRESS_LAYERS_UNAVAILABLE" and "not-measured" in caps.unavailable("robot", unmeasured, None)["reason"]
     monkeypatch.setattr(caps.platform, "machine", lambda: "arm64")
-    assert caps.collect(lambda: {"robot_layers": {"ok": True}}).machine == "arm64"
+    arm = caps.collect(lambda: {"browser": {"status": "OK", "message": ""}, "robot_layers": {"ok": True}})
+    assert (arm.system, arm.machine) == ("linux", "aarch64") and arm.robot_layers == {"ok": True}, "an arm64 Linux host is measured like an x86_64 one"
+    assert caps.unavailable("demo", arm, None) is None, "both lanes of the demo are available on an arm64 Linux host whose layers were measured"
+    monkeypatch.setattr(caps.platform, "system", lambda: "Darwin")
+    mac = caps.collect(lambda: pytest.fail("nothing is measured on a platform without lanes"))
+    assert caps.unavailable("browser", mac, None)["code"] == "ARCHITECTURE_UNSUPPORTED" and "linux arm64" in caps.unavailable("browser", mac, None)["reason"]
 
 
 def test_a_run_that_exceeds_the_timeout_is_killed_and_said_so(make_server, tmp_path):

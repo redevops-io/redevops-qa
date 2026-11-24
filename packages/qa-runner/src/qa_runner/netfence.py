@@ -36,8 +36,7 @@ What these layers do NOT do (the report of a run says the same):
 * Names are not resolved over the network (UDP is refused): only what ``/etc/hosts`` gives resolves, and the address it gives is then checked like any other.
 * Inbound: ``listen`` is refused and ``bind`` is refused by Landlock, so nothing in the lane accepts a connection; a TCP simultaneous open (two ends that connect to each other) is not excluded.
 
-Linux only. ``x86_64`` is the platform this release makes claims for; the table for ``aarch64`` exists so the same code can be exercised on that architecture during development, it is
-not measured in CI and nothing is claimed for it."""
+Linux only, on ``x86_64`` and ``aarch64``: each has its own table of system call numbers and its own audit architecture below, and the Robot egress lane runs in CI on both."""
 from __future__ import annotations
 
 import ctypes
@@ -574,7 +573,7 @@ def install(policy: Mapping[str, Any], *, layers: Sequence[str] = ALL_LAYERS) ->
     libc = _libc()
     facts = kernel_facts()
     if LAYER_LANDLOCK in layers and facts.get("landlock_abi", 0) < MIN_LANDLOCK_ABI:
-        raise _fail("landlock-network-rules-unavailable", f"Landlock network rules need ABI {MIN_LANDLOCK_ABI} or later (kernel 6.7 or later with Landlock enabled, a native x86_64 host or VM, a container profile that allows the landlock calls); this host reports {facts.get('landlock_abi', 0)}")
+        raise _fail("landlock-network-rules-unavailable", f"Landlock network rules need ABI {MIN_LANDLOCK_ABI} or later (kernel 6.7 or later with Landlock enabled, a native x86_64 or arm64 host or VM, a container profile that allows the landlock calls); this host reports {facts.get('landlock_abi', 0)}")
     fence = Fence(arch, allowed, layers, facts)
     canary = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:

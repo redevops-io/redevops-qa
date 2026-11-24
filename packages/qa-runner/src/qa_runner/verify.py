@@ -312,7 +312,8 @@ def _check_report_fields(frozen: FrozenPlan, files: Mapping[str, bytes], report:
         v.add("CEILING_MISMATCH", "verification_ceiling", "the report's ceiling is not the one the plan's target gives (an external target is capped at CORROBORATED, the fixture app is not): a capped run cannot be relabelled")
     ids = (K.NO_RESTATEMENT_ID, K.ROBOT_EGRESS_LIMITATION_ID, K.ROBOT_EGRESS_LAYERS_ID)
     have = [(x.get("id"), x.get("text")) for x in report.get("limitations", []) if isinstance(x, dict) and x.get("id") in ids]
-    want = [(x["id"], x["text"]) for x in extra_limitations(frozen)]
+    env = report.get("environment")
+    want = [(x["id"], x["text"]) for x in extra_limitations(frozen, K.claim_arch(env.get("arch") if isinstance(env, dict) else None))]     # the platform sentence names the machine the report says it ran on
     if have != want:
         v.add("EGRESS_STATEMENT_MISSING" if len(have) < len(want) and all(w in want for w in have) else "EGRESS_STATEMENT_WRONG", "limitations",
               "the report must state what limits the egress of the plan's Robot lane(s) (that it is not enforced, or which kernel layers apply and what they do not stop), in the runner's words, and only for the lanes the plan has")
