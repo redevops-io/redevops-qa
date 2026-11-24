@@ -15,7 +15,7 @@
         "v0.2.0"
       ]
     },
-    "note": "The repository is public and pre-release. Release git tags (v0.6.2, v0.6.3) exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2, 0.6.3): that is a separate channel and no profile in this file is it. Every profile here is a clone of the repository at the pinned commit, and nothing is published to a language package registry (there is no PyPI package); the Compose and Kubernetes targets stay planned until a named CI job installs from the published image (see targets). The dependency release tags are the pins in pins.toml; the verified profiles do not need them."
+    "note": "The repository is public and pre-release. Release git tags (v0.6.2, v0.6.3, v0.6.4) exist and signed container images are published at ghcr.io/redevops-io/redevops-qa (image tags 0.6.2, 0.6.3, 0.6.4): that is a separate channel and no profile in this file is it. Every profile here is a clone of the repository at the pinned commit, and nothing is published to a language package registry (there is no PyPI package); the Compose and Kubernetes targets stay planned until a named CI job installs from the published image (see targets). The dependency release tags are the pins in pins.toml; the verified profiles do not need them."
   },
   "verifier": {
     "supported": true,
