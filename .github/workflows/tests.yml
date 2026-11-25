@@ -91,6 +91,17 @@ jobs:
             python -m pytest -q tests/test_adapter_license_matrix.py tests/test_third_party_evidence.py --junitxml="$RUNNER_TEMP/junit-adapter-licences.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-adapter-licences.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-adapter-licences.xml
+          project: redevops-qa
+          suite: adapter-licences
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   neutral-wording:
     name: neutral wording (no tracked file carries a deny-listed term; offline, no pins; no skips, at least one test)
@@ -114,6 +125,17 @@ jobs:
             python -m pytest -q tests/test_neutral_wording.py --junitxml="$RUNNER_TEMP/junit-neutral-wording.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-neutral-wording.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-neutral-wording.xml
+          project: redevops-qa
+          suite: neutral-wording
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   adapter-kit:
     name: adapter kit (standard library only; fake adapters; supervisor, models, mapping; no skips, at least one test)
@@ -137,6 +159,17 @@ jobs:
             python -m pytest -q packages/qa-adapter-kit/tests --junitxml="$RUNNER_TEMP/junit-adapter-kit.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-adapter-kit.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-adapter-kit.xml
+          project: redevops-qa
+          suite: adapter-kit
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   fixture-app:
     name: fixture app (Python ${{ matrix.python }}; standard library only; loopback only; golden responses, defect isolation, determinism, shutdown; no skips, at least one test)
@@ -165,6 +198,17 @@ jobs:
             python -m pytest -q packages/qa-fixture-app/tests --junitxml="$RUNNER_TEMP/junit-fixture-app.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-fixture-app.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-fixture-app.xml
+          project: redevops-qa
+          suite: fixture-app
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
@@ -190,6 +234,17 @@ jobs:
             python -m pytest -q packages/qa-evidence/tests --junitxml="$RUNNER_TEMP/junit-evidence.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-evidence.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-evidence.xml
+          project: redevops-qa
+          suite: evidence
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Rebuild the golden bundle and print its digests (compare with the golden vectors in the tests and with the macOS run)
         run: |
           env -i HOME="$(mktemp -d)" PATH="$PATH" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=packages/qa-evidence/src:packages/qa-evidence/tests \
@@ -249,6 +304,17 @@ jobs:
           if pgrep -fa 'qa_runner[.]read_worker'; then echo "a read worker outlived the suite"; exit 1; fi
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-runner.xml
+          project: redevops-qa
+          suite: runner
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   runner-browser:
     name: runner browser lane (real Chromium; Playwright pinned; the harness executor, the real adapter and the egress gateway against the fixture app; a missing Playwright or browser fails, never skips)
@@ -299,6 +365,17 @@ jobs:
             python -m pytest -q -m browser packages/qa-runner/tests/browser --junitxml="$RUNNER_TEMP/junit-runner-browser.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner-browser.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-runner-browser.xml
+          project: redevops-qa
+          suite: runner-browser
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
@@ -352,6 +429,17 @@ jobs:
             python -m pytest -q -m egress packages/qa-runner/tests/egress --junitxml="$RUNNER_TEMP/junit-runner-egress.xml"
       - name: Fail on zero collected tests, any skip, or a number of tests other than the one expected (a deleted or deselected test cannot stay green)
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner-egress.xml" --expect-tests 30
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-runner-egress.xml
+          project: redevops-qa
+          suite: runner-egress
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
@@ -399,6 +487,17 @@ jobs:
             python -m pytest -q -m robot_real packages/qa-runner/tests/real --junitxml="$RUNNER_TEMP/junit-runner-robot.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner-robot.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-runner-robot.xml
+          project: redevops-qa
+          suite: runner-robot
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
@@ -454,6 +553,17 @@ jobs:
             python -m pytest -q -m robot_egress packages/qa-runner/tests/robot_egress --junitxml="$RUNNER_TEMP/junit-robot-egress.xml"
       - name: Fail on zero collected tests, any skip, or a number of tests other than the one expected (a deleted or deselected test cannot stay green)
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-egress.xml" --expect-tests 265
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-robot-egress.xml
+          project: redevops-qa
+          suite: robot-egress
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: "Run the experiments as root in an ubuntu:24.04 container (Docker's default options, so its own seccomp profile and no added capability)"
         run: |
           docker run --rm -v "$PWD":/w -v "$RUNNER_TEMP":/out -w /w ubuntu:24.04 bash -euc '
@@ -469,6 +579,17 @@ jobs:
           '
       - name: Fail on zero collected tests, any skip, or a number of tests other than the one expected (as root)
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-egress-root.xml" --expect-tests 229
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-robot-egress-root.xml
+          project: redevops-qa
+          suite: robot-egress-root
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
@@ -521,6 +642,17 @@ jobs:
             python -m pytest -q -m e2e packages/qa-runner/tests/e2e --junitxml="$RUNNER_TEMP/junit-runner-e2e.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-runner-e2e.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-runner-e2e.xml
+          project: redevops-qa
+          suite: runner-e2e
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
@@ -567,6 +699,17 @@ jobs:
               --junitxml="$RUNNER_TEMP/junit-bundle-tests.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-bundle-tests.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-bundle-tests.xml
+          project: redevops-qa
+          suite: bundle-tests
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
 
@@ -1026,6 +1169,17 @@ jobs:
             python -m pytest -q -m browser packages/qa-playwright/tests/browser packages/qa-egress/tests/browser --junitxml="$RUNNER_TEMP/junit-browser.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-browser.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-browser.xml
+          project: redevops-qa
+          suite: browser
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   capabilities:
     name: "capability manifest (qa-capabilities.json - schema, pins, evidence, adapter agreement, freshness against main, generated document; offline; never skipped)"
@@ -1051,6 +1205,17 @@ jobs:
             python -m pytest -q tests/test_capabilities.py tests/test_qa_jsonschema.py --junitxml="$RUNNER_TEMP/junit-capabilities.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-capabilities.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-capabilities.xml
+          project: redevops-qa
+          suite: capabilities
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   selenium-offline:
     name: "selenium adapter (offline - fake browser, recorded pytest JUnit reports, real pytest under the supervisor; no Selenium installed)"
@@ -1072,6 +1237,17 @@ jobs:
             python -m pytest -q packages/qa-selenium/tests --junitxml="$RUNNER_TEMP/junit-selenium-offline.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-selenium-offline.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-selenium-offline.xml
+          project: redevops-qa
+          suite: selenium-offline
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   selenium-browser:
     name: selenium browser lane (real Chrome and ChromeDriver; Selenium pinned; NOT a required check until proven; a missing dependency fails, never skips)
@@ -1118,6 +1294,17 @@ jobs:
             python -m pytest -q -ra --durations=0 -m browser packages/qa-selenium/tests/browser --junitxml="$RUNNER_TEMP/junit-selenium-browser.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-selenium-browser.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-selenium-browser.xml
+          project: redevops-qa
+          suite: selenium-browser
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Keep the JUnit report (also when the lane failed)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
@@ -1161,6 +1348,17 @@ jobs:
             python -m pytest -q packages/qa-robot/tests --junitxml="$RUNNER_TEMP/junit-robot-offline.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-offline.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-robot-offline.xml
+          project: redevops-qa
+          suite: robot-offline
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   robot-real:
     name: "robot real lane (Robot Framework 7.5 pinned; NOT a required check until proven; a missing Robot Framework fails, never skips)"
@@ -1185,6 +1383,17 @@ jobs:
             python -m pytest -q -m robot_real packages/qa-robot/tests/real --junitxml="$RUNNER_TEMP/junit-robot-real.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-robot-real.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-robot-real.xml
+          project: redevops-qa
+          suite: robot-real
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   appium-offline:
     name: "appium adapters (offline - fake device, capabilities, server policy, iOS reports unavailable; no Appium installed)"
@@ -1206,6 +1415,17 @@ jobs:
             python -m pytest -q packages/qa-appium/tests --junitxml="$RUNNER_TEMP/junit-appium-offline.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-appium-offline.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-appium-offline.xml
+          project: redevops-qa
+          suite: appium-offline
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   appium-server:
     name: "appium server lane (real Appium 3.9.0 server and client 6.1.1, no device; NOT a required check until proven; a missing dependency fails, never skips)"
@@ -1249,6 +1469,17 @@ jobs:
             python -m pytest -q -m appium_server packages/qa-appium/tests/real --junitxml="$RUNNER_TEMP/junit-appium-server.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-appium-server.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-appium-server.xml
+          project: redevops-qa
+          suite: appium-server
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Server log (diagnostics)
         if: always()
         run: tail -n 50 "$RUNNER_TEMP/appium-server.log" || true
@@ -1453,6 +1684,17 @@ jobs:
             python -m pytest -q tests/test_install_profiles.py tests/test_install_config.py --junitxml="$RUNNER_TEMP/junit-install-profiles.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-install-profiles.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-install-profiles.xml
+          project: redevops-qa
+          suite: install-profiles
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
 
   standalone:
     name: standalone image (built from this commit; Compose from an empty directory; probes, 401, real runs through the API including the demo with the Robot lane's kernel layers, verification of the downloaded bundle in a second container, persistence; Kubernetes manifests rendered and checked)
@@ -1514,5 +1756,16 @@ jobs:
             python -m pytest -q -m browser packages/qa-service/tests/browser --junitxml="$RUNNER_TEMP/junit-qa-service-ui.xml"
       - name: Fail on zero collected tests or any skip
         run: python tools/check_junit.py "$RUNNER_TEMP/junit-qa-service-ui.xml"
+      - name: Report the run to the QA portfolio dashboard
+        # the default branch only (the dashboard shows its state, not every pull request's); failures are reported too; a dashboard
+        # outage never fails the build, and with no token (a fork) nothing is reported
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: redevops-io/agentic-os/.github/actions/report-qa@d458e1fc8a2d8dbe4ec7f71c998b23c9af2e734a   # v0.4.12
+        with:
+          junit: ${{ runner.temp }}/junit-qa-service-ui.xml
+          project: redevops-qa
+          suite: qa-service-ui
+          url: ${{ vars.QA_DASHBOARD_URL }}
+          token: ${{ secrets.QA_DASHBOARD_TOKEN }}
       - name: Fail if the tests left anything in the working tree
         run: test -z "$(git status --porcelain)"
