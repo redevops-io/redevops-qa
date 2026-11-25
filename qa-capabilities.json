@@ -189,7 +189,7 @@
       ],
       "limitations": [
         "Chromium only; Firefox and WebKit are not exercised.",
-        "Verified on a Linux x86_64 hosted runner only; macOS, Windows and Linux arm64 have no run.",
+        "The evidence rows here are from Linux x86_64 hosted runners. From 0.6.6 the same browser tests also run natively on a Linux arm64 hosted runner (workflow arm64.yml); macOS and Windows have no run.",
         "The real driver is exercised against pages served from loopback, not against an external site.",
         "Pre-release adapter (0.1.0.dev0); nothing is published, and the adapter needs the pinned harness tree from pins.toml on its import path.",
         "The lane is not deterministic: its popup test (`assert 2 == 1` on the number of pages) failed intermittently on 2026-11-01 with no change to the adapter (for example jobs 124725855749, 124849661087 and 124849741361), and the same commits passed on re-run or in a sibling run. A green run is evidence, not a guarantee.",
@@ -902,7 +902,7 @@
       ],
       "limitations": [
         "The target is the bundled fixture app: this release runs plans against it only, not against an arbitrary application.",
-        "Linux x86_64 only; Playwright with Chromium only; Selenium and Appium are not part of this workflow.",
+        "Linux x86_64 and, from 0.6.6, Linux arm64 (each with its own bundle, wheel lock and browser pin; the evidence rows here are x86_64, the arm64 lanes run in workflow arm64.yml); Playwright with Chromium only; Selenium and Appium are not part of this workflow.",
         "The browser lane's traffic goes through the egress gateway; a Robot lane that asks for the kernel layers (`origin-only`) is limited by them instead, with the limits the report states (against a hostile library only the port is enforced: a second thread can change a connect address to another one on the allowed port; files, pipes and processes are not confined), and does not start where they are unavailable; a Robot lane that says `not-enforced` is limited by nothing.",
         "The pinned bundle's install and the public CI demo are run by CI jobs added after this evidence; they get their own rows once a run on the main branch backs them."
       ]

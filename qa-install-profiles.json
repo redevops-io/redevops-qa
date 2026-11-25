@@ -1069,7 +1069,7 @@
           "status": "planned",
           "prerequisites": [],
           "verified_by": null,
-          "disabled_reason": "The bundle is built for linux x86_64 only: its compiled wheels and its Playwright wheel are for that platform.",
+          "disabled_reason": "From 0.6.6 an arm64 bundle exists (tools/build_bundle.py build --platform linux-arm64) and CI builds, installs and runs it on an arm64 runner (workflow arm64.yml). The steps of this profile are not yet run on arm64 by the profile job, so the host stays planned.",
           "note": ""
         },
         {
@@ -1077,7 +1077,7 @@
           "status": "planned",
           "prerequisites": [],
           "verified_by": null,
-          "disabled_reason": "The bundle is built for linux x86_64 only, and the supervisor of the runner is POSIX-only but has no CI evidence on macOS; macOS runs are development evidence.",
+          "disabled_reason": "Bundles are built for linux x86_64 and linux arm64 only, and the supervisor of the runner is POSIX-only but has no CI evidence on macOS; macOS runs are development evidence.",
           "note": ""
         }
       ],
@@ -1180,7 +1180,7 @@
       },
       "uninstall_note": "uninstall.sh removes the installation directory (virtual environment, browser directory, launcher) and refuses a directory it did not make. The evidence directory and the operating system packages installed by --with-deps stay.",
       "limitations": [
-        "CPython 3.12 on Linux x86_64 only. Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.",
+        "CPython 3.12 on Linux x86_64 or, from 0.6.6, Linux arm64 (one bundle per platform; a bundle refuses the other platform). Another Python minor or platform is refused by install.sh; macOS and Windows are not claimed.",
         "No bundle is published and no release exists: the archive comes from a build of the repository or from a workflow run, and its digest is only as trustworthy as the place you obtained it from.",
         "Chromium is downloaded when the browser step runs and is not shipped in the bundle; the bundle pins the sha256 of the archives and the mode, size and sha256 of every file of the unpacked tree, the step refuses an archive that does not match, and doctor checks the installed tree. Not covered: the operating system libraries of --with-deps, and the availability of the download host.",
         "The runner in this release runs plans against the bundled fixture app only; a Robot lane that asks for the kernel layers (`origin-only`) is limited by them and does not start where they are unavailable (`doctor` measures them), and a Robot lane that says `not-enforced` is limited by nothing (see the egress matrix in the runner's README).",

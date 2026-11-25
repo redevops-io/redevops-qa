@@ -1431,7 +1431,7 @@ def test_the_generator_still_refuses_a_verifier_for_every_engine_set_that_has_no
     r = gen.generate(sel_qa(channel="stable"), CAPS, PROFILES)
     assert [(e["code"], e["field"]) for e in r["errors"]] == [("NEEDS_EXPERIMENTAL_CHANNEL", "channel")]
     r = gen.generate(sel_qa(host="macos-arm64"), CAPS, PROFILES)
-    assert [(e["code"], e["field"]) for e in r["errors"]] == [("HOST_NOT_SUPPORTED", "host")] and "linux x86_64 only" in r["errors"][0]["message"]
+    assert [(e["code"], e["field"]) for e in r["errors"]] == [("HOST_NOT_SUPPORTED", "host")] and "linux x86_64 and linux arm64 only" in r["errors"][0]["message"]
 
 
 def test_the_runner_takes_only_the_parameters_the_profile_declares_and_needs_no_checkout_for_a_bundle_profile(tmp_path):
